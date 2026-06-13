@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+from cogs.backup import ler, salvar, agora_str
 
 # ─────────────────────────────────────────────
 #  Cog: Amistosos
@@ -109,6 +110,16 @@ class ConfirmarPresencaView(discord.ui.View):
         )
 
         await interaction.message.edit(embed=embed, view=self)
+
+        # Salva confirmado no histórico
+        from cogs.backup import ler, salvar
+        amistosos = ler("amistosos")
+        for a in amistosos:
+            if a.get("canal_id") == self.canal_amistoso_id:
+                if membro.id not in a["confirmados"]:
+                    a["confirmados"].append(membro.id)
+                break
+        salvar("amistosos", amistosos)
 
         # Libera acesso ao canal do amistoso
         canal_amistoso = interaction.client.get_channel(self.canal_amistoso_id)
@@ -234,7 +245,27 @@ class AmistosoModal(discord.ui.Modal, title="📋  Anunciar Amistoso"):
             rank_id=rank_id,
             canal_amistoso_id=canal_amistoso.id
         )
-        await canal_anuncio.send(content=mencao, embed=embed, view=view)
+        msg_anuncio = await canal_anuncio.send(content=mencao, embed=embed, view=view)
+
+        # Registra no cog para deletar o canal junto se a mensagem for apagada
+        cog = interaction.client.cogs.get("Friendly")
+        if cog:
+            cog.registrar(msg_anuncio.id, canal_amistoso.id)
+
+        # Salva o amistoso no histórico
+        amistosos = ler("amistosos")
+        amistosos.append({
+            "id":          len(amistosos) + 1,
+            "adversario":  self.adversario.value,
+            "data":        self.data.value,
+            "rank":        rank_encontrado,
+            "resultado":   None,
+            "placar":      "",
+            "confirmados": [],
+            "canal_id":    canal_amistoso.id,
+            "criado_em":   agora_str(),
+        })
+        salvar("amistosos", amistosos)
 
         # Envia mensagem inicial no canal do amistoso
         embed_canal = discord.Embed(
@@ -261,6 +292,25 @@ class AmistosoModal(discord.ui.Modal, title="📋  Anunciar Amistoso"):
 class Friendly(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        # Mapeia message_id -> canal_amistoso_id para deletar junto
+        self.amistoso_map: dict[int, int] = {}
+
+    def registrar(self, message_id: int, canal_id: int):
+        """Registra a relação entre mensagem de anúncio e canal do amistoso."""
+        self.amistoso_map[message_id] = canal_id
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message):
+        """Quando a mensagem do anúncio for deletada, apaga o canal do amistoso."""
+        if message.channel.id != AMISTOSOS_CHANNEL_ID:
+            return
+        canal_id = self.amistoso_map.pop(message.id, None)
+        if canal_id is None:
+            return
+        canal = self.bot.get_channel(canal_id)
+        if canal:
+            await canal.delete(reason="Mensagem do amistoso deletada — canal removido automaticamente.")
+            print(f"[AMISTOSO] 🗑️ Canal {canal.name} deletado junto com o anúncio.")
 
     @app_commands.command(name="amistoso", description="Anuncia um amistoso no canal de amistosos.")
     @app_commands.checks.has_role(ADMIN_ROLE_ID)

@@ -21,6 +21,10 @@ COGS = [
     "cogs.players",
     "cogs.friendly",
     "cogs.tiktok",
+    "cogs.backup",
+    "cogs.stats",
+    "cogs.treinos",
+    "cogs.resultados",
 ]
 
 async def load_cogs():
