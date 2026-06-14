@@ -15,21 +15,23 @@ import asyncio
 ADMIN_ROLE_ID        = 1511894837790769204
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
-FRASES = {
-    "vitoria": [
-        "Vocês foram incríveis! Resultado merecido. 🚀",
-        "Que jogo! A TryHarders mostrou do que é feita. 🔥",
-        "Vitória conquistada com muita garra! Parabéns a todos. 🏆",
-    ],
-    "derrota": [
-        "Nem toda batalha é vencida, mas o time deu tudo. Cabeça erguida! 💪",
-        "Derrota faz parte. A TryHarders vai voltar mais forte. 🔄",
-        "Obrigado por ter jogado. Cada jogo é aprendizado! 📈",
-    ],
-    "empate": [
-        "Jogo equilibrado! A TryHarders segurou bem. ⚖️",
-        "Empate justo. Time mostrou consistência! 👊",
-    ],
+FRASES_JOGO = [
+    "O jogo foi pegado!",
+    "Foi um jogo difícil!",
+    "Que partida intensa!",
+    "O jogo foi disputado!",
+]
+
+FRASES_RESULTADO = {
+    "vitoria": "Mas mesmo assim: **Ganhamos!** 🏆🚀",
+    "derrota": "Mas mesmo assim: **Perdemos.** 💪 Cabeça erguida!",
+    "empate":  "Mas mesmo assim: **Empatamos.** ⚖️",
+}
+
+TITULOS = {
+    "vitoria": "✅ Vitória!",
+    "derrota": "❌ Derrota!",
+    "empate":  "🤝 Empate!",
 }
 
 import random
@@ -83,7 +85,9 @@ class Resultados(commands.Cog):
 
         emoji_resultado = {"vitoria": "✅ Vitória", "derrota": "❌ Derrota", "empate": "🤝 Empate"}[resultado.value]
         cores           = {"vitoria": 0x57F287, "derrota": 0xED4245, "empate": 0xFEE75C}
-        frase           = random.choice(FRASES[resultado.value])
+        frase_jogo      = random.choice(FRASES_JOGO)
+        frase_resultado = FRASES_RESULTADO[resultado.value]
+        titulo_resultado = TITULOS[resultado.value]
 
         # Encontra o amistoso mais recente com esse adversário
         amistoso_idx  = None
@@ -150,13 +154,20 @@ class Resultados(commands.Cog):
             if membro is None:
                 continue
             try:
+                # Monta a mensagem no formato pedido
+                linhas_dm = [frase_jogo, frase_resultado]
+                if placar:
+                    linhas_dm.append(f"\n**Placar:** {placar}")
+
+                rank_amistoso = amistosos[amistoso_idx].get("rank", "") if amistoso_idx is not None else ""
+                if rank_amistoso:
+                    linhas_dm.append(f"**Rank do amistoso:** {rank_amistoso}")
+
                 embed_dm = discord.Embed(
-                    title=f"{emoji_resultado}  TryHarders vs {adversario}",
-                    description=frase,
+                    title=f"{titulo_resultado}  TryHarders vs {adversario}",
+                    description="\n".join(linhas_dm),
                     color=cores[resultado.value],
                 )
-                if placar:
-                    embed_dm.add_field(name="⚽  Placar final", value=f"**{placar}**", inline=True)
                 embed_dm.add_field(name="📅  Data", value=agora_str(), inline=True)
 
                 if transcricao_arquivo:
@@ -182,24 +193,42 @@ class Resultados(commands.Cog):
                 dm_falhas += 1
                 print(f"[RESULTADO] ⚠️ Não foi possível enviar DM para {membro}.")
 
-        # ── Embed público no canal de amistosos ────────────────────────────
+        # ── Responde a mensagem do amistoso no canal ──────────────────────
+        linhas_pub = [frase_jogo, frase_resultado]
+        if placar:
+            linhas_pub.append(f"\n**Placar:** {placar}")
+        rank_amistoso = amistosos[amistoso_idx].get("rank", "") if amistoso_idx is not None else ""
+        if rank_amistoso:
+            linhas_pub.append(f"**Rank do amistoso:** {rank_amistoso}")
+
         embed_pub = discord.Embed(
-            title=f"{emoji_resultado}  TryHarders vs {adversario}{placar_texto}",
-            description=frase,
+            title=titulo_resultado,
+            description="\n".join(linhas_pub),
             color=cores[resultado.value],
         )
-        embed_pub.add_field(name="📅  Data", value=agora_str(), inline=True)
         if dm_enviadas:
             embed_pub.add_field(
-                name="📬  DMs enviadas",
-                value=f"`{dm_enviadas}` jogador(es) notificados",
+                name="📬  Jogadores notificados",
+                value=f"`{dm_enviadas}` jogador(es) receberam DM",
                 inline=True
             )
         embed_pub.set_footer(text=f"Registrado por {interaction.user.display_name}")
 
         canal_pub = self.bot.get_channel(AMISTOSOS_CHANNEL_ID)
         if canal_pub:
-            await canal_pub.send(embed=embed_pub)
+            # Tenta responder à mensagem do amistoso
+            msg_amistoso = None
+            async for msg in canal_pub.history(limit=30):
+                if msg.author == self.bot.user and msg.embeds:
+                    title = msg.embeds[0].title or ""
+                    if adversario.lower() in title.lower():
+                        msg_amistoso = msg
+                        break
+
+            if msg_amistoso:
+                await msg_amistoso.reply(embed=embed_pub)
+            else:
+                await canal_pub.send(embed=embed_pub)
 
         # ── Deleta o canal do amistoso ─────────────────────────────────────
         if canal_amistoso:
