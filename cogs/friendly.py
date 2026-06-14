@@ -25,101 +25,71 @@ RANK_EMOJIS = {
 }
 
 
-def rank_info(role: discord.Role) -> tuple[str, str] | None:
-    """Retorna (nome, emoji) se o cargo for um rank válido."""
+def rank_info(role: discord.Role):
     for nome, rid in RANKS.items():
         if role.id == rid:
             return nome, RANK_EMOJIS[nome]
     return None
 
 
-# ── Botão de sair do amistoso ──────────────────────────────────────────────────
+# ── Botão de sair ──────────────────────────────────────────────────────────────
 class SairAmistosoView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="🚪  Sair do Amistoso",
-        style=discord.ButtonStyle.danger,
-        custom_id="sair_amistoso"
-    )
+    @discord.ui.button(label="🚪  Sair do Amistoso", style=discord.ButtonStyle.danger, custom_id="sair_amistoso")
     async def sair(self, interaction: discord.Interaction, button: discord.ui.Button):
         membro = interaction.user
         canal  = interaction.channel
 
-        # Remove acesso ao canal
         await canal.set_permissions(membro, overwrite=None)
 
-        # Remove do JSON e encontra o canal do anúncio
         amistosos = ler("amistosos")
-        canal_anuncio_id = None
         for a in amistosos:
             if a.get("canal_id") == canal.id:
                 if membro.id in a["confirmados"]:
                     a["confirmados"].remove(membro.id)
-                canal_anuncio_id = AMISTOSOS_CHANNEL_ID
                 break
         salvar("amistosos", amistosos)
 
-        # Atualiza o embed do anúncio removendo o nick
-        if canal_anuncio_id:
-            canal_anuncio = interaction.client.get_channel(canal_anuncio_id)
-            if canal_anuncio:
-                async for msg in canal_anuncio.history(limit=20):
-                    if msg.author == interaction.client.user and msg.embeds:
-                        embed = msg.embeds[0]
-                        # Procura o field de confirmados
-                        novos_fields = []
-                        for f in embed.fields:
-                            if f.name.startswith("✅  Jogadores Confirmados"):
-                                # Remove o nick da lista
-                                linhas = [l for l in f.value.split("
-") if membro.display_name not in l]
-                                qtd = len(linhas)
-                                if linhas:
-                                    novos_fields.append(discord.ui.dynamic_field(
-                                        name=f"✅  Jogadores Confirmados  `({qtd})`",
-                                        value="
-".join(linhas),
-                                        inline=False
-                                    ))
-                                # Se lista ficou vazia, não adiciona o field
-                            else:
-                                novos_fields.append(f)
+        # Atualiza embed do anúncio removendo o nick
+        canal_anuncio = interaction.client.get_channel(AMISTOSOS_CHANNEL_ID)
+        if canal_anuncio:
+            async for msg in canal_anuncio.history(limit=20):
+                if msg.author == interaction.client.user and msg.embeds:
+                    embed = msg.embeds[0]
+                    campos = list(embed.fields)
+                    embed.clear_fields()
+                    for f in campos:
+                        if f.name.startswith("✅  Jogadores Confirmados"):
+                            linhas = [l for l in f.value.split("\n") if membro.display_name not in l]
+                            if linhas:
+                                embed.add_field(
+                                    name=f"✅  Jogadores Confirmados  `({len(linhas)})`",
+                                    value="\n".join(linhas),
+                                    inline=False
+                                )
+                        else:
+                            embed.add_field(name=f.name, value=f.value, inline=f.inline)
+                    await msg.edit(embed=embed)
+                    break
 
-                        embed.clear_fields()
-                        for f in novos_fields:
-                            if hasattr(f, "name"):
-                                embed.add_field(name=f.name, value=f.value, inline=f.inline)
-
-                        await msg.edit(embed=embed)
-                        break
-
-        # Avisa no canal que saiu
         await canal.send(f"🚪 **{membro.display_name}** saiu do amistoso.")
-
-        await interaction.response.send_message(
-            "✅ Você saiu do amistoso e perdeu o acesso ao canal.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("✅ Você saiu do amistoso e perdeu o acesso ao canal.", ephemeral=True)
         print(f"[AMISTOSO] 🚪 {membro} saiu do amistoso no canal #{canal.name}.")
 
 
 # ── Botão de confirmar presença ────────────────────────────────────────────────
 class ConfirmarPresencaView(discord.ui.View):
-    def __init__(self, rank_alvo: str, rank_id: int, canal_amistoso_id: int, rank_ids_extras: list[int] = None):
+    def __init__(self, rank_alvo: str, rank_id: int, canal_amistoso_id: int, rank_ids_extras: list = None):
         super().__init__(timeout=None)
         self.rank_alvo         = rank_alvo
         self.rank_id           = rank_id
         self.rank_ids_extras   = rank_ids_extras or [rank_id]
         self.canal_amistoso_id = canal_amistoso_id
-        self.confirmados: list[tuple[str, int]] = []
+        self.confirmados: list = []  # [(display_name, member_id)]
 
-    @discord.ui.button(
-        label="✅  Confirmar Presença",
-        style=discord.ButtonStyle.success,
-        custom_id="confirmar_amistoso"
-    )
+    @discord.ui.button(label="✅  Confirmar Presença", style=discord.ButtonStyle.success, custom_id="confirmar_amistoso")
     async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
         membro     = interaction.user
         ids_cargos = {r.id for r in membro.roles}
@@ -132,19 +102,16 @@ class ConfirmarPresencaView(discord.ui.View):
             return
 
         if any(mid == membro.id for _, mid in self.confirmados):
-            await interaction.response.send_message(
-                "⚠️ Você já confirmou presença neste amistoso!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("⚠️ Você já confirmou presença neste amistoso!", ephemeral=True)
             return
 
         self.confirmados.append((membro.display_name, membro.id))
 
         # Atualiza embed do anúncio
         embed = interaction.message.embeds[0]
-        novos_fields = [f for f in embed.fields if not f.name.startswith("✅  Jogadores Confirmados")]
+        novos = [f for f in embed.fields if not f.name.startswith("✅  Jogadores Confirmados")]
         embed.clear_fields()
-        for f in novos_fields:
+        for f in novos:
             embed.add_field(name=f.name, value=f.value, inline=f.inline)
         lista = "\n".join(f"  ▸  {nome}" for nome, _ in self.confirmados)
         embed.add_field(
@@ -163,19 +130,13 @@ class ConfirmarPresencaView(discord.ui.View):
                 break
         salvar("amistosos", amistosos)
 
-        # Libera acesso ao canal
+        # Libera acesso ao canal e notifica
         canal_amistoso = interaction.client.get_channel(self.canal_amistoso_id)
         if canal_amistoso:
             await canal_amistoso.set_permissions(
-                membro,
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True
+                membro, view_channel=True, send_messages=True, read_message_history=True
             )
-            # Avisa no canal do amistoso
-            await canal_amistoso.send(
-                f"✅ {membro.mention} confirmou presença!"
-            )
+            await canal_amistoso.send(f"✅ {membro.mention} confirmou presença!")
 
         await interaction.response.send_message(
             f"✅ Presença confirmada! Você agora tem acesso a {canal_amistoso.mention if canal_amistoso else 'o canal do amistoso'}. 🚀",
@@ -184,50 +145,41 @@ class ConfirmarPresencaView(discord.ui.View):
         print(f"[AMISTOSO] ✅ {membro} confirmou presença.")
 
 
-# ── Modal ──────────────────────────────────────────────────────────────────────
+# ── Lógica de criação do amistoso ─────────────────────────────────────────────
 async def criar_amistoso(
     interaction: discord.Interaction,
     adversario: str,
     data_hora: str,
     rank1: discord.Role,
     info_extra: str,
-    rank2: discord.Role | None,
+    rank2: discord.Role = None,
 ):
     guild = interaction.guild
 
-    # Valida ranks
     info1 = rank_info(rank1)
     if info1 is None:
-        await interaction.response.send_message(
-            f"❌ O cargo {rank1.mention} não é um rank válido.", ephemeral=True
-        )
+        await interaction.response.send_message(f"❌ O cargo {rank1.mention} não é um rank válido.", ephemeral=True)
         return
 
-    ranks_validos   = [(rank1, info1)]
-    ranks_ids       = [rank1.id]
-    mencoes         = [rank1.mention]
-    nomes_ranks     = [info1[0]]
-    emojis_ranks    = [info1[1]]
+    ranks_ids    = [rank1.id]
+    nomes_ranks  = [info1[0]]
+    emojis_ranks = [info1[1]]
 
     if rank2 and rank2.id != rank1.id:
         info2 = rank_info(rank2)
         if info2 is None:
-            await interaction.response.send_message(
-                f"❌ O cargo {rank2.mention} não é um rank válido.", ephemeral=True
-            )
+            await interaction.response.send_message(f"❌ O cargo {rank2.mention} não é um rank válido.", ephemeral=True)
             return
-        ranks_validos.append((rank2, info2))
         ranks_ids.append(rank2.id)
-        mencoes.append(rank2.mention)
         nomes_ranks.append(info2[0])
         emojis_ranks.append(info2[1])
 
     rank_display = " + ".join(f"{e} {n}" for e, n in zip(emojis_ranks, nomes_ranks))
-    mencao_str   = " ".join(mencoes)
+    mencao_str   = " ".join(guild.get_role(rid).mention for rid in ranks_ids if guild.get_role(rid))
     rank_salvo   = " + ".join(nomes_ranks)
 
-    nome_canal = f"amistoso-{adversario.lower().strip()}"
-    nome_canal = "".join(c if c.isalnum() or c == "-" else "-" for c in nome_canal)[:50]
+    nome_canal = "amistoso-" + "".join(c if c.isalnum() or c == "-" else "-" for c in adversario.lower().strip())
+    nome_canal = nome_canal[:50]
 
     admin_role = guild.get_role(ADMIN_ROLE_ID)
     overwrites = {
@@ -235,30 +187,25 @@ async def criar_amistoso(
         guild.me:           discord.PermissionOverwrite(view_channel=True, send_messages=True),
     }
     if admin_role:
-        overwrites[admin_role] = discord.PermissionOverwrite(
-            view_channel=True, send_messages=True, read_message_history=True
-        )
+        overwrites[admin_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
     canal_ref      = guild.get_channel(AMISTOSOS_CHANNEL_ID)
     categoria      = canal_ref.category if canal_ref else None
     canal_amistoso = await guild.create_text_channel(
-        name=nome_canal,
-        overwrites=overwrites,
-        category=categoria,
+        name=nome_canal, overwrites=overwrites, category=categoria,
         reason=f"Amistoso vs {adversario} criado por {interaction.user}"
     )
 
     embed = discord.Embed(title="⚽  AMISTOSO ANUNCIADO", color=0xD4A843)
-    embed.add_field(name="​", value="```╔══════════  📋  DETALHES  ══════════╗```", inline=False)
-    embed.add_field(name="🆚  Adversário",  value=f"**{adversario}**",   inline=True)
-    embed.add_field(name="📅  Data / Hora", value=f"**{data_hora}**",    inline=True)
-    embed.add_field(name="🏅  Rank",        value=rank_display,          inline=True)
+    embed.add_field(name="\u200b", value="```╔══════════  📋  DETALHES  ══════════╗```", inline=False)
+    embed.add_field(name="🆚  Adversário",  value=f"**{adversario}**", inline=True)
+    embed.add_field(name="📅  Data / Hora", value=f"**{data_hora}**",  inline=True)
+    embed.add_field(name="🏅  Rank",        value=rank_display,        inline=True)
     if info_extra:
         embed.add_field(name="📝  Informações", value=info_extra, inline=False)
     embed.add_field(
-        name="​",
-        value=f"🔔 {mencao_str} — Confirme sua presença abaixo!
-📁 Canal do amistoso: {canal_amistoso.mention}",
+        name="\u200b",
+        value=f"🔔 {mencao_str} — Confirme sua presença abaixo!\n📁 Canal do amistoso: {canal_amistoso.mention}",
         inline=False
     )
     embed.set_footer(text=f"Anunciado por {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
@@ -269,14 +216,8 @@ async def criar_amistoso(
         await interaction.response.send_message("❌ Canal de amistosos não encontrado.", ephemeral=True)
         return
 
-    # Usa o primeiro rank_id para validar presença (ou ambos — veja ConfirmarPresencaView)
-    view_confirmacao = ConfirmarPresencaView(
-        rank_alvo=rank_salvo,
-        rank_id=ranks_ids[0],
-        canal_amistoso_id=canal_amistoso.id,
-        rank_ids_extras=ranks_ids,
-    )
-    msg_anuncio = await canal_anuncio.send(content=mencao_str, embed=embed, view=view_confirmacao)
+    view_conf   = ConfirmarPresencaView(rank_alvo=rank_salvo, rank_id=ranks_ids[0], canal_amistoso_id=canal_amistoso.id, rank_ids_extras=ranks_ids)
+    msg_anuncio = await canal_anuncio.send(content=mencao_str, embed=embed, view=view_conf)
 
     cog = interaction.client.cogs.get("Friendly")
     if cog:
@@ -284,41 +225,25 @@ async def criar_amistoso(
 
     amistosos = ler("amistosos")
     amistosos.append({
-        "id":          len(amistosos) + 1,
-        "adversario":  adversario,
-        "data":        data_hora,
-        "rank":        rank_salvo,
-        "resultado":   None,
-        "placar":      "",
-        "confirmados": [],
-        "canal_id":    canal_amistoso.id,
-        "criado_em":   agora_str(),
+        "id": len(amistosos) + 1, "adversario": adversario, "data": data_hora,
+        "rank": rank_salvo, "resultado": None, "placar": "", "confirmados": [],
+        "canal_id": canal_amistoso.id, "criado_em": agora_str(),
     })
     salvar("amistosos", amistosos)
 
     embed_canal = discord.Embed(
         title=f"⚽ Amistoso vs {adversario}",
         description=(
-            f"Bem-vindos ao canal do amistoso!
-
-"
-            f"**🏅 Rank:** {rank_display}
-"
-            f"**📅 Data:** {data_hora}
-"
-            f"{'**📝 Info:** ' + info_extra if info_extra else ''}
-
-"
-            f"Se quiser desistir, clique no botão abaixo."
+            f"Bem-vindos ao canal do amistoso!\n\n"
+            f"**🏅 Rank:** {rank_display}\n"
+            f"**📅 Data:** {data_hora}\n"
+            + (f"**📝 Info:** {info_extra}\n" if info_extra else "") +
+            f"\nSe quiser desistir, clique no botão abaixo."
         ),
         color=0xD4A843
     )
     await canal_amistoso.send(embed=embed_canal, view=SairAmistosoView())
-
-    await interaction.response.send_message(
-        f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}",
-        ephemeral=True
-    )
+    await interaction.response.send_message(f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}", ephemeral=True)
     print(f"[AMISTOSO] ✅ {interaction.user} anunciou amistoso vs {adversario} — {rank_salvo}")
 
 
@@ -366,10 +291,7 @@ class Friendly(commands.Cog):
     @amistoso.error
     async def amistoso_error(self, interaction: discord.Interaction, error):
         if isinstance(error, app_commands.MissingRole):
-            await interaction.response.send_message(
-                "❌ Apenas **Administradores** podem anunciar amistosos.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Apenas **Administradores** podem anunciar amistosos.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
