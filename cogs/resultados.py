@@ -413,5 +413,66 @@ class Resultados(commands.Cog):
             )
 
 
+    # ── /listar_resultados ───────────────────────────────────────────────────
+    @app_commands.command(name="listar_resultados", description="Lista todos os resultados com número para deletar.")
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    async def listar_resultados(self, interaction: discord.Interaction):
+        resultados = ler("resultados")
+        if not isinstance(resultados, list) or not resultados:
+            await interaction.response.send_message("📭 Nenhum resultado registrado.", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="📋  Resultados Registrados", color=0xD4A843)
+        for i, r in enumerate(resultados):
+            emoji  = {"vitoria": "✅", "derrota": "❌", "empate": "🤝"}.get(r["resultado"], "❓")
+            placar = f" — {r['placar']}" if r.get("placar") else ""
+            embed.add_field(
+                name=f"`#{i}` {emoji} vs {r['adversario']}{placar}",
+                value=f"📅 {r['data']}",
+                inline=False,
+            )
+        embed.set_footer(text="Use /deletar_resultado com o número para remover.")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @listar_resultados.error
+    async def listar_resultados_error(self, interaction: discord.Interaction, error):
+        if isinstance(error, app_commands.MissingRole):
+            await interaction.response.send_message("❌ Apenas **Administradores** podem usar este comando.", ephemeral=True)
+
+    # ── /deletar_resultado ────────────────────────────────────────────────────
+    @app_commands.command(name="deletar_resultado", description="Deleta um resultado pelo número (use /listar_resultados primeiro).")
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.describe(numero="Número do resultado (veja com /listar_resultados)")
+    async def deletar_resultado(self, interaction: discord.Interaction, numero: int):
+        resultados = ler("resultados")
+        if not isinstance(resultados, list):
+            await interaction.response.send_message("📭 Nenhum resultado registrado.", ephemeral=True)
+            return
+
+        if numero < 0 or numero >= len(resultados):
+            await interaction.response.send_message(
+                f"❌ Número inválido. Use um número entre `0` e `{len(resultados) - 1}`.",
+                ephemeral=True
+            )
+            return
+
+        removido = resultados.pop(numero)
+        salvar("resultados", resultados)
+
+        emoji = {"vitoria": "✅", "derrota": "❌", "empate": "🤝"}.get(removido["resultado"], "❓")
+        placar = f" — {removido['placar']}" if removido.get("placar") else ""
+
+        await interaction.response.send_message(
+            f"🗑️ Resultado removido: `#{numero}` {emoji} vs **{removido['adversario']}**{placar}",
+            ephemeral=True
+        )
+        print(f"[RESULTADO] 🗑️ #{numero} deletado por {interaction.user}: {removido}")
+
+    @deletar_resultado.error
+    async def deletar_resultado_error(self, interaction: discord.Interaction, error):
+        if isinstance(error, app_commands.MissingRole):
+            await interaction.response.send_message("❌ Apenas **Administradores** podem usar este comando.", ephemeral=True)
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Resultados(bot))
