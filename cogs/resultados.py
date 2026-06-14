@@ -305,5 +305,113 @@ class Resultados(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
 
+    # ── /cancelar_amistoso ───────────────────────────────────────────────────
+    @app_commands.command(name="cancelar_amistoso", description="Cancela um amistoso e notifica os jogadores.")
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.describe(
+        adversario="Nome do adversário (como foi anunciado)",
+        link_mensagem="Link da mensagem do anúncio do amistoso",
+        motivo="Motivo do cancelamento",
+    )
+    async def cancelar_amistoso(
+        self,
+        interaction: discord.Interaction,
+        adversario: str,
+        link_mensagem: str,
+        motivo: str,
+    ):
+        await interaction.response.defer(ephemeral=True)
+
+        amistosos = ler("amistosos")
+        confirmados_ids = []
+        canal_amistoso  = None
+        amistoso_idx    = None
+
+        for i in range(len(amistosos) - 1, -1, -1):
+            if adversario.lower() in amistosos[i]["adversario"].lower():
+                amistoso_idx    = i
+                confirmados_ids = amistosos[i].get("confirmados", [])
+                canal_id        = amistosos[i].get("canal_id")
+                if canal_id:
+                    canal_amistoso = self.bot.get_channel(canal_id)
+                break
+
+        # Atualiza histórico
+        if amistoso_idx is not None:
+            amistosos[amistoso_idx]["resultado"] = "❌ Cancelado"
+            amistosos[amistoso_idx]["placar"]    = ""
+            salvar("amistosos", amistosos)
+
+        # Embed público respondendo ao anúncio
+        embed_pub = discord.Embed(
+            title="🚫  Amistoso Cancelado",
+            color=0x808080,
+        )
+        embed_pub.add_field(name="🆚  Adversário", value=f"**{adversario}**", inline=True)
+        embed_pub.add_field(name="📝  Motivo",     value=motivo,              inline=False)
+        embed_pub.set_footer(text=f"Cancelado por {interaction.user.display_name}")
+        embed_pub.timestamp = discord.utils.utcnow()
+
+        canal_pub = self.bot.get_channel(AMISTOSOS_CHANNEL_ID)
+        if canal_pub:
+            msg_amistoso = None
+            try:
+                partes = link_mensagem.strip().split("/")
+                msg_id    = int(partes[-1])
+                ch_id     = int(partes[-2])
+                canal_link = self.bot.get_channel(ch_id)
+                if canal_link:
+                    msg_amistoso = await canal_link.fetch_message(msg_id)
+            except Exception as e:
+                print(f"[CANCELAR] ⚠️ Não foi possível buscar a mensagem: {e}")
+
+            if msg_amistoso:
+                await msg_amistoso.reply(embed=embed_pub)
+            else:
+                await canal_pub.send(embed=embed_pub)
+
+        # DM para cada jogador confirmado
+        dm_enviadas = 0
+        for mid in confirmados_ids:
+            membro = interaction.guild.get_member(mid)
+            if membro is None:
+                continue
+            try:
+                embed_dm = discord.Embed(
+                    title="🚫  Amistoso Cancelado",
+                    description=f"O amistoso contra **{adversario}** foi cancelado.",
+                    color=0x808080,
+                )
+                embed_dm.add_field(name="📝  Motivo", value=motivo, inline=False)
+                embed_dm.set_footer(text="TryHarders RL 🚀")
+                dm = await membro.create_dm()
+                await dm.send(embed=embed_dm)
+                dm_enviadas += 1
+            except discord.Forbidden:
+                print(f"[CANCELAR] ⚠️ Não foi possível enviar DM para {membro}.")
+
+        # Deleta o canal do amistoso
+        if canal_amistoso:
+            await asyncio.sleep(2)
+            try:
+                await canal_amistoso.delete(reason=f"Amistoso vs {adversario} cancelado.")
+                print(f"[CANCELAR] 🗑️ Canal {canal_amistoso.name} deletado.")
+            except Exception as e:
+                print(f"[CANCELAR] ⚠️ Erro ao deletar canal: {e}")
+
+        await interaction.followup.send(
+            f"✅ Amistoso vs **{adversario}** cancelado. {dm_enviadas} jogador(es) notificados.",
+            ephemeral=True
+        )
+        print(f"[CANCELAR] ✅ Amistoso vs {adversario} cancelado por {interaction.user} | DMs: {dm_enviadas}")
+
+    @cancelar_amistoso.error
+    async def cancelar_amistoso_error(self, interaction: discord.Interaction, error):
+        if isinstance(error, app_commands.MissingRole):
+            await interaction.response.send_message(
+                "❌ Apenas **Administradores** podem cancelar amistosos.", ephemeral=True
+            )
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Resultados(bot))
