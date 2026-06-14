@@ -56,6 +56,7 @@ CORES = {
 class TicketSelect(discord.ui.Select):
     def __init__(self):
         super().__init__(
+            custom_id="ticket_select",
             placeholder="📂 Selecione o tipo de suporte...",
             min_values=1,
             max_values=1,

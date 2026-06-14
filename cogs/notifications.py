@@ -55,6 +55,7 @@ class NotificacaoSelect(discord.ui.Select):
             for chave, dados in CARGOS_NOTIFICACAO.items()
         ]
         super().__init__(
+            custom_id="notificacao_select",
             placeholder="🔔 Selecione as notificações que deseja...",
             min_values=1,
             max_values=len(opcoes),
