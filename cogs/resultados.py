@@ -165,9 +165,9 @@ class Resultados(commands.Cog):
 
                 embed_dm = discord.Embed(
                     title=f"{titulo_resultado}  TryHarders vs {adversario}",
-                    description="\n".join(linhas_dm),
                     color=cores[resultado.value],
                 )
+                embed_dm.add_field(name="📝  Descrição", value="\n".join(linhas_dm), inline=False)
                 embed_dm.add_field(name="📅  Data", value=agora_str(), inline=True)
 
                 if transcricao_arquivo:
@@ -203,15 +203,9 @@ class Resultados(commands.Cog):
 
         embed_pub = discord.Embed(
             title=titulo_resultado,
-            description="\n".join(linhas_pub),
             color=cores[resultado.value],
         )
-        if dm_enviadas:
-            embed_pub.add_field(
-                name="📬  Jogadores notificados",
-                value=f"`{dm_enviadas}` jogador(es) receberam DM",
-                inline=True
-            )
+        embed_pub.add_field(name="📝  Descrição", value="\n".join(linhas_pub), inline=False)
         embed_pub.set_footer(text=f"Registrado por {interaction.user.display_name}")
 
         canal_pub = self.bot.get_channel(AMISTOSOS_CHANNEL_ID)
