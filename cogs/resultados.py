@@ -290,19 +290,44 @@ class Resultados(commands.Cog):
         embed.add_field(name="🤝  Empates",  value=f"`{empates}`",  inline=True)
         embed.add_field(name="📊  Winrate",  value=f"`{winrate}`",  inline=True)
 
-        if resultados:
-            embed.add_field(name="\u200b", value="```╔══════════  🕐  ÚLTIMOS JOGOS  ══════════╗```", inline=False)
-            for r in resultados[-5:][::-1]:
-                emoji  = {"vitoria": "✅", "derrota": "❌", "empate": "🤝"}[r["resultado"]]
-                placar = f" {r['placar']}" if r.get("placar") else ""
-                embed.add_field(
-                    name=f"{emoji}  vs {r['adversario']}{placar}",
-                    value=f"📅 {r['data']}",
-                    inline=False,
-                )
-
         embed.set_footer(text=f"TryHarders RL • {agora_str()}")
-        await interaction.response.send_message(embed=embed)
+
+        if not resultados or len(resultados) <= 5:
+            if resultados:
+                embed.add_field(name="\u200b", value="```╔══════════  🕐  JOGOS  ══════════╗```", inline=False)
+                for i, r in enumerate(resultados[::-1]):
+                    num    = len(resultados) - 1 - i
+                    emoji  = {"vitoria": "✅", "derrota": "❌", "empate": "🤝"}.get(r["resultado"], "❓")
+                    placar = f" — {r['placar']}" if r.get("placar") else ""
+                    embed.add_field(
+                        name=f"`#{num}`  {emoji}  vs {r['adversario']}{placar}",
+                        value=f"📅 {r['data']}",
+                        inline=False,
+                    )
+            await interaction.response.send_message(embed=embed)
+        else:
+            from cogs.paginacao import paginar, PaginacaoView
+
+            # Embed de resumo (sempre página 1)
+            embed_resumo = embed
+
+            def montar_pagina(pagina, total, fatia, offset):
+                e = discord.Embed(title="🏆  Placar TryHarders RL — Jogos", color=0xD4A843)
+                for i, r in enumerate(fatia):
+                    num    = offset + i
+                    emoji  = {"vitoria": "✅", "derrota": "❌", "empate": "🤝"}.get(r["resultado"], "❓")
+                    placar = f" — {r['placar']}" if r.get("placar") else ""
+                    e.add_field(
+                        name=f"`#{num}`  {emoji}  vs {r['adversario']}{placar}",
+                        value=f"📅 {r['data']}",
+                        inline=False,
+                    )
+                e.set_footer(text=f"Página {pagina}/{total}  •  {len(resultados)} jogos no total")
+                return e
+
+            embeds = [embed_resumo] + paginar(resultados, 5, montar_pagina)
+            view   = PaginacaoView(embeds)
+            await interaction.response.send_message(embed=embeds[0], view=view)
 
 
     # ── /cancelar_amistoso ───────────────────────────────────────────────────
@@ -422,17 +447,25 @@ class Resultados(commands.Cog):
             await interaction.response.send_message("📭 Nenhum resultado registrado.", ephemeral=True)
             return
 
-        embed = discord.Embed(title="📋  Resultados Registrados", color=0xD4A843)
-        for i, r in enumerate(resultados):
-            emoji  = {"vitoria": "✅", "derrota": "❌", "empate": "🤝"}.get(r["resultado"], "❓")
-            placar = f" — {r['placar']}" if r.get("placar") else ""
-            embed.add_field(
-                name=f"`#{i}` {emoji} vs {r['adversario']}{placar}",
-                value=f"📅 {r['data']}",
-                inline=False,
-            )
-        embed.set_footer(text="Use /deletar_resultado com o número para remover.")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        from cogs.paginacao import paginar, PaginacaoView
+
+        def montar_embed(pagina, total, fatia, offset):
+            embed = discord.Embed(title="📋  Resultados Registrados", color=0xD4A843)
+            for i, r in enumerate(fatia):
+                num    = offset + i
+                emoji  = {"vitoria": "✅", "derrota": "❌", "empate": "🤝"}.get(r["resultado"], "❓")
+                placar = f" — {r['placar']}" if r.get("placar") else ""
+                embed.add_field(
+                    name=f"`#{num}` {emoji} vs {r['adversario']}{placar}",
+                    value=f"📅 {r['data']}",
+                    inline=False,
+                )
+            embed.set_footer(text=f"Página {pagina}/{total}  •  Use /deletar_resultado com o número para remover.")
+            return embed
+
+        embeds = paginar(resultados, 5, montar_embed)
+        view   = PaginacaoView(embeds, ephemeral=True) if len(embeds) > 1 else None
+        await interaction.response.send_message(embed=embeds[0], view=view, ephemeral=True)
 
     @listar_resultados.error
     async def listar_resultados_error(self, interaction: discord.Interaction, error):
