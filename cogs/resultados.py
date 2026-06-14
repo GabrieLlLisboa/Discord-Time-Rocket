@@ -61,8 +61,10 @@ class Resultados(commands.Cog):
     @app_commands.command(name="resultado", description="Registra o resultado de um amistoso.")
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     @app_commands.describe(
-        adversario="Nome do adversário (como foi anunciado)",
+        adversario="Nome do adversário",
         resultado="Resultado do amistoso",
+        link_mensagem="Link da mensagem do anúncio do amistoso (clique com botão direito → Copiar Link)",
+        descricao="Descrição livre sobre o jogo",
         placar="Placar final (ex: 3-1)",
     )
     @app_commands.choices(resultado=[
@@ -75,6 +77,8 @@ class Resultados(commands.Cog):
         interaction: discord.Interaction,
         adversario: str,
         resultado: app_commands.Choice[str],
+        link_mensagem: str,
+        descricao: str = "",
         placar: str = "",
     ):
         await interaction.response.defer(ephemeral=True)
@@ -155,18 +159,21 @@ class Resultados(commands.Cog):
                 continue
             try:
                 # Monta a mensagem no formato pedido
-                linhas_dm = [frase_jogo, frase_resultado]
-                if placar:
-                    linhas_dm.append(f"\n**Placar:** {placar}")
-
                 rank_amistoso = amistosos[amistoso_idx].get("rank", "") if amistoso_idx is not None else ""
-                if rank_amistoso:
-                    linhas_dm.append(f"**Rank do amistoso:** {rank_amistoso}")
 
                 embed_dm = discord.Embed(
                     title=f"{titulo_resultado}  TryHarders vs {adversario}",
                     color=cores[resultado.value],
                 )
+                embed_dm.add_field(name="🆚  Adversário", value=f"**{adversario}**", inline=True)
+                if rank_amistoso:
+                    embed_dm.add_field(name="🏅  Rank", value=f"**{rank_amistoso}**", inline=True)
+                if placar:
+                    embed_dm.add_field(name="⚽  Placar", value=f"**{placar}**", inline=True)
+
+                linhas_dm = [frase_jogo, frase_resultado]
+                if descricao:
+                    linhas_dm.append(f"\n{descricao}")
                 embed_dm.add_field(name="📝  Descrição", value="\n".join(linhas_dm), inline=False)
                 embed_dm.add_field(name="📅  Data", value=agora_str(), inline=True)
 
@@ -194,30 +201,37 @@ class Resultados(commands.Cog):
                 print(f"[RESULTADO] ⚠️ Não foi possível enviar DM para {membro}.")
 
         # ── Responde a mensagem do amistoso no canal ──────────────────────
-        linhas_pub = [frase_jogo, frase_resultado]
-        if placar:
-            linhas_pub.append(f"\n**Placar:** {placar}")
         rank_amistoso = amistosos[amistoso_idx].get("rank", "") if amistoso_idx is not None else ""
-        if rank_amistoso:
-            linhas_pub.append(f"**Rank do amistoso:** {rank_amistoso}")
 
         embed_pub = discord.Embed(
             title=titulo_resultado,
             color=cores[resultado.value],
         )
+        embed_pub.add_field(name="🆚  Adversário", value=f"**{adversario}**", inline=True)
+        if rank_amistoso:
+            embed_pub.add_field(name="🏅  Rank", value=f"**{rank_amistoso}**", inline=True)
+        if placar:
+            embed_pub.add_field(name="⚽  Placar", value=f"**{placar}**", inline=True)
+
+        linhas_pub = [frase_jogo, frase_resultado]
+        if descricao:
+            linhas_pub.append(f"\n{descricao}")
         embed_pub.add_field(name="📝  Descrição", value="\n".join(linhas_pub), inline=False)
         embed_pub.set_footer(text=f"Registrado por {interaction.user.display_name}")
 
         canal_pub = self.bot.get_channel(AMISTOSOS_CHANNEL_ID)
         if canal_pub:
-            # Tenta responder à mensagem do amistoso
             msg_amistoso = None
-            async for msg in canal_pub.history(limit=30):
-                if msg.author == self.bot.user and msg.embeds:
-                    title = msg.embeds[0].title or ""
-                    if adversario.lower() in title.lower():
-                        msg_amistoso = msg
-                        break
+            # Extrai IDs do link: .../channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID
+            try:
+                partes = link_mensagem.strip().split("/")
+                msg_id = int(partes[-1])
+                ch_id  = int(partes[-2])
+                canal_link = self.bot.get_channel(ch_id)
+                if canal_link:
+                    msg_amistoso = await canal_link.fetch_message(msg_id)
+            except Exception as e:
+                print(f"[RESULTADO] ⚠️ Não foi possível buscar a mensagem pelo link: {e}")
 
             if msg_amistoso:
                 await msg_amistoso.reply(embed=embed_pub)
