@@ -9,7 +9,7 @@ from discord.ext import commands, tasks
 JOGADORES_CHANNEL_ID = 1514775408124367149
 
 CARGOS = [
-    {"nome": "Dono do Clube",      "id": 1421693641184772147, "emoji": "👑", "secao": "staff"},
+    {"nome": "Dono do Clube",      "id": 1511895253777649704, "emoji": "👑", "secao": "staff"},
     {"nome": "Administrador",      "id": 1511894837790769204, "emoji": "🛡️", "secao": "staff"},
     {"nome": "Coach",              "id": 1513356584946896946, "emoji": "📋", "secao": "staff"},
     {"nome": "Editor de vídeo",    "id": 1513240072139309317, "emoji": "🎬", "secao": "staff"},
