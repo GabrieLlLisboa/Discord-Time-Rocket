@@ -68,7 +68,11 @@ async def buscar_rank_rl(nick: str, plataforma: str = "epic") -> dict:
 
     plataforma = PLATAFORMAS_VALIDAS.get(plataforma.lower().strip(), "epic")
     url = f"{TRN_BASE_URL}/{plataforma}/{nick}"
-    headers = {"TRN-Api-Key": TRN_API_KEY}
+    headers = {
+        "TRN-Api-Key": TRN_API_KEY,
+        "User-Agent": "Mozilla/5.0 (compatible; TryHardersRLBot/1.0; +https://discord.com)",
+        "Accept": "application/json",
+    }
 
     try:
         async with httpx.AsyncClient(timeout=12) as client:
@@ -78,6 +82,17 @@ async def buscar_rank_rl(nick: str, plataforma: str = "epic") -> dict:
 
     if resp.status_code == 404:
         return {"erro": f"❌ Nenhum jogador encontrado com o nick **{nick}** na plataforma `{plataforma}`."}
+    if resp.status_code == 401:
+        return {"erro": "🔑 A `TRN_API_KEY` é inválida. Gere uma nova em tracker.gg/developers."}
+    if resp.status_code == 403:
+        return {
+            "erro": (
+                "🚫 A Tracker Network bloqueou essa requisição (status 403).\n"
+                "Possíveis causas: app ainda pendente de aprovação no tracker.gg/developers, "
+                "chave incorreta/expirada, ou bloqueio de IP do servidor onde o bot está rodando.\n"
+                "Confira o status do seu app no painel da Tracker Network."
+            )
+        }
     if resp.status_code == 429:
         return {"erro": "⏳ Limite de requisições da API atingido. Tente novamente em alguns minutos."}
     if resp.status_code != 200:
