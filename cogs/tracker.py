@@ -115,11 +115,11 @@ async def buscar_rank_rl(nick: str, plataforma: str = "epic") -> dict:
 class TrackerModal(discord.ui.Modal, title="🔎 Buscar Rank — Rocket League"):
     nick = discord.ui.TextInput(
         label="Nick do jogador",
-        placeholder="Ex: TryHarder#2847 (sugestão: copie exatamente como no jogo)",
+        placeholder="Ex: TryHarder#2847 (copie igual está no jogo)",
         max_length=64,
     )
     plataforma = discord.ui.TextInput(
-        label="Plataforma (sugestão: epic, steam, psn ou xbl)",
+        label="Plataforma (epic, steam, psn ou xbl)",
         placeholder="Deixe em branco para usar Epic Games (padrão)",
         required=False,
         max_length=10,
