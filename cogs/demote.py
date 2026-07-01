@@ -433,6 +433,41 @@ class Demote(commands.Cog):
             ],
         )
 
+    # ── Se o canal de quarentena for apagado (manualmente ou por permissão), encerra a quarentena ──
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        dados = ler_dados()
+        user_id_alvo = None
+        for uid, info in dados["ativos"].items():
+            if info["channel_id"] == channel.id:
+                user_id_alvo = uid
+                break
+
+        if user_id_alvo is None:
+            return  # não era um canal de quarentena controlado pelo bot
+
+        info = dados["ativos"][user_id_alvo]
+        del dados["ativos"][user_id_alvo]
+        salvar_dados(dados)
+
+        print(f"[DEMOTE] 🗑️ Canal de quarentena de {info.get('user_name', user_id_alvo)} foi apagado — quarentena encerrada.")
+
+        await self.enviar_log(
+            title="🗑️ Canal de quarentena apagado",
+            description=(
+                f"O canal `#{channel.name}` foi apagado e a quarentena de "
+                f"**{info.get('user_name', user_id_alvo)}** (`{user_id_alvo}`) foi encerrada automaticamente.\n\n"
+                f"⚠️ Os cargos removidos **não** foram restaurados — use um comando de cargo manual "
+                f"se quiser devolvê-los."
+            ),
+            color=0x99AAB5,
+            fields=[
+                ("Motivo original", info.get("motivo", "Inatividade")),
+                ("Cargos salvos (não restaurados)",
+                 ", ".join(str(rid) for rid in info.get("cargos_removidos", [])) or "—"),
+            ],
+        )
+
     # ── Checagem periódica de expiração (a cada N minutos) ───────────────────
     @tasks.loop(minutes=INTERVALO_VERIFICACAO_MINUTOS)
     async def checar_expiracoes(self):
@@ -472,6 +507,10 @@ class Demote(commands.Cog):
                 except discord.Forbidden:
                     print(f"[DEMOTE] ❌ Sem permissão para expulsar {membro} após expiração da quarentena.")
 
+            del dados["ativos"][uid]
+            alterou = True
+            salvar_dados(dados)  # salva antes de apagar o canal, pra não duplicar o log do listener de canal apagado
+
             canal = self.bot.get_channel(info["channel_id"])
             if canal:
                 try:
@@ -479,8 +518,6 @@ class Demote(commands.Cog):
                 except discord.Forbidden:
                     pass
 
-            del dados["ativos"][uid]
-            alterou = True
             print(f"[DEMOTE] 🔻 {info.get('user_name', uid)} expulso automaticamente após {DIAS_QUARENTENA} dias sem resposta.")
 
             await self.enviar_log(
