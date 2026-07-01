@@ -16,6 +16,7 @@ bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 COGS = [
     "cogs.welcome",
     "cogs.tickets",
+    "cogs.demote",
     "cogs.clear",
     "cogs.notifications",
     "cogs.players",
