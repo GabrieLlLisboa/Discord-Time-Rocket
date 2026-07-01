@@ -1,63 +1,69 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import json
 import os
-import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # ─────────────────────────────────────────────
-#  Cog: Demoção por inatividade
+#  Cog: Quarentena por inatividade
 #  Arquivo: cogs/demote.py
-#  Comandos: !demotar @pessoa | !fechardemote
+#  Comandos:
+#    !demotar @pessoa [motivo]   -> coloca o jogador em quarentena
+#    !fecharquarentena [aprovado] -> fecha o canal (uso dentro do canal de quarentena)
+#
 #  Fluxo:
-#    1) !demotar @pessoa -> expulsa e manda DM padrão
-#    2) Pessoa responde "QUEROVOLTAR" no privado
-#    3) Bot cria um canal (categoria "Retornos") no servidor
-#    4) Tudo que a equipe escreve nesse canal vira DM pra pessoa
-#       e tudo que a pessoa manda de volta no privado aparece no canal
+#    1) !demotar @pessoa -> remove cargo Membro, dá cargo Quarentena,
+#       cria canal privado e manda a mensagem de aviso nele.
+#    2) Contador de 7 dias começa.
+#    3) Se a pessoa responder no canal -> contador cancela e a staff é avisada.
+#    4) Se passarem 7 dias sem resposta -> kick automático, canal apagado,
+#       DM final é enviada.
 # ─────────────────────────────────────────────
 
-DATA_FILE      = "data/demotados.json"
-CATEGORY_NAME  = "📋 Retornos"
+# ───────────────── CONFIGURAÇÕES (preencha os IDs do seu servidor) ─────────────────
+STAFF_ROLE_IDS = [
+    1511895253777649704,   # Dono do Clube
+    1511894837790769204,   # Administrador
+]                                             # cargos que enxergam os canais de quarentena
 
-MENSAGEM_DEMOCAO_PADRAO = (
-    "Olá! Você foi removido do clube **TryHarders RL** devido à sua inatividade.\n\n"
-    "Recentemente, realizamos um período de avaliação de atividade para identificar "
-    "quais jogadores estavam participando do clube. Durante esse período, não "
-    "registramos atividade suficiente da sua parte.\n\n"
-    "Manter uma comunidade ativa é muito importante para o crescimento e a organização "
-    "do clube. Por isso, foi necessário realizar essa remoção.\n\n"
-    "Caso queira voltar e ter uma segunda oportunidade para demonstrar sua atividade, "
-    "basta responder a esta mensagem com a palavra:\n\n"
-    "**QUEROVOLTAR**\n\n"
-    "Assim, sua solicitação será analisada pela equipe. Esperamos ver você de volta em breve!"
+MEMBRO_ROLE_ID = 0                           # não há cargo de "Membro" no servidor — deixado em 0,
+                                              # então essa etapa é simplesmente pulada.
+
+QUARENTENA_ROLE_ID = 0                       # deixado em 0 -> o bot procura um cargo chamado
+                                              # "Quarentena" e, se não existir, cria um
+                                              # automaticamente (sem nenhuma permissão).
+
+QUARENTENA_CATEGORY_NAME = "🔒 Quarentena"
+DIAS_QUARENTENA = 7
+INTERVALO_VERIFICACAO_MINUTOS = 30           # de quanto em quanto tempo o bot checa expiração
+
+DATA_FILE = "data/quarentena.json"
+
+MENSAGEM_QUARENTENA = (
+    "Olá! Você entrou em quarentena por inatividade.\n\n"
+    "Durante nosso período de avaliação, não identificamos atividade suficiente da sua "
+    "parte. Para manter o clube ativo, jogadores inativos passam por esta etapa antes de "
+    "uma remoção definitiva.\n\n"
+    "Caso deseje continuar fazendo parte da **TryHarders RL**, basta responder neste canal "
+    "dentro de **7 dias**.\n\n"
+    "Se não houver nenhuma resposta nesse período, você será removido automaticamente do clube."
 )
 
-INSTRUCOES_RETORNO = (
-    "Caso queira voltar e ter uma segunda oportunidade, basta responder a esta "
-    "mensagem com a palavra:\n\n"
-    "**QUEROVOLTAR**\n\n"
-    "Assim, sua solicitação será analisada pela equipe. Esperamos ver você de volta em breve!"
+MENSAGEM_REMOCAO_FINAL = (
+    "Olá! Você foi removido da **TryHarders RL** porque não houve nenhuma interação "
+    "durante o período de quarentena de 7 dias.\n\n"
+    "Caso queira receber uma nova oportunidade para voltar ao clube, entre em contato com "
+    "**ravokes** pelo Discord. Após a análise da Staff, você poderá receber uma nova chance "
+    "para demonstrar sua atividade."
 )
 
 
-def montar_mensagem_democao(motivo: str = None) -> str:
-    """Monta o texto da DM de demoção. Usa o texto padrão, ou um customizado se `motivo` for informado."""
-    if not motivo:
-        return MENSAGEM_DEMOCAO_PADRAO
-    return (
-        f"Olá! Você foi removido do clube **TryHarders RL**.\n\n"
-        f"**Motivo:** {motivo}\n\n"
-        f"{INSTRUCOES_RETORNO}"
-    )
-
-
-# ── Helpers de leitura/escrita (mesmo padrão do cogs/backup.py) ────────────────
+# ── Helpers de leitura/escrita ──────────────────────────────────────────────
 def ler_dados() -> dict:
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"aguardando": {}, "tickets": {}}
+    return {"ativos": {}}
 
 
 def salvar_dados(dados: dict):
@@ -70,18 +76,44 @@ class Demote(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         if not os.path.exists(DATA_FILE):
-            salvar_dados({"aguardando": {}, "tickets": {}})
+            salvar_dados({"ativos": {}})
+        self.checar_expiracoes.start()
+
+    def cog_unload(self):
+        self.checar_expiracoes.cancel()
+
+    # ── Pega (ou cria) o cargo Quarentena ───────────────────────────────────
+    async def obter_cargo_quarentena(self, guild: discord.Guild) -> discord.Role:
+        if QUARENTENA_ROLE_ID:
+            cargo = guild.get_role(QUARENTENA_ROLE_ID)
+            if cargo:
+                return cargo
+
+        cargo = discord.utils.get(guild.roles, name="Quarentena")
+        if cargo:
+            return cargo
+
+        # Cria o cargo sem nenhuma permissão (inclusive sem "Ver canais"),
+        # assim ele não concede acesso a nada por conta própria.
+        cargo = await guild.create_role(
+            name="Quarentena",
+            permissions=discord.Permissions.none(),
+            color=discord.Color.dark_gray(),
+            reason="Cargo de quarentena criado automaticamente pelo bot",
+        )
+        print(f"[DEMOTE] ✅ Cargo 'Quarentena' criado em {guild.name}.")
+        return cargo
 
     # ── !demotar @pessoa ────────────────────────────────────────────────────
     @commands.command(name="demotar")
     @commands.has_permissions(kick_members=True)
-    @commands.bot_has_permissions(kick_members=True)
+    @commands.bot_has_permissions(kick_members=True, manage_roles=True, manage_channels=True)
     async def demotar(self, ctx: commands.Context, membro: discord.Member = None, *, motivo: str = None):
-        """Expulsa um membro e envia a mensagem de demoção no privado.
+        """Coloca um jogador em quarentena por inatividade.
 
         Uso:
-          !demotar @pessoa               -> usa a mensagem padrão (inatividade)
-          !demotar @pessoa Sumiu 3 meses -> usa um motivo customizado no lugar do texto padrão
+          !demotar @pessoa               -> usa o motivo padrão (inatividade)
+          !demotar @pessoa Sumiu 3 meses -> usa um motivo customizado
         """
         if membro is None:
             await ctx.send("⚠️ Uso correto: `!demotar @pessoa`", delete_after=6)
@@ -92,64 +124,104 @@ class Demote(commands.Cog):
             return
 
         if membro.bot:
-            await ctx.send("❌ Não é possível demotar um bot.", delete_after=6)
+            await ctx.send("❌ Não é possível colocar um bot em quarentena.", delete_after=6)
             return
 
         if membro.guild_permissions.administrator:
-            await ctx.send("❌ Não é possível demotar um administrador do servidor.", delete_after=6)
+            await ctx.send("❌ Não é possível colocar um administrador em quarentena.", delete_after=6)
             return
 
         if membro.top_role >= ctx.guild.me.top_role:
             await ctx.send(
-                "❌ Não consigo expulsar esse membro — o cargo dele é igual ou "
+                "❌ Não consigo gerenciar esse membro — o cargo dele é igual ou "
                 "maior que o meu cargo mais alto.",
                 delete_after=8
             )
             return
 
-        # Envia a DM ANTES de expulsar (depois de sair, pode não ser mais possível)
-        dm_enviada = True
-        embed = discord.Embed(
-            title="🔻 Remoção do Clube",
-            description=montar_mensagem_democao(motivo),
-            color=0xED4245
-        )
-        embed.set_footer(text="TryHarders RL")
-
-        try:
-            await membro.send(embed=embed)
-        except discord.Forbidden:
-            dm_enviada = False
-
-        motivo_auditoria = motivo or "Inatividade"
-        try:
-            await ctx.guild.kick(membro, reason=f"{motivo_auditoria} — ação de {ctx.author}")
-        except discord.Forbidden:
-            await ctx.send("❌ Não tenho permissão para expulsar esse membro.", delete_after=6)
+        dados = ler_dados()
+        if str(membro.id) in dados["ativos"]:
+            canal_existente = self.bot.get_channel(dados["ativos"][str(membro.id)]["channel_id"])
+            mencao = canal_existente.mention if canal_existente else "canal antigo (não encontrado)"
+            await ctx.send(f"⚠️ **{membro}** já está em quarentena. Veja {mencao}.", delete_after=8)
             return
 
-        # Marca o usuário como "aguardando QUEROVOLTAR"
-        dados = ler_dados()
-        dados["aguardando"][str(membro.id)] = {
-            "guild_id":  ctx.guild.id,
+        guild = ctx.guild
+
+        # 1) Remove o cargo de Membro (se configurado)
+        if MEMBRO_ROLE_ID:
+            cargo_membro = guild.get_role(MEMBRO_ROLE_ID)
+            if cargo_membro and cargo_membro in membro.roles:
+                try:
+                    await membro.remove_roles(cargo_membro, reason="Marcado para remoção por inatividade")
+                except discord.Forbidden:
+                    await ctx.send("⚠️ Não consegui remover o cargo de Membro (permissão insuficiente).")
+
+        # 2) Adiciona o cargo Quarentena
+        cargo_quarentena = await self.obter_cargo_quarentena(guild)
+        try:
+            await membro.add_roles(cargo_quarentena, reason="Quarentena por inatividade")
+        except discord.Forbidden:
+            await ctx.send("❌ Não tenho permissão para atribuir o cargo Quarentena.", delete_after=8)
+            return
+
+        # 3) Cria o canal privado de quarentena
+        categoria = discord.utils.get(guild.categories, name=QUARENTENA_CATEGORY_NAME)
+        if categoria is None:
+            categoria = await guild.create_category(QUARENTENA_CATEGORY_NAME)
+
+        nome_canal = f"quarentena-{membro.name}".lower().replace(" ", "-")
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, manage_channels=True, read_message_history=True
+            ),
+            membro: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True
+            ),
+        }
+        for staff_id in STAFF_ROLE_IDS:
+            staff_role = guild.get_role(staff_id)
+            if staff_role:
+                overwrites[staff_role] = discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True, read_message_history=True
+                )
+
+        canal = await guild.create_text_channel(
+            name=nome_canal,
+            category=categoria,
+            overwrites=overwrites,
+            reason=f"Quarentena de {membro} — ação de {ctx.author}",
+        )
+
+        # 4) Envia a mensagem de aviso no canal (em vez de DM)
+        await canal.send(f"{membro.mention}")
+        await canal.send(MENSAGEM_QUARENTENA)
+
+        # 5) Inicia o contador de 7 dias
+        agora = datetime.now(timezone.utc)
+        expira_em = agora + timedelta(days=DIAS_QUARENTENA)
+
+        dados["ativos"][str(membro.id)] = {
+            "guild_id": guild.id,
+            "channel_id": canal.id,
             "user_name": str(membro),
-            "motivo":    motivo or "Inatividade",
-            "kicked_at": datetime.now(timezone.utc).isoformat(),
+            "motivo": motivo or "Inatividade",
+            "iniciado_em": agora.isoformat(),
+            "expira_em": expira_em.isoformat(),
+            "respondido": False,
         }
         salvar_dados(dados)
 
         confirmacao = discord.Embed(
-            title="✅ Membro demovido",
-            description=f"**{membro}** foi removido do servidor.",
-            color=0x57F287
+            title="🔒 Jogador colocado em quarentena",
+            description=f"**{membro}** foi movido para quarentena em {canal.mention}.",
+            color=0xFEE75C,
         )
-        confirmacao.add_field(
-            name="DM enviada?",
-            value="Sim ✅" if dm_enviada else "Não ❌ (privado fechado — a pessoa não poderá pedir para voltar por lá)",
-            inline=False
-        )
+        confirmacao.add_field(name="Prazo", value=f"{DIAS_QUARENTENA} dias (expira {discord.utils.format_dt(expira_em, style='F')})", inline=False)
         await ctx.send(embed=confirmacao)
-        print(f"[DEMOTE] ✅ {membro} demovido por {ctx.author} (DM enviada: {dm_enviada}).")
+        print(f"[DEMOTE] 🔒 {membro} entrou em quarentena por {ctx.author}. Expira em {expira_em.isoformat()}.")
 
     @demotar.error
     async def demotar_error(self, ctx, error):
@@ -157,174 +229,174 @@ class Demote(commands.Cog):
             await ctx.send("❌ Você precisa da permissão **Expulsar Membros** para usar este comando.", delete_after=6)
         elif isinstance(error, commands.MemberNotFound):
             await ctx.send("❌ Membro não encontrado. Marque a pessoa com `@`.", delete_after=6)
+        elif isinstance(error, commands.BotMissingPermissions):
+            await ctx.send(f"❌ Preciso das permissões: {', '.join(error.missing_permissions)}", delete_after=8)
 
-    # ── !fechardemote — fecha o canal de retorno atual ──────────────────────
-    @commands.command(name="fechardemote")
+    # ── !fecharquarentena [aprovado] — fecha o canal atual ──────────────────
+    @commands.command(name="fecharquarentena", aliases=["fechardemote"])
     @commands.has_permissions(kick_members=True)
-    async def fechardemote(self, ctx: commands.Context, *, mensagem_final: str = None):
-        """Encerra o atendimento de retorno aberto no canal atual."""
+    async def fecharquarentena(self, ctx: commands.Context, decisao: str = None):
+        """Encerra a quarentena aberta no canal atual.
+
+        Uso:
+          !fecharquarentena           -> só fecha e apaga o canal
+          !fecharquarentena aprovado  -> restaura o cargo de Membro, remove a
+                                         Quarentena e apaga o canal
+        """
         dados = ler_dados()
         user_id_alvo = None
-        for uid, info in dados["tickets"].items():
+        for uid, info in dados["ativos"].items():
             if info["channel_id"] == ctx.channel.id:
                 user_id_alvo = uid
                 break
 
         if user_id_alvo is None:
-            await ctx.send("⚠️ Este comando só funciona dentro de um canal de retorno.", delete_after=6)
+            await ctx.send("⚠️ Este comando só funciona dentro de um canal de quarentena.", delete_after=6)
             return
 
-        usuario = self.bot.get_user(int(user_id_alvo))
-        if usuario is None:
-            try:
-                usuario = await self.bot.fetch_user(int(user_id_alvo))
-            except discord.NotFound:
-                usuario = None
+        guild = ctx.guild
+        membro = guild.get_member(int(user_id_alvo))
+        aprovado = (decisao or "").strip().lower() == "aprovado"
 
-        texto_final = mensagem_final or (
-            "Seu atendimento foi encerrado pela equipe do TryHarders RL. "
-            "Se precisar, você pode nos procurar novamente."
-        )
-        if usuario:
+        if aprovado and membro:
+            cargo_quarentena = await self.obter_cargo_quarentena(guild)
             try:
-                await usuario.send(f"🔒 **{texto_final}**")
+                await membro.remove_roles(cargo_quarentena, reason="Quarentena aprovada pela staff")
+            except discord.Forbidden:
+                pass
+            if MEMBRO_ROLE_ID:
+                cargo_membro = guild.get_role(MEMBRO_ROLE_ID)
+                if cargo_membro:
+                    try:
+                        await membro.add_roles(cargo_membro, reason="Quarentena aprovada pela staff")
+                    except discord.Forbidden:
+                        pass
+            try:
+                await membro.send(
+                    "✅ Sua quarentena foi encerrada e você continua fazendo parte da "
+                    "**TryHarders RL**. Bem-vindo(a) de volta à atividade!"
+                )
             except discord.Forbidden:
                 pass
 
-        del dados["tickets"][user_id_alvo]
+        del dados["ativos"][user_id_alvo]
         salvar_dados(dados)
 
-        await ctx.send("🔒 Encerrando este atendimento em 3 segundos...")
-        await asyncio.sleep(3)
-        await ctx.channel.delete(reason=f"Atendimento de retorno encerrado por {ctx.author}")
-        print(f"[DEMOTE] ✅ Atendimento com {usuario or user_id_alvo} encerrado por {ctx.author}.")
+        await ctx.send("🔒 Fechando este canal em 3 segundos...")
+        await ctx.channel.delete(reason=f"Quarentena encerrada por {ctx.author}")
+        print(f"[DEMOTE] ✅ Quarentena de {membro or user_id_alvo} encerrada por {ctx.author} (aprovado={aprovado}).")
 
-    @fechardemote.error
-    async def fechardemote_error(self, ctx, error):
+    @fecharquarentena.error
+    async def fecharquarentena_error(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("❌ Você precisa da permissão **Expulsar Membros** para usar este comando.", delete_after=6)
 
-    # ── Cria o canal de retorno quando a pessoa manda QUEROVOLTAR ───────────
-    async def criar_canal_retorno(self, autor: discord.User, dados: dict):
-        info  = dados["aguardando"][str(autor.id)]
-        guild = self.bot.get_guild(info["guild_id"])
-        if guild is None:
-            return
-
-        categoria = discord.utils.get(guild.categories, name=CATEGORY_NAME)
-        if categoria is None:
-            categoria = await guild.create_category(CATEGORY_NAME)
-
-        nome_canal = f"retorno-{autor.name}".lower().replace(" ", "-")
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            guild.me:            discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        }
-        for role in guild.roles:
-            if role.permissions.administrator:
-                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-
-        canal = await guild.create_text_channel(
-            name=nome_canal,
-            category=categoria,
-            overwrites=overwrites,
-            reason=f"Pedido de retorno de {autor}"
-        )
-
-        embed = discord.Embed(
-            title="🔁 Pedido de retorno",
-            description=(
-                f"**{autor}** (`{autor.id}`) foi removido — motivo: **{info.get('motivo', 'Inatividade')}** — e "
-                f"respondeu **QUEROVOLTAR** no privado.\n\n"
-                f"Tudo que a equipe escrever **neste canal** será enviado no privado "
-                f"da pessoa, e as respostas dela aparecerão aqui automaticamente.\n\n"
-                f"Use `!fechardemote` (opcionalmente seguido de uma mensagem final) "
-                f"para encerrar este atendimento."
-            ),
-            color=0x5865F2
-        )
-        embed.set_thumbnail(url=autor.display_avatar.url)
-        await canal.send(embed=embed)
-
-        dados["tickets"][str(autor.id)] = {
-            "channel_id": canal.id,
-            "guild_id":   guild.id,
-            "user_name":  str(autor),
-        }
-        del dados["aguardando"][str(autor.id)]
-        salvar_dados(dados)
-
-        try:
-            await autor.send("✅ Recebemos seu pedido! Nossa equipe vai analisar e falar com você por aqui em breve.")
-        except discord.Forbidden:
-            pass
-
-        print(f"[DEMOTE] ✅ Canal {nome_canal} criado para o retorno de {autor}.")
-
-    # ── Ponte DM <-> canal ───────────────────────────────────────────────────
+    # ── Detecta resposta do jogador no canal de quarentena ──────────────────
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot:
+        if message.author.bot or message.guild is None:
             return
 
         prefixo = self.bot.command_prefix if isinstance(self.bot.command_prefix, str) else "!"
+        if message.content.startswith(prefixo):
+            return  # deixa comandos passarem normalmente
 
-        # Mensagem recebida no privado do bot
-        if isinstance(message.channel, discord.DMChannel):
-            dados   = ler_dados()
-            user_id = str(message.author.id)
+        dados = ler_dados()
+        user_id_alvo = None
+        for uid, info in dados["ativos"].items():
+            if info["channel_id"] == message.channel.id:
+                user_id_alvo = uid
+                break
 
-            # Já existe atendimento aberto -> encaminha pro canal
-            if user_id in dados["tickets"]:
-                canal = self.bot.get_channel(dados["tickets"][user_id]["channel_id"])
-                if canal is None:
-                    return
-                if message.content:
-                    embed = discord.Embed(description=message.content, color=0x2B2D31)
-                    embed.set_author(name=str(message.author), icon_url=message.author.display_avatar.url)
-                    await canal.send(embed=embed)
-                for anexo in message.attachments:
-                    await canal.send(anexo.url)
-                return
+        if user_id_alvo is None:
+            return
 
-            # Está aguardando e mandou a palavra-chave
-            if user_id in dados["aguardando"] and message.content.strip().upper() == "QUEROVOLTAR":
-                await self.criar_canal_retorno(message.author, dados)
-                return
+        # Só o próprio jogador cancela a contagem ao responder
+        if str(message.author.id) != user_id_alvo:
+            return
 
-        # Mensagem em um canal do servidor -> checa se é um canal de retorno
-        else:
-            if message.content.startswith(prefixo):
-                return  # deixa comandos (ex: !fechardemote) passarem sem virar DM
+        info = dados["ativos"][user_id_alvo]
+        if info["respondido"]:
+            return
 
-            dados         = ler_dados()
-            user_id_alvo  = None
-            for uid, info in dados["tickets"].items():
-                if info["channel_id"] == message.channel.id:
-                    user_id_alvo = uid
-                    break
+        info["respondido"] = True
+        salvar_dados(dados)
 
-            if user_id_alvo is None:
-                return
+        mencoes = [
+            role.mention for rid in STAFF_ROLE_IDS
+            if (role := message.guild.get_role(rid)) is not None
+        ]
+        mencao = " ".join(mencoes) if mencoes else "Staff"
 
-            usuario = self.bot.get_user(int(user_id_alvo))
-            if usuario is None:
+        aviso = discord.Embed(
+            title="✅ Jogador respondeu na quarentena",
+            description=(
+                f"**{message.author}** respondeu dentro do prazo. O contador de "
+                f"{DIAS_QUARENTENA} dias foi **cancelado**.\n\n"
+                f"Analisem o caso e usem `!fecharquarentena aprovado` para restaurar o "
+                f"acesso, ou `!fecharquarentena` para apenas encerrar este canal."
+            ),
+            color=0x57F287,
+        )
+        await message.channel.send(content=mencao, embed=aviso)
+        print(f"[DEMOTE] ✅ {message.author} respondeu na quarentena — contador cancelado.")
+
+    # ── Checagem periódica de expiração (a cada N minutos) ───────────────────
+    @tasks.loop(minutes=INTERVALO_VERIFICACAO_MINUTOS)
+    async def checar_expiracoes(self):
+        dados = ler_dados()
+        agora = datetime.now(timezone.utc)
+        alterou = False
+
+        for uid, info in list(dados["ativos"].items()):
+            if info.get("respondido"):
+                continue
+
+            expira_em = datetime.fromisoformat(info["expira_em"])
+            if agora < expira_em:
+                continue
+
+            guild = self.bot.get_guild(info["guild_id"])
+            if guild is None:
+                continue
+
+            membro = guild.get_member(int(uid))
+
+            # Envia a DM final antes de expulsar
+            if membro:
                 try:
-                    usuario = await self.bot.fetch_user(int(user_id_alvo))
-                except discord.NotFound:
-                    return
+                    embed = discord.Embed(
+                        title="🔻 Remoção do Clube",
+                        description=MENSAGEM_REMOCAO_FINAL,
+                        color=0xED4245,
+                    )
+                    embed.set_footer(text="TryHarders RL")
+                    await membro.send(embed=embed)
+                except discord.Forbidden:
+                    pass
 
-            try:
-                if message.content:
-                    await usuario.send(f"**Equipe TryHarders RL:** {message.content}")
-                for anexo in message.attachments:
-                    await usuario.send(anexo.url)
-                await message.add_reaction("✅")
-            except discord.Forbidden:
-                await message.channel.send(
-                    "⚠️ Não foi possível entregar a mensagem — a pessoa bloqueou o bot ou fechou as DMs."
-                )
+                try:
+                    await guild.kick(membro, reason="Sem resposta durante os 7 dias de quarentena")
+                except discord.Forbidden:
+                    print(f"[DEMOTE] ❌ Sem permissão para expulsar {membro} após expiração da quarentena.")
+
+            canal = self.bot.get_channel(info["channel_id"])
+            if canal:
+                try:
+                    await canal.delete(reason="Quarentena expirada — jogador expulso automaticamente")
+                except discord.Forbidden:
+                    pass
+
+            del dados["ativos"][uid]
+            alterou = True
+            print(f"[DEMOTE] 🔻 {info.get('user_name', uid)} expulso automaticamente após {DIAS_QUARENTENA} dias sem resposta.")
+
+        if alterou:
+            salvar_dados(dados)
+
+    @checar_expiracoes.before_loop
+    async def antes_de_checar(self):
+        await self.bot.wait_until_ready()
 
 
 async def setup(bot: commands.Bot):
