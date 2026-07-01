@@ -364,6 +364,84 @@ class Demote(commands.Cog):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("❌ Você precisa da permissão **Expulsar Membros** para usar este comando.", delete_after=6)
 
+    # ── !tirardemote @pessoa — tira a pessoa da quarentena de qualquer canal ─
+    @commands.command(name="tirardemote", aliases=["tirarquarentena"])
+    @commands.has_permissions(kick_members=True)
+    @commands.bot_has_permissions(manage_roles=True, manage_channels=True)
+    async def tirardemote(self, ctx: commands.Context, membro: discord.Member = None):
+        """Remove a quarentena de alguém, restaura os cargos e apaga o canal, de qualquer lugar do servidor.
+
+        Uso:
+          !tirardemote @pessoa
+          !tirardemote Nick
+        """
+        if membro is None:
+            await ctx.send("⚠️ Uso correto: `!tirardemote @pessoa` (ou o nick dela)", delete_after=6)
+            return
+
+        dados = ler_dados()
+        user_id_alvo = str(membro.id)
+
+        if user_id_alvo not in dados["ativos"]:
+            await ctx.send(f"⚠️ **{membro}** não está em quarentena.", delete_after=6)
+            return
+
+        guild = ctx.guild
+        info = dados["ativos"][user_id_alvo]
+
+        cargos_restaurados = await self.restaurar_cargos(guild, membro, info)
+
+        canal = self.bot.get_channel(info["channel_id"])
+
+        del dados["ativos"][user_id_alvo]
+        salvar_dados(dados)
+
+        try:
+            await membro.send(
+                "✅ Sua quarentena foi encerrada e você continua fazendo parte da "
+                "**TryHarders RL**. Bem-vindo(a) de volta à atividade!"
+            )
+        except discord.Forbidden:
+            pass
+
+        if canal:
+            try:
+                await canal.delete(reason=f"Quarentena removida manualmente por {ctx.author}")
+            except discord.Forbidden:
+                pass
+
+        nomes_cargos = ", ".join(r.name for r in cargos_restaurados) if cargos_restaurados else "—"
+
+        confirmacao = discord.Embed(
+            title="✅ Quarentena removida",
+            description=f"**{membro}** saiu da quarentena e teve os cargos restaurados.",
+            color=0x57F287,
+        )
+        confirmacao.add_field(name="Cargos restaurados", value=nomes_cargos, inline=False)
+        await ctx.send(embed=confirmacao)
+        print(f"[DEMOTE] ✅ Quarentena de {membro} removida manualmente por {ctx.author}.")
+
+        await self.enviar_log(
+            title="✅ Quarentena removida manualmente",
+            description=(
+                f"{membro.mention} (`{membro}` / `{membro.id}`) teve a quarentena removida "
+                f"por {ctx.author.mention} usando `!tirardemote`."
+            ),
+            color=0x57F287,
+            fields=[
+                ("Cargos restaurados", nomes_cargos),
+            ],
+        )
+
+    @tirardemote.error
+    async def tirardemote_error(self, ctx, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("❌ Você precisa da permissão **Expulsar Membros** para usar este comando.", delete_after=6)
+        elif isinstance(error, commands.MemberNotFound):
+            await ctx.send("❌ Membro não encontrado. Marque a pessoa com `@` ou use o nick certinho.", delete_after=6)
+        elif isinstance(error, commands.BotMissingPermissions):
+            await ctx.send(f"❌ Preciso das permissões: {', '.join(error.missing_permissions)}", delete_after=8)
+
     # ── Detecta resposta do jogador no canal de quarentena ──────────────────
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
