@@ -27,6 +27,7 @@ COGS = [
     "cogs.treinos",
     "cogs.resultados",
     "cogs.tracker",
+    "cogs.atividade",
 ]
 
 async def load_cogs():
