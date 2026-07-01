@@ -37,6 +37,8 @@ QUARENTENA_CATEGORY_NAME = "🔒 Quarentena"
 DIAS_QUARENTENA = 7
 INTERVALO_VERIFICACAO_MINUTOS = 30           # de quanto em quanto tempo o bot checa expiração
 
+LOG_CHANNEL_ID = 1521897698419019907         # canal onde o bot manda o log de tudo que faz aqui
+
 DATA_FILE = "data/quarentena.json"
 
 MENSAGEM_QUARENTENA = (
@@ -81,6 +83,55 @@ class Demote(commands.Cog):
 
     def cog_unload(self):
         self.checar_expiracoes.cancel()
+
+    # ── Envia uma mensagem de log no canal de logs ──────────────────────────
+    async def enviar_log(self, title: str, description: str, color: int = 0x5865F2, fields: list = None):
+        canal = self.bot.get_channel(LOG_CHANNEL_ID)
+        if canal is None:
+            try:
+                canal = await self.bot.fetch_channel(LOG_CHANNEL_ID)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                canal = None
+        if canal is None:
+            print(f"[DEMOTE] ⚠️ Canal de logs ({LOG_CHANNEL_ID}) não encontrado.")
+            return
+
+        embed = discord.Embed(title=title, description=description, color=color, timestamp=datetime.now(timezone.utc))
+        if fields:
+            for nome, valor in fields:
+                embed.add_field(name=nome, value=valor, inline=False)
+        embed.set_footer(text="Sistema de Quarentena")
+
+        try:
+            await canal.send(embed=embed)
+        except discord.Forbidden:
+            print(f"[DEMOTE] ⚠️ Sem permissão para mandar mensagem no canal de logs ({LOG_CHANNEL_ID}).")
+        except discord.HTTPException as e:
+            print(f"[DEMOTE] ⚠️ Falha ao mandar log: {e}")
+
+    # ── Restaura os cargos que o membro tinha antes de entrar em quarentena ─
+    async def restaurar_cargos(self, guild: discord.Guild, membro: discord.Member, info: dict) -> list:
+        """Remove o cargo Quarentena e devolve todos os cargos salvos. Retorna a lista de cargos restaurados."""
+        cargo_quarentena = await self.obter_cargo_quarentena(guild)
+        if cargo_quarentena in membro.roles:
+            try:
+                await membro.remove_roles(cargo_quarentena, reason="Quarentena encerrada — membro voltou a ficar ativo")
+            except discord.Forbidden:
+                pass
+
+        cargos_para_restaurar = []
+        for role_id in info.get("cargos_removidos", []):
+            cargo = guild.get_role(role_id)
+            if cargo is not None and cargo not in membro.roles:
+                cargos_para_restaurar.append(cargo)
+
+        if cargos_para_restaurar:
+            try:
+                await membro.add_roles(*cargos_para_restaurar, reason="Cargos restaurados após saída da quarentena")
+            except discord.Forbidden:
+                print(f"[DEMOTE] ⚠️ Sem permissão para restaurar todos os cargos de {membro}.")
+
+        return cargos_para_restaurar
 
     # ── Pega (ou cria) o cargo Quarentena ───────────────────────────────────
     async def obter_cargo_quarentena(self, guild: discord.Guild) -> discord.Role:
@@ -148,14 +199,16 @@ class Demote(commands.Cog):
 
         guild = ctx.guild
 
-        # 1) Remove o cargo de Membro (se configurado)
-        if MEMBRO_ROLE_ID:
-            cargo_membro = guild.get_role(MEMBRO_ROLE_ID)
-            if cargo_membro and cargo_membro in membro.roles:
-                try:
-                    await membro.remove_roles(cargo_membro, reason="Marcado para remoção por inatividade")
-                except discord.Forbidden:
-                    await ctx.send("⚠️ Não consegui remover o cargo de Membro (permissão insuficiente).")
+        # 1) Salva e remove TODOS os cargos atuais do membro (exceto @everyone e
+        #    cargos "managed", que pertencem a integrações/bots e não podem ser removidos manualmente)
+        cargos_atuais = [r for r in membro.roles if r != guild.default_role and not r.managed]
+        cargos_removidos_ids = [r.id for r in cargos_atuais]
+
+        if cargos_atuais:
+            try:
+                await membro.remove_roles(*cargos_atuais, reason="Marcado para quarentena por inatividade")
+            except discord.Forbidden:
+                await ctx.send("⚠️ Não consegui remover todos os cargos (permissão insuficiente).")
 
         # 2) Adiciona o cargo Quarentena
         cargo_quarentena = await self.obter_cargo_quarentena(guild)
@@ -211,6 +264,7 @@ class Demote(commands.Cog):
             "iniciado_em": agora.isoformat(),
             "expira_em": expira_em.isoformat(),
             "respondido": False,
+            "cargos_removidos": cargos_removidos_ids,
         }
         salvar_dados(dados)
 
@@ -222,6 +276,19 @@ class Demote(commands.Cog):
         confirmacao.add_field(name="Prazo", value=f"{DIAS_QUARENTENA} dias (expira {discord.utils.format_dt(expira_em, style='F')})", inline=False)
         await ctx.send(embed=confirmacao)
         print(f"[DEMOTE] 🔒 {membro} entrou em quarentena por {ctx.author}. Expira em {expira_em.isoformat()}.")
+
+        nomes_cargos = ", ".join(r.name for r in cargos_atuais) if cargos_atuais else "Nenhum cargo (o membro não tinha cargos)"
+        await self.enviar_log(
+            title="🔒 Membro colocado em quarentena",
+            description=f"{membro.mention} (`{membro}` / `{membro.id}`) foi colocado em quarentena por {ctx.author.mention}.",
+            color=0xFEE75C,
+            fields=[
+                ("Motivo", motivo or "Inatividade"),
+                ("Canal criado", canal.mention),
+                ("Cargos removidos e salvos", nomes_cargos),
+                ("Expira em", discord.utils.format_dt(expira_em, style='F')),
+            ],
+        )
 
     @demotar.error
     async def demotar_error(self, ctx, error):
@@ -257,20 +324,11 @@ class Demote(commands.Cog):
         guild = ctx.guild
         membro = guild.get_member(int(user_id_alvo))
         aprovado = (decisao or "").strip().lower() == "aprovado"
+        info = dados["ativos"][user_id_alvo]
+        cargos_restaurados = []
 
         if aprovado and membro:
-            cargo_quarentena = await self.obter_cargo_quarentena(guild)
-            try:
-                await membro.remove_roles(cargo_quarentena, reason="Quarentena aprovada pela staff")
-            except discord.Forbidden:
-                pass
-            if MEMBRO_ROLE_ID:
-                cargo_membro = guild.get_role(MEMBRO_ROLE_ID)
-                if cargo_membro:
-                    try:
-                        await membro.add_roles(cargo_membro, reason="Quarentena aprovada pela staff")
-                    except discord.Forbidden:
-                        pass
+            cargos_restaurados = await self.restaurar_cargos(guild, membro, info)
             try:
                 await membro.send(
                     "✅ Sua quarentena foi encerrada e você continua fazendo parte da "
@@ -283,6 +341,21 @@ class Demote(commands.Cog):
         salvar_dados(dados)
 
         await ctx.send("🔒 Fechando este canal em 3 segundos...")
+
+        nomes_cargos = ", ".join(r.name for r in cargos_restaurados) if cargos_restaurados else "—"
+        await self.enviar_log(
+            title="✅ Quarentena encerrada" if aprovado else "🔒 Canal de quarentena fechado",
+            description=(
+                f"A quarentena de **{membro or info.get('user_name', user_id_alvo)}** "
+                f"(`{user_id_alvo}`) foi encerrada por {ctx.author.mention}."
+            ),
+            color=0x57F287 if aprovado else 0x99AAB5,
+            fields=[
+                ("Decisão", "Aprovado — cargos restaurados" if aprovado else "Apenas fechado (sem restaurar cargos)"),
+                ("Cargos restaurados", nomes_cargos) if aprovado else ("Canal", ctx.channel.name),
+            ],
+        )
+
         await ctx.channel.delete(reason=f"Quarentena encerrada por {ctx.author}")
         print(f"[DEMOTE] ✅ Quarentena de {membro or user_id_alvo} encerrada por {ctx.author} (aprovado={aprovado}).")
 
@@ -322,24 +395,43 @@ class Demote(commands.Cog):
         info["respondido"] = True
         salvar_dados(dados)
 
+        # Membro ficou ativo -> restaura automaticamente todos os cargos que ele tinha antes
+        cargos_restaurados = await self.restaurar_cargos(message.guild, message.author, info)
+
         mencoes = [
             role.mention for rid in STAFF_ROLE_IDS
             if (role := message.guild.get_role(rid)) is not None
         ]
         mencao = " ".join(mencoes) if mencoes else "Staff"
 
+        nomes_cargos = ", ".join(r.name for r in cargos_restaurados) if cargos_restaurados else "Nenhum cargo para restaurar"
+
         aviso = discord.Embed(
             title="✅ Jogador respondeu na quarentena",
             description=(
                 f"**{message.author}** respondeu dentro do prazo. O contador de "
-                f"{DIAS_QUARENTENA} dias foi **cancelado**.\n\n"
-                f"Analisem o caso e usem `!fecharquarentena aprovado` para restaurar o "
-                f"acesso, ou `!fecharquarentena` para apenas encerrar este canal."
+                f"{DIAS_QUARENTENA} dias foi **cancelado** e os cargos dele(a) foram "
+                f"**restaurados automaticamente**.\n\n"
+                f"Cargos restaurados: {nomes_cargos}\n\n"
+                f"Usem `!fecharquarentena aprovado` para encerrar e fechar este canal."
             ),
             color=0x57F287,
         )
         await message.channel.send(content=mencao, embed=aviso)
-        print(f"[DEMOTE] ✅ {message.author} respondeu na quarentena — contador cancelado.")
+        print(f"[DEMOTE] ✅ {message.author} respondeu na quarentena — contador cancelado e cargos restaurados.")
+
+        await self.enviar_log(
+            title="✅ Membro voltou a ficar ativo",
+            description=(
+                f"{message.author.mention} (`{message.author}` / `{message.author.id}`) respondeu "
+                f"no canal de quarentena e teve os cargos restaurados automaticamente."
+            ),
+            color=0x57F287,
+            fields=[
+                ("Cargos restaurados", nomes_cargos),
+                ("Canal", message.channel.mention),
+            ],
+        )
 
     # ── Checagem periódica de expiração (a cada N minutos) ───────────────────
     @tasks.loop(minutes=INTERVALO_VERIFICACAO_MINUTOS)
@@ -390,6 +482,20 @@ class Demote(commands.Cog):
             del dados["ativos"][uid]
             alterou = True
             print(f"[DEMOTE] 🔻 {info.get('user_name', uid)} expulso automaticamente após {DIAS_QUARENTENA} dias sem resposta.")
+
+            await self.enviar_log(
+                title="🔻 Expulsão automática após quarentena",
+                description=(
+                    f"**{info.get('user_name', uid)}** (`{uid}`) foi expulso(a) automaticamente "
+                    f"por não responder em {DIAS_QUARENTENA} dias."
+                ),
+                color=0xED4245,
+                fields=[
+                    ("Motivo original", info.get("motivo", "Inatividade")),
+                    ("Cargos que ele(a) tinha (não restaurados)",
+                     ", ".join(str(rid) for rid in info.get("cargos_removidos", [])) or "—"),
+                ],
+            )
 
         if alterou:
             salvar_dados(dados)
