@@ -33,6 +33,14 @@ def _esta_oculto(membro: discord.Member) -> bool:
     return bool(IDS_OCULTOS & {r.id for r in membro.roles})
 
 
+def _membros_do_cargo(guild: discord.Guild, cargo_id: int) -> list:
+    """Membros de um cargo, já filtrando bots e membros ocultos."""
+    cargo = guild.get_role(cargo_id)
+    if cargo is None:
+        return []
+    return [m for m in cargo.members if not m.bot and not _esta_oculto(m)]
+
+
 def build_embed(guild: discord.Guild) -> discord.Embed:
     embed = discord.Embed(
         title="🚀  TryHarders RL — Time de Rocket League",
@@ -40,6 +48,7 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
     )
 
     secao_atual = None
+    membros_unicos = set()  # pra não contar 2x quem tem mais de um cargo monitorado (ex: staff + rank)
 
     for cargo_info in CARGOS:
         if cargo_info["secao"] != secao_atual:
@@ -49,14 +58,11 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
             else:
                 embed.add_field(name="\u200b", value="```╔══════════  🎮  RANKS  ══════════╗```", inline=False)
 
-        cargo = guild.get_role(cargo_info["id"])
-        if cargo is None:
-            continue
-
         membros = sorted(
-            [m for m in cargo.members if not m.bot and not _esta_oculto(m)],
+            _membros_do_cargo(guild, cargo_info["id"]),
             key=lambda m: m.display_name.lower()
         )
+        membros_unicos.update(m.id for m in membros)
 
         if membros:
             lista = "\n".join(f"  ▸  {m.display_name}" for m in membros)
@@ -69,12 +75,9 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
             inline=False,
         )
 
-    total = sum(
-        len([m for m in guild.get_role(c["id"]).members if not m.bot and not _esta_oculto(m)])
-        for c in CARGOS if guild.get_role(c["id"])
-    )
-
-    embed.set_footer(text=f"⚡ {total} membros com cargo  •  Atualiza a cada 5 min")
+    # Total de PESSOAS diferentes com pelo menos um cargo monitorado
+    # (soma por cargo daria número errado, pois quem tem staff + rank seria contado 2x)
+    embed.set_footer(text=f"⚡ {len(membros_unicos)} membros com cargo  •  Atualiza a cada 5 min")
     embed.timestamp = discord.utils.utcnow()
     return embed
 
