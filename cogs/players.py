@@ -23,6 +23,14 @@ CARGOS = [
 
 IDS_MONITORADOS = {c["id"] for c in CARGOS}
 CARGO_MAP       = {c["id"]: c for c in CARGOS}
+RANK_IDS        = {c["id"] for c in CARGOS if c["secao"] == "rank"}
+
+# Quem tiver qualquer um desses cargos não aparece na lista de jogadores
+IDS_OCULTOS = {1521890714873757707, 1514782308031533116}
+
+
+def _esta_oculto(membro: discord.Member) -> bool:
+    return bool(IDS_OCULTOS & {r.id for r in membro.roles})
 
 
 def build_embed(guild: discord.Guild) -> discord.Embed:
@@ -46,7 +54,7 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
             continue
 
         membros = sorted(
-            [m for m in cargo.members if not m.bot],
+            [m for m in cargo.members if not m.bot and not _esta_oculto(m)],
             key=lambda m: m.display_name.lower()
         )
 
@@ -62,7 +70,7 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
         )
 
     total = sum(
-        len([m for m in guild.get_role(c["id"]).members if not m.bot])
+        len([m for m in guild.get_role(c["id"]).members if not m.bot and not _esta_oculto(m)])
         for c in CARGOS if guild.get_role(c["id"])
     )
 
@@ -91,13 +99,46 @@ class Players(commands.Cog):
         channel = self.bot.get_channel(JOGADORES_CHANNEL_ID)
         if channel is None:
             return
+
+        ganhou_rank  = ganhou & RANK_IDS
+        perdeu_rank  = perdeu & RANK_IDS
+        ganhou_staff = ganhou - RANK_IDS
+        perdeu_staff = perdeu - RANK_IDS
+
         linhas = []
-        for cid in ganhou:
+        ranks_consumidos = set()
+
+        # Ganhou um rank novo: distingue "entrou no clube" de "upou de rank"
+        for cid in ganhou_rank:
+            info_novo = CARGO_MAP[cid]
+            candidatos = perdeu_rank - ranks_consumidos
+            rank_anterior_id = next(iter(candidatos), None)
+            if rank_anterior_id is not None:
+                info_antigo = CARGO_MAP[rank_anterior_id]
+                ranks_consumidos.add(rank_anterior_id)
+                linhas.append(
+                    f"⬆️ **{after.display_name}** upou do rank {info_antigo['emoji']} **{info_antigo['nome']}** "
+                    f"para o rank {info_novo['emoji']} **{info_novo['nome']}**!"
+                )
+            else:
+                linhas.append(
+                    f"🎉 **{after.display_name}** entrou no clube com o rank {info_novo['emoji']} **{info_novo['nome']}**!"
+                )
+
+        # Cargos de staff (não são rank) seguem a mensagem antiga
+        for cid in ganhou_staff:
             info = CARGO_MAP[cid]
             linhas.append(f"📈 **{after.display_name}** subiu para {info['emoji']} **{info['nome']}**!")
-        for cid in perdeu:
+
+        for cid in perdeu_staff:
             info = CARGO_MAP[cid]
             linhas.append(f"📉 **{after.display_name}** saiu de {info['emoji']} **{info['nome']}**.")
+
+        # Rank perdido sem ganhar outro no lugar (rebaixamento "seco")
+        for cid in perdeu_rank - ranks_consumidos:
+            info = CARGO_MAP[cid]
+            linhas.append(f"📉 **{after.display_name}** saiu do rank {info['emoji']} **{info['nome']}**.")
+
         if linhas:
             notif = await channel.send("\n".join(linhas))
             await self._editar_ou_criar(channel)
