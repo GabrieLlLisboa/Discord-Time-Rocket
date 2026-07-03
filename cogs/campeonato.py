@@ -186,6 +186,41 @@ class EntrarTorneioView(discord.ui.View):
             )
 
 
+async def _apagar_campeonato(bot: commands.Bot, chave: str):
+    dados = ler_campeonatos()
+    info = dados.get(chave)
+    if info is None:
+        return
+    canal = bot.get_channel(info["canal_id"])
+    if canal is not None:
+        for msg_id in (info.get("message_id"), info.get("lista_message_id")):
+            if msg_id is None:
+                continue
+            try:
+                msg = await canal.fetch_message(msg_id)
+                await msg.delete()
+            except discord.NotFound:
+                pass
+    del dados[chave]
+    salvar_campeonatos(dados)
+
+
+class ConfirmarExclusaoView(discord.ui.View):
+    def __init__(self, chave: str, bot: commands.Bot):
+        super().__init__(timeout=30)
+        self.chave = chave
+        self.bot = bot
+
+    @discord.ui.button(label="Sim, apagar", style=discord.ButtonStyle.danger)
+    async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _apagar_campeonato(self.bot, self.chave)
+        await interaction.response.edit_message(content="🗑️ Campeonato apagado.", view=None)
+
+    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary)
+    async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="❌ Cancelado, o campeonato continua ativo.", view=None)
+
+
 async def _autocomplete_campeonato(interaction: discord.Interaction, current: str):
     dados = ler_campeonatos()
     return [
@@ -260,11 +295,27 @@ class Campeonato(commands.Cog):
             await interaction.response.send_message(f"❌ Erro ao criar campeonato: {error}", ephemeral=True)
 
     # ── /torneiar ────────────────────────────────────────────────────────────
-    @app_commands.command(name="torneiar", description="Inscreve alguém manualmente num campeonato (sem checar rank).")
-    @app_commands.describe(membro="Quem vai ser inscrito", campeonato="Nome do campeonato")
+    @app_commands.command(name="torneiar", description="Inscreve uma ou mais pessoas manualmente num campeonato (sem checar rank).")
+    @app_commands.describe(
+        campeonato="Nome do campeonato",
+        membro1="Quem vai ser inscrito",
+        membro2="(opcional) mais alguém",
+        membro3="(opcional) mais alguém",
+        membro4="(opcional) mais alguém",
+        membro5="(opcional) mais alguém",
+    )
     @app_commands.autocomplete(campeonato=_autocomplete_campeonato)
     @app_commands.checks.has_permissions(administrator=True)
-    async def torneiar(self, interaction: discord.Interaction, membro: discord.Member, campeonato: str):
+    async def torneiar(
+        self,
+        interaction: discord.Interaction,
+        campeonato: str,
+        membro1: discord.Member,
+        membro2: discord.Member = None,
+        membro3: discord.Member = None,
+        membro4: discord.Member = None,
+        membro5: discord.Member = None,
+    ):
         chave = _chave(campeonato)
         dados = ler_campeonatos()
         info = dados.get(chave)
@@ -272,18 +323,58 @@ class Campeonato(commands.Cog):
             await interaction.response.send_message(f"❌ Não encontrei nenhum campeonato chamado **{campeonato}**.", ephemeral=True)
             return
 
-        if str(membro.id) in info["inscritos"]:
-            await interaction.response.send_message(f"⚠️ **{membro.display_name}** já está inscrito em **{info['nome']}**.", ephemeral=True)
-            return
+        membros = [m for m in (membro1, membro2, membro3, membro4, membro5) if m is not None]
 
-        info["inscritos"][str(membro.id)] = {"pais": "—"}
+        inscritos_agora = []
+        ja_estavam = []
+        for membro in membros:
+            if str(membro.id) in info["inscritos"]:
+                ja_estavam.append(membro.display_name)
+            else:
+                info["inscritos"][str(membro.id)] = {"pais": "—"}
+                inscritos_agora.append(membro.display_name)
+
         salvar_campeonatos(dados)
         await _atualizar_lista(self.bot, chave)
 
-        await interaction.response.send_message(f"✅ **{membro.display_name}** foi inscrito manualmente em **{info['nome']}**.", ephemeral=True)
+        partes = []
+        if inscritos_agora:
+            partes.append(f"✅ Inscrito(s) em **{info['nome']}**: {', '.join(inscritos_agora)}")
+        if ja_estavam:
+            partes.append(f"⚠️ Já estavam inscritos (ignorados): {', '.join(ja_estavam)}")
+
+        await interaction.response.send_message("\n".join(partes) or "⚠️ Nada pra fazer.", ephemeral=True)
 
     @torneiar.error
     async def torneiar_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Só **Administradores** podem usar este comando.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
+
+    # ── /deletar-torneio ─────────────────────────────────────────────────────
+    @app_commands.command(name="deletar-torneio", description="Apaga um campeonato (as duas mensagens e todos os inscritos).")
+    @app_commands.describe(campeonato="Qual campeonato apagar")
+    @app_commands.autocomplete(campeonato=_autocomplete_campeonato)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def deletar_torneio(self, interaction: discord.Interaction, campeonato: str):
+        chave = _chave(campeonato)
+        dados = ler_campeonatos()
+        info = dados.get(chave)
+        if info is None:
+            await interaction.response.send_message(f"❌ Não encontrei nenhum campeonato chamado **{campeonato}**.", ephemeral=True)
+            return
+
+        view = ConfirmarExclusaoView(chave, self.bot)
+        await interaction.response.send_message(
+            f"⚠️ Tem certeza que quer apagar o campeonato **{info['nome']}**? "
+            f"Isso vai apagar as mensagens e **{len(info['inscritos'])} inscrição(ões)**, sem volta.",
+            view=view,
+            ephemeral=True,
+        )
+
+    @deletar_torneio.error
+    async def deletar_torneio_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.MissingPermissions):
             await interaction.response.send_message("❌ Só **Administradores** podem usar este comando.", ephemeral=True)
         else:
