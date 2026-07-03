@@ -13,6 +13,10 @@ from cogs.players import CARGOS
 #
 #  /criar-campeonato e /torneiar são slash commands.
 #  !destornear continua sendo comando de prefixo (!).
+#
+#  Cada campeonato gera DUAS mensagens no canal:
+#    1) A mensagem de informações + botão "Entrar no Torneio"
+#    2) A mensagem com a lista de inscritos (atualizada à parte)
 # ─────────────────────────────────────────────
 
 DATA_FILE = "data/campeonatos.json"
@@ -21,7 +25,7 @@ RANKS_VALIDOS = {c["nome"].lower(): c for c in CARGOS if c["secao"] == "rank"}
 RANK_TODOS = "Todos"
 
 RANK_CHOICES = [app_commands.Choice(name=c["nome"], value=c["nome"]) for c in CARGOS if c["secao"] == "rank"]
-RANK_CHOICES.append(app_commands.Choice(name="🌈 Todos os ranks", value=RANK_TODOS))
+RANK_CHOICES.append(app_commands.Choice(name="Todos os ranks", value=RANK_TODOS))
 
 FORMATO_CHOICES = [
     app_commands.Choice(name="1v1", value="1v1"),
@@ -61,32 +65,39 @@ def _membro_tem_rank(membro: discord.Member, rank_nome: str) -> bool:
     return any(r.id == info["id"] for r in membro.roles)
 
 
-def construir_embed_campeonato(info: dict) -> discord.Embed:
+def _rank_display(rank_nome: str) -> str:
+    if rank_nome == RANK_TODOS:
+        return "Todos os ranks"
+    info = RANKS_VALIDOS.get(rank_nome.lower())
+    return f"{info['emoji']} {info['nome']}" if info else rank_nome
+
+
+def construir_embed_info(info: dict) -> discord.Embed:
+    """Mensagem 1: informações do campeonato (não muda depois de criada)."""
     embed = discord.Embed(title=f"🏆 Campeonato: {info['nome']}", color=0xD4A843)
-
-    if info["rank"] == RANK_TODOS:
-        rank_display = "🌈 Todos os ranks"
-    else:
-        rank_info = RANKS_VALIDOS.get(info["rank"].lower())
-        rank_display = f"{rank_info['emoji']} {rank_info['nome']}" if rank_info else info["rank"]
-
-    embed.add_field(name="🎮 Rank exigido", value=rank_display, inline=True)
+    embed.add_field(name="🎮 Rank exigido", value=_rank_display(info["rank"]), inline=True)
     embed.add_field(name="⚔️ Formato", value=info["formato"], inline=True)
     embed.add_field(name="🌍 Tipo", value=info["tipo"], inline=True)
     embed.add_field(name="🧑‍💼 Organizador", value=info["organizador"], inline=False)
-
-    inscritos = info.get("inscritos", {})
-    if inscritos:
-        lista = "\n".join(f"▸ <@{uid}>" for uid in inscritos.keys())
-    else:
-        lista = "*— ninguém inscrito ainda —*"
-
-    embed.add_field(name=f"📋 Lista de inscritos ({len(inscritos)})", value=lista, inline=False)
+    embed.set_footer(text="Clique no botão abaixo pra se inscrever!")
     embed.timestamp = datetime.now(timezone.utc)
     return embed
 
 
-async def _atualizar_mensagem(bot: commands.Bot, chave: str):
+def construir_embed_lista(info: dict) -> discord.Embed:
+    """Mensagem 2: lista de inscritos (atualizada toda vez que alguém entra/sai)."""
+    inscritos = info.get("inscritos", {})
+    embed = discord.Embed(
+        title=f"📋 Lista de inscritos — {info['nome']}",
+        description="\n".join(f"▸ <@{uid}>" for uid in inscritos.keys()) if inscritos else "*— ninguém inscrito ainda —*",
+        color=0xD4A843,
+    )
+    embed.set_footer(text=f"{len(inscritos)} inscrito(s)")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
+
+async def _atualizar_lista(bot: commands.Bot, chave: str):
     dados = ler_campeonatos()
     info = dados.get(chave)
     if info is None:
@@ -95,8 +106,8 @@ async def _atualizar_mensagem(bot: commands.Bot, chave: str):
     if canal is None:
         return
     try:
-        msg = await canal.fetch_message(info["message_id"])
-        await msg.edit(embed=construir_embed_campeonato(info))
+        msg = await canal.fetch_message(info["lista_message_id"])
+        await msg.edit(embed=construir_embed_lista(info))
     except discord.NotFound:
         pass
 
@@ -122,7 +133,7 @@ class PaisModal(discord.ui.Modal, title="Inscrição no Torneio"):
 
         info["inscritos"][str(interaction.user.id)] = {"pais": str(self.pais)}
         salvar_campeonatos(dados)
-        await _atualizar_mensagem(self.bot, self.chave)
+        await _atualizar_lista(self.bot, self.chave)
         await interaction.response.send_message(
             f"✅ Inscrição confirmada no campeonato **{info['nome']}**!", ephemeral=True
         )
@@ -224,14 +235,20 @@ class Campeonato(commands.Cog):
             "organizador": organizador,
             "canal_id": interaction.channel_id,
             "message_id": None,
+            "lista_message_id": None,
             "inscritos": {},
         }
 
-        view = EntrarTorneioView(chave)
-        await interaction.response.send_message(embed=construir_embed_campeonato(info), view=view)
-        msg = await interaction.original_response()
+        # Responde só pra você, de forma discreta — o anúncio de verdade vai
+        # como mensagem própria do bot, sem aparecer como resposta ao seu comando
+        await interaction.response.send_message("✅ Campeonato criado!", ephemeral=True)
 
-        info["message_id"] = msg.id
+        canal = interaction.channel
+        msg_info = await canal.send(embed=construir_embed_info(info), view=EntrarTorneioView(chave))
+        msg_lista = await canal.send(embed=construir_embed_lista(info))
+
+        info["message_id"] = msg_info.id
+        info["lista_message_id"] = msg_lista.id
         dados[chave] = info
         salvar_campeonatos(dados)
 
@@ -261,7 +278,7 @@ class Campeonato(commands.Cog):
 
         info["inscritos"][str(membro.id)] = {"pais": "—"}
         salvar_campeonatos(dados)
-        await _atualizar_mensagem(self.bot, chave)
+        await _atualizar_lista(self.bot, chave)
 
         await interaction.response.send_message(f"✅ **{membro.display_name}** foi inscrito manualmente em **{info['nome']}**.", ephemeral=True)
 
@@ -293,7 +310,7 @@ class Campeonato(commands.Cog):
 
         del info["inscritos"][str(membro.id)]
         salvar_campeonatos(dados)
-        await _atualizar_mensagem(self.bot, chave)
+        await _atualizar_lista(self.bot, chave)
 
         await ctx.send(f"✅ **{membro.display_name}** foi removido de **{info['nome']}**.", delete_after=8)
 
