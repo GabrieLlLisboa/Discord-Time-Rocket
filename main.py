@@ -28,6 +28,7 @@ COGS = [
     "cogs.resultados",
     "cogs.tracker",
     "cogs.atividade",
+    "cogs.campeonato",
 ]
 
 async def load_cogs():
@@ -83,6 +84,20 @@ async def registrar_views_persistentes():
             print(f"[VIEWS] ✅ {count} view(s) de amistoso(s) em aberto recarregada(s).")
     except Exception as e:
         print(f"[VIEWS] ⚠️  Erro ao recarregar views de amistosos: {e}")
+
+    # Views de campeonatos em aberto (o botão "Entrar no Torneio" precisa
+    # ser recriado com o custom_id certo pra continuar funcionando)
+    try:
+        from cogs.campeonato import EntrarTorneioView, ler_campeonatos
+        campeonatos = ler_campeonatos()
+        count = 0
+        for chave in campeonatos.keys():
+            bot.add_view(EntrarTorneioView(chave))
+            count += 1
+        if count:
+            print(f"[VIEWS] ✅ {count} view(s) de campeonato(s) recarregada(s).")
+    except Exception as e:
+        print(f"[VIEWS] ⚠️  Erro ao recarregar views de campeonatos: {e}")
 
     print("[VIEWS] ✅ Views persistentes registradas.")
 
