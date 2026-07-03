@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import json
 import os
@@ -9,11 +10,29 @@ from cogs.players import CARGOS
 # ─────────────────────────────────────────────
 #  Cog: Campeonatos / Torneios
 #  Arquivo: cogs/campeonato.py
+#
+#  /criar-campeonato e /torneiar são slash commands.
+#  !destornear continua sendo comando de prefixo (!).
 # ─────────────────────────────────────────────
 
 DATA_FILE = "data/campeonatos.json"
 
 RANKS_VALIDOS = {c["nome"].lower(): c for c in CARGOS if c["secao"] == "rank"}
+RANK_TODOS = "Todos"
+
+RANK_CHOICES = [app_commands.Choice(name=c["nome"], value=c["nome"]) for c in CARGOS if c["secao"] == "rank"]
+RANK_CHOICES.append(app_commands.Choice(name="🌈 Todos os ranks", value=RANK_TODOS))
+
+FORMATO_CHOICES = [
+    app_commands.Choice(name="1v1", value="1v1"),
+    app_commands.Choice(name="2v2", value="2v2"),
+    app_commands.Choice(name="3v3", value="3v3"),
+]
+
+TIPO_CHOICES = [
+    app_commands.Choice(name="Interno", value="Interno"),
+    app_commands.Choice(name="Externo", value="Externo"),
+]
 
 
 def ler_campeonatos() -> dict:
@@ -34,6 +53,8 @@ def _chave(nome: str) -> str:
 
 
 def _membro_tem_rank(membro: discord.Member, rank_nome: str) -> bool:
+    if rank_nome == RANK_TODOS:
+        return True
     info = RANKS_VALIDOS.get(rank_nome.lower())
     if info is None:
         return True  # rank desconhecido — não bloqueia, deixa passar
@@ -43,12 +64,16 @@ def _membro_tem_rank(membro: discord.Member, rank_nome: str) -> bool:
 def construir_embed_campeonato(info: dict) -> discord.Embed:
     embed = discord.Embed(title=f"🏆 Campeonato: {info['nome']}", color=0xD4A843)
 
-    rank_info = RANKS_VALIDOS.get(info["rank"].lower())
-    rank_display = f"{rank_info['emoji']} {rank_info['nome']}" if rank_info else info["rank"]
+    if info["rank"] == RANK_TODOS:
+        rank_display = "🌈 Todos os ranks"
+    else:
+        rank_info = RANKS_VALIDOS.get(info["rank"].lower())
+        rank_display = f"{rank_info['emoji']} {rank_info['nome']}" if rank_info else info["rank"]
 
     embed.add_field(name="🎮 Rank exigido", value=rank_display, inline=True)
+    embed.add_field(name="⚔️ Formato", value=info["formato"], inline=True)
     embed.add_field(name="🌍 Tipo", value=info["tipo"], inline=True)
-    embed.add_field(name="🧑‍💼 Organizador", value=info["organizador"], inline=True)
+    embed.add_field(name="🧑‍💼 Organizador", value=info["organizador"], inline=False)
 
     inscritos = info.get("inscritos", {})
     if inscritos:
@@ -150,87 +175,111 @@ class EntrarTorneioView(discord.ui.View):
             )
 
 
+async def _autocomplete_campeonato(interaction: discord.Interaction, current: str):
+    dados = ler_campeonatos()
+    return [
+        app_commands.Choice(name=info["nome"], value=info["nome"])
+        for info in dados.values()
+        if current.lower() in info["nome"].lower()
+    ][:25]
+
+
 class Campeonato(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ── !criar-campeonato "Nome" Rank Interno/Externo Organizador ───────────
-    @commands.command(name="criar-campeonato")
-    @commands.has_permissions(administrator=True)
-    async def criar_campeonato(self, ctx: commands.Context, nome: str, rank: str, tipo: str, *, organizador: str):
-        """Cria o anúncio de um campeonato com botão de inscrição.
-
-        Uso: !criar-campeonato "Nome do Campeonato" Rank Interno/Externo Organizador
-        Exemplo: !criar-campeonato "Copa de Verão" Diamante Interno João
-        (Use aspas no nome se ele tiver espaço.)
-        """
-        rank_info = RANKS_VALIDOS.get(rank.lower())
-        if rank_info is None:
-            validos = ", ".join(c["nome"] for c in CARGOS if c["secao"] == "rank")
-            await ctx.send(f"❌ Rank inválido. Use um destes: {validos}", delete_after=10)
-            return
-
-        if tipo.lower() not in ("interno", "externo"):
-            await ctx.send("❌ O tipo precisa ser `Interno` ou `Externo`.", delete_after=8)
-            return
-
+    # ── /criar-campeonato ────────────────────────────────────────────────────
+    @app_commands.command(name="criar-campeonato", description="Cria o anúncio de um campeonato com botão de inscrição.")
+    @app_commands.describe(
+        nome="Nome do campeonato",
+        rank="Rank exigido pra participar (ou 'Todos os ranks')",
+        formato="Formato das partidas",
+        tipo="O campeonato é interno ou externo?",
+        organizador="Quem está organizando",
+    )
+    @app_commands.choices(rank=RANK_CHOICES, formato=FORMATO_CHOICES, tipo=TIPO_CHOICES)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def criar_campeonato(
+        self,
+        interaction: discord.Interaction,
+        nome: str,
+        rank: app_commands.Choice[str],
+        formato: app_commands.Choice[str],
+        tipo: app_commands.Choice[str],
+        organizador: str,
+    ):
         chave = _chave(nome)
         dados = ler_campeonatos()
         if chave in dados:
-            await ctx.send(f"❌ Já existe um campeonato chamado **{nome}**. Escolha outro nome.", delete_after=8)
+            await interaction.response.send_message(
+                f"❌ Já existe um campeonato chamado **{nome}**. Escolha outro nome.", ephemeral=True
+            )
             return
 
         info = {
             "nome": nome,
-            "rank": rank_info["nome"],
-            "tipo": tipo.capitalize(),
+            "rank": rank.value,
+            "formato": formato.value,
+            "tipo": tipo.value,
             "organizador": organizador,
-            "canal_id": ctx.channel.id,
+            "canal_id": interaction.channel_id,
             "message_id": None,
             "inscritos": {},
         }
 
         view = EntrarTorneioView(chave)
-        msg = await ctx.send(embed=construir_embed_campeonato(info), view=view)
+        await interaction.response.send_message(embed=construir_embed_campeonato(info), view=view)
+        msg = await interaction.original_response()
 
         info["message_id"] = msg.id
         dados[chave] = info
         salvar_campeonatos(dados)
 
-        try:
-            await ctx.message.delete()
-        except discord.Forbidden:
-            pass
-
     @criar_campeonato.error
-    async def criar_campeonato_error(self, ctx, error):
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ Só **Administradores** podem criar campeonatos.", delete_after=6)
-        elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(
-                "⚠️ Uso: `!criar-campeonato \"Nome do Campeonato\" Rank Interno/Externo Organizador`\n"
-                "Exemplo: `!criar-campeonato \"Copa de Verão\" Diamante Interno João`",
-                delete_after=12,
-            )
+    async def criar_campeonato_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Só **Administradores** podem criar campeonatos.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Erro ao criar campeonato: {error}", ephemeral=True)
 
-    # ── !torneiar <id> <nome do campeonato> — inscrição manual pela staff ───
-    @commands.command(name="torneiar")
+    # ── /torneiar ────────────────────────────────────────────────────────────
+    @app_commands.command(name="torneiar", description="Inscreve alguém manualmente num campeonato (sem checar rank).")
+    @app_commands.describe(membro="Quem vai ser inscrito", campeonato="Nome do campeonato")
+    @app_commands.autocomplete(campeonato=_autocomplete_campeonato)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def torneiar(self, interaction: discord.Interaction, membro: discord.Member, campeonato: str):
+        chave = _chave(campeonato)
+        dados = ler_campeonatos()
+        info = dados.get(chave)
+        if info is None:
+            await interaction.response.send_message(f"❌ Não encontrei nenhum campeonato chamado **{campeonato}**.", ephemeral=True)
+            return
+
+        if str(membro.id) in info["inscritos"]:
+            await interaction.response.send_message(f"⚠️ **{membro.display_name}** já está inscrito em **{info['nome']}**.", ephemeral=True)
+            return
+
+        info["inscritos"][str(membro.id)] = {"pais": "—"}
+        salvar_campeonatos(dados)
+        await _atualizar_mensagem(self.bot, chave)
+
+        await interaction.response.send_message(f"✅ **{membro.display_name}** foi inscrito manualmente em **{info['nome']}**.", ephemeral=True)
+
+    @torneiar.error
+    async def torneiar_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Só **Administradores** podem usar este comando.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
+
+    # ── !destornear <membro> <nome do campeonato> — tira alguém da lista ────
+    @commands.command(name="destornear")
     @commands.has_permissions(administrator=True)
-    async def torneiar(self, ctx: commands.Context, membro_id: str, *, nome_campeonato: str):
-        """Inscreve alguém manualmente num campeonato (sem checar rank, sem pedir país).
+    async def destornear(self, ctx: commands.Context, membro: discord.Member, *, nome_campeonato: str):
+        """Tira alguém da lista de inscritos de um campeonato.
 
-        Uso: !torneiar <id_do_usuário> <nome do campeonato>
+        Uso: !destornear @pessoa <nome do campeonato>
         """
-        membro_id_limpo = membro_id.strip("<@!>")
-        if not membro_id_limpo.isdigit():
-            await ctx.send("⚠️ ID inválido. Uso: `!torneiar <id> <nome do campeonato>`", delete_after=6)
-            return
-
-        membro = ctx.guild.get_member(int(membro_id_limpo))
-        if membro is None:
-            await ctx.send("❌ Não encontrei esse membro no servidor.", delete_after=6)
-            return
-
         chave = _chave(nome_campeonato)
         dados = ler_campeonatos()
         info = dados.get(chave)
@@ -238,22 +287,24 @@ class Campeonato(commands.Cog):
             await ctx.send(f"❌ Não encontrei nenhum campeonato chamado **{nome_campeonato}**.", delete_after=8)
             return
 
-        if membro_id_limpo in info["inscritos"]:
-            await ctx.send(f"⚠️ **{membro.display_name}** já está inscrito em **{info['nome']}**.", delete_after=6)
+        if str(membro.id) not in info["inscritos"]:
+            await ctx.send(f"⚠️ **{membro.display_name}** não está inscrito em **{info['nome']}**.", delete_after=6)
             return
 
-        info["inscritos"][membro_id_limpo] = {"pais": "—"}
+        del info["inscritos"][str(membro.id)]
         salvar_campeonatos(dados)
         await _atualizar_mensagem(self.bot, chave)
 
-        await ctx.send(f"✅ **{membro.display_name}** foi inscrito manualmente em **{info['nome']}**.", delete_after=8)
+        await ctx.send(f"✅ **{membro.display_name}** foi removido de **{info['nome']}**.", delete_after=8)
 
-    @torneiar.error
-    async def torneiar_error(self, ctx, error):
+    @destornear.error
+    async def destornear_error(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("❌ Só **Administradores** podem usar este comando.", delete_after=6)
+        elif isinstance(error, commands.MemberNotFound):
+            await ctx.send("❌ Membro não encontrado. Marque a pessoa com `@` ou use o nick certinho.", delete_after=6)
         elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send("⚠️ Uso: `!torneiar <id_do_usuário> <nome do campeonato>`", delete_after=8)
+            await ctx.send("⚠️ Uso: `!destornear @pessoa <nome do campeonato>`", delete_after=8)
 
 
 async def setup(bot: commands.Bot):
