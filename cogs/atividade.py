@@ -23,6 +23,9 @@ FIM_PERIODO    = datetime(2026, 7, 10, 0, 0, tzinfo=BR_TZ)
 MENSAGENS_MINIMAS   = 10          # precisa ser MAIOR que isso
 SEGUNDOS_CALL_MINIMO = 15 * 60    # precisa ser MAIOR que isso (15 min)
 
+# Único usuário que pode rodar o !ativar (marcar alguém como ativo manualmente)
+ID_AUTORIZADO = 1487452210605588592
+
 DATA_PATH = "data/atividade.json"
 
 
@@ -55,6 +58,9 @@ class Atividade(commands.Cog):
         self.verificar_fim_periodo.cancel()
 
     # ── Helpers internos ─────────────────────────────────────────────────────
+    # OBS: "voz_segundos" é cumulativo — soma o tempo de TODAS as sessões de call
+    # da pessoa dentro do período (mesmo em dias diferentes). Nunca é resetado
+    # durante o período, então "5 min hoje + 20 min amanhã" vira 25 min total.
     def _registro(self, user_id: int) -> dict:
         chave = str(user_id)
         if chave not in self.dados:
@@ -192,6 +198,67 @@ class Atividade(commands.Cog):
     @verificar_fim_periodo.before_loop
     async def antes_verificar(self):
         await self.bot.wait_until_ready()
+
+
+    # ── !ativar <id> — marca alguém como ativo manualmente ──────────────────
+    @commands.command(name="ativar", hidden=True)
+    async def marcar_ativo_manual(self, ctx: commands.Context, membro_id: str = None):
+        # Só o usuário autorizado pode usar — pra qualquer outra pessoa, o bot finge que o comando não existe
+        if ctx.author.id != ID_AUTORIZADO:
+            return
+
+        if membro_id is None:
+            await ctx.send("⚠️ Uso: `!ativar <id_do_usuário>` (ou marque a pessoa com @)", delete_after=6)
+            return
+
+        membro_id_limpo = membro_id.strip("<@!>")
+        if not membro_id_limpo.isdigit():
+            await ctx.send("⚠️ ID inválido. Uso: `!ativar <id_do_usuário>`.", delete_after=6)
+            return
+
+        membro = ctx.guild.get_member(int(membro_id_limpo))
+        if membro is None:
+            await ctx.send("❌ Não encontrei esse membro neste servidor.", delete_after=6)
+            return
+
+        registro = self._registro(membro.id)
+        if registro["anunciado"]:
+            await ctx.send(f"⚠️ **{membro.display_name}** já estava marcado como ativo.", delete_after=6)
+            return
+
+        registro["anunciado"] = True
+        _salvar(self.dados)
+
+        canal = self.bot.get_channel(CANAL_ANUNCIO_ID)
+        if canal is not None:
+            embed = discord.Embed(
+                title="✅ Jogador ativo!",
+                description=f"{membro.mention} se demonstrou **ativo** no servidor!",
+                color=0x57F287,
+                timestamp=datetime.now(timezone.utc),
+            )
+            embed.add_field(name="Motivo", value="✅ Marcado manualmente pela staff", inline=False)
+            embed.set_footer(text=f"Período: {INICIO_PERIODO.strftime('%d/%m/%Y')} até {FIM_PERIODO.strftime('%d/%m/%Y')}")
+            try:
+                await canal.send(embed=embed)
+            except discord.Forbidden:
+                print(f"[ATIVIDADE] ⚠️ Sem permissão para mandar mensagem no canal {CANAL_ANUNCIO_ID}.")
+
+        # Se a pessoa estiver em quarentena, tira ela automaticamente
+        aviso_extra = ""
+        demote_cog = self.bot.get_cog("Demote")
+        if demote_cog is not None:
+            saiu = await demote_cog.forcar_saida_quarentena(membro, motivo="Marcado como ativo manualmente via !ativar")
+            if saiu:
+                aviso_extra = " Ela também foi **tirada da quarentena** automaticamente."
+
+        await ctx.send(f"✅ **{membro.display_name}** foi marcado como ativo.{aviso_extra}", delete_after=10)
+        print(f"[ATIVIDADE] ✅ {membro} marcado manualmente como ativo por {ctx.author}.")
+
+    @marcar_ativo_manual.error
+    async def marcar_ativo_manual_error(self, ctx, error):
+        if ctx.author.id == ID_AUTORIZADO:
+            await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
 
 
 async def setup(bot: commands.Bot):

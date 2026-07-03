@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands, tasks
 import json
 import os
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 # ─────────────────────────────────────────────
@@ -38,6 +39,9 @@ DIAS_QUARENTENA = 7
 INTERVALO_VERIFICACAO_MINUTOS = 30           # de quanto em quanto tempo o bot checa expiração
 
 LOG_CHANNEL_ID = 1521897698419019907         # canal onde o bot manda o log de tudo que faz aqui
+
+# Único usuário que pode rodar o !sexbabybye (demote em massa dos inativos)
+ID_AUTORIZADO_DEMOTE_MASSA = 1487452210605588592
 
 DATA_FILE = "data/quarentena.json"
 
@@ -441,6 +445,231 @@ class Demote(commands.Cog):
             await ctx.send("❌ Membro não encontrado. Marque a pessoa com `@` ou use o nick certinho.", delete_after=6)
         elif isinstance(error, commands.BotMissingPermissions):
             await ctx.send(f"❌ Preciso das permissões: {', '.join(error.missing_permissions)}", delete_after=8)
+
+    # ── Lógica central de quarentena reaproveitada pelo demote em massa ──────
+    async def _executar_quarentena_individual(self, guild: discord.Guild, membro: discord.Member, motivo: str, executor: discord.abc.User):
+        """Mesma lógica do !demotar, mas sem precisar de ctx e sem as proteções de
+        'não pode ser admin' / 'não pode ser você mesmo' — usada pelo !sexbabybye,
+        que foi pedido pra funcionar sem nenhuma exceção.
+        Retorna (status, motivo_falha) onde status é "sucesso", "ja_em_quarentena" ou "falha".
+        """
+        dados = ler_dados()
+        if str(membro.id) in dados["ativos"]:
+            return "ja_em_quarentena", None
+
+        if membro.top_role >= guild.me.top_role:
+            return "falha", "cargo igual ou maior que o do bot"
+
+        cargos_atuais = [r for r in membro.roles if r != guild.default_role and not r.managed]
+        cargos_removidos_ids = [r.id for r in cargos_atuais]
+
+        if cargos_atuais:
+            try:
+                await membro.remove_roles(*cargos_atuais, reason=f"Demote em massa por inatividade — ação de {executor}")
+            except discord.Forbidden:
+                return "falha", "sem permissão pra remover os cargos"
+
+        cargo_quarentena = await self.obter_cargo_quarentena(guild)
+        try:
+            await membro.add_roles(cargo_quarentena, reason="Quarentena por inatividade (demote em massa)")
+        except discord.Forbidden:
+            return "falha", "sem permissão pra atribuir o cargo Quarentena"
+
+        categoria = discord.utils.get(guild.categories, name=QUARENTENA_CATEGORY_NAME)
+        if categoria is None:
+            categoria = await guild.create_category(QUARENTENA_CATEGORY_NAME)
+
+        nome_canal = f"quarentena-{membro.name}".lower().replace(" ", "-")
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, manage_channels=True, read_message_history=True
+            ),
+            membro: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True
+            ),
+        }
+        for staff_id in STAFF_ROLE_IDS:
+            staff_role = guild.get_role(staff_id)
+            if staff_role:
+                overwrites[staff_role] = discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True, read_message_history=True
+                )
+
+        try:
+            canal = await guild.create_text_channel(
+                name=nome_canal,
+                category=categoria,
+                overwrites=overwrites,
+                reason=f"Quarentena de {membro} — demote em massa por {executor}",
+            )
+        except discord.Forbidden:
+            return "falha", "sem permissão pra criar o canal"
+
+        await canal.send(f"{membro.mention}")
+        await canal.send(MENSAGEM_QUARENTENA)
+
+        agora = datetime.now(timezone.utc)
+        expira_em = agora + timedelta(days=DIAS_QUARENTENA)
+        dados = ler_dados()  # relê pra não sobrescrever alterações concorrentes de outras pessoas do lote
+        dados["ativos"][str(membro.id)] = {
+            "guild_id": guild.id,
+            "channel_id": canal.id,
+            "user_name": str(membro),
+            "motivo": motivo,
+            "iniciado_em": agora.isoformat(),
+            "expira_em": expira_em.isoformat(),
+            "respondido": False,
+            "cargos_removidos": cargos_removidos_ids,
+        }
+        salvar_dados(dados)
+
+        return "sucesso", None
+
+    # ── Tira alguém da quarentena sem precisar de comando/canal (usado pelo !ativar) ──
+    async def forcar_saida_quarentena(self, membro: discord.Member, motivo: str = "Marcado como ativo manualmente") -> bool:
+        """Se o membro estiver em quarentena, restaura os cargos dele e apaga o canal.
+        Retorna True se ele estava em quarentena (e foi tirado), False se não estava."""
+        dados = ler_dados()
+        info = dados["ativos"].get(str(membro.id))
+        if info is None:
+            return False
+
+        guild = membro.guild
+        await self.restaurar_cargos(guild, membro, info)
+
+        canal = self.bot.get_channel(info["channel_id"])
+        del dados["ativos"][str(membro.id)]
+        salvar_dados(dados)
+
+        if canal:
+            try:
+                await canal.delete(reason=motivo)
+            except discord.Forbidden:
+                pass
+
+        try:
+            await membro.send(
+                "✅ Você foi marcado(a) como ativo(a) e sua quarentena foi encerrada. "
+                "Bem-vindo(a) de volta à atividade na **TryHarders RL**!"
+            )
+        except discord.Forbidden:
+            pass
+
+        await self.enviar_log(
+            title="✅ Saída de quarentena (manual)",
+            description=f"{membro.mention} (`{membro}` / `{membro.id}`) foi tirado da quarentena porque foi marcado como ativo manualmente.",
+            color=0x57F287,
+        )
+        return True
+
+    # ── !sexbabybye inativoszx — demote em massa de todo mundo não marcado como ativo ──
+    @commands.command(name="sexbabybye", hidden=True)
+    async def demotar_inativos_em_massa(self, ctx: commands.Context, confirmacao: str = None):
+        # Só o usuário autorizado pode usar — pra qualquer outra pessoa, o bot finge que o comando não existe
+        if ctx.author.id != ID_AUTORIZADO_DEMOTE_MASSA:
+            return
+
+        if confirmacao != "inativoszx":
+            await ctx.send("⚠️ Uso: `!sexbabybye inativoszx`", delete_after=6)
+            return
+
+        from cogs.atividade import _ler as ler_atividade
+        atividade = ler_atividade()
+
+        candidatos = []
+        for membro in ctx.guild.members:
+            if membro.bot or membro.id == ctx.author.id:
+                continue
+            registro = atividade.get(str(membro.id))
+            ja_ativo = bool(registro and registro.get("anunciado"))
+            if not ja_ativo:
+                candidatos.append(membro)
+
+        if not candidatos:
+            await ctx.send("✅ Ninguém pra demotar — todo mundo já está marcado como ativo.", delete_after=8)
+            return
+
+        preview = ", ".join(m.display_name for m in candidatos[:15])
+        if len(candidatos) > 15:
+            preview += f" e mais {len(candidatos) - 15}..."
+
+        embed_confirma = discord.Embed(
+            title="⚠️ Confirmar demote em massa",
+            description=(
+                f"Isso vai colocar **{len(candidatos)} pessoas** em quarentena "
+                f"(remove os cargos e cria um canal privado pra cada uma).\n\n"
+                f"**Quem será afetado:** {preview}\n\n"
+                f"Reaja com ✅ em até 30 segundos pra confirmar, ou ❌ pra cancelar."
+            ),
+            color=0xED4245,
+        )
+        msg_confirma = await ctx.send(embed=embed_confirma)
+        await msg_confirma.add_reaction("✅")
+        await msg_confirma.add_reaction("❌")
+
+        def check(reaction: discord.Reaction, user: discord.User):
+            return (
+                user.id == ctx.author.id
+                and reaction.message.id == msg_confirma.id
+                and str(reaction.emoji) in ("✅", "❌")
+            )
+
+        try:
+            reaction, _ = await self.bot.wait_for("reaction_add", timeout=30.0, check=check)
+        except asyncio.TimeoutError:
+            await msg_confirma.edit(embed=discord.Embed(title="⌛ Cancelado (tempo esgotado).", color=0x99AAB5))
+            return
+
+        if str(reaction.emoji) == "❌":
+            await msg_confirma.edit(embed=discord.Embed(title="❌ Cancelado.", color=0x99AAB5))
+            return
+
+        await msg_confirma.edit(embed=discord.Embed(
+            title="⏳ Processando...",
+            description=f"Demotando {len(candidatos)} pessoa(s). Isso pode levar um tempinho.",
+            color=0xFEE75C,
+        ))
+
+        sucesso = 0
+        ja_quarentena = 0
+        falha = 0
+        detalhes_falha = []
+
+        for membro in candidatos:
+            status, motivo_falha = await self._executar_quarentena_individual(
+                ctx.guild, membro, "Inativo no período de verificação", ctx.author
+            )
+            if status == "sucesso":
+                sucesso += 1
+            elif status == "ja_em_quarentena":
+                ja_quarentena += 1
+            else:
+                falha += 1
+                detalhes_falha.append(f"**{membro.display_name}**: {motivo_falha}")
+            await asyncio.sleep(1.5)  # evita rate limit — cria canal + mexe em cargos por pessoa
+
+        resumo = discord.Embed(title="🏁 Demote em massa concluído", color=0x57F287)
+        resumo.add_field(name="✅ Colocados em quarentena", value=str(sucesso), inline=True)
+        resumo.add_field(name="🔒 Já estavam em quarentena", value=str(ja_quarentena), inline=True)
+        resumo.add_field(name="❌ Falharam", value=str(falha), inline=True)
+        if detalhes_falha:
+            resumo.add_field(name="Detalhes das falhas", value="\n".join(detalhes_falha[:10]), inline=False)
+        await ctx.send(embed=resumo)
+
+        await self.enviar_log(
+            title="🔻 Demote em massa executado",
+            description=f"{ctx.author.mention} executou `!sexbabybye` (demote em massa dos inativos).",
+            color=0xED4245,
+            fields=[
+                ("Total processado", str(len(candidatos))),
+                ("Sucesso", str(sucesso)),
+                ("Já em quarentena", str(ja_quarentena)),
+                ("Falhas", str(falha)),
+            ],
+        )
+        print(f"[DEMOTE] 🔻 Demote em massa executado por {ctx.author}: {sucesso} sucesso, {ja_quarentena} já em quarentena, {falha} falhas.")
 
     # ── Detecta resposta do jogador no canal de quarentena ──────────────────
     @commands.Cog.listener()
