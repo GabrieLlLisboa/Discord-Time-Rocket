@@ -15,6 +15,7 @@ bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 
 COGS = [
     "cogs.welcome",
+    "cogs.leave",
     "cogs.tickets",
     "cogs.demote",
     "cogs.clear",
@@ -49,12 +50,14 @@ async def registrar_views_persistentes():
     from cogs.notifications import NotificacaoView
     from cogs.friendly import ConfirmarPresencaView, SairAmistosoView
     from cogs.tracker import TrackerView
+    from cogs.welcome import BoasVindasView
 
     # Views sem estado (não precisam de argumentos)
     bot.add_view(TicketSetupView())
     bot.add_view(NotificacaoView())
     bot.add_view(SairAmistosoView())
     bot.add_view(TrackerView())
+    bot.add_view(BoasVindasView())
 
     # ConfirmarPresencaView precisa de rank_alvo, rank_id e canal_id
     # Recria a partir dos amistosos salvos no JSON
