@@ -39,48 +39,6 @@ def _tempo_no_servidor(entrou_em) -> str:
     return f"{horas} hora(s)" if horas else "menos de 1 hora"
 
 
-# ── Modal pra deixar um recado de despedida ─────────────────────────────────
-class DespedidaModal(discord.ui.Modal, title="Deixar um recado"):
-    mensagem = discord.ui.TextInput(
-        label="Sua mensagem de despedida",
-        style=discord.TextStyle.paragraph,
-        placeholder="Ex: Foi ótimo jogar com você, boa sorte por aí!",
-        max_length=200,
-    )
-
-    def __init__(self, nome_de_quem_saiu: str):
-        super().__init__()
-        self.nome_de_quem_saiu = nome_de_quem_saiu
-
-    async def on_submit(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            description=(
-                f"💌 **{interaction.user.display_name}** deixou um recado pra "
-                f"**{self.nome_de_quem_saiu}**:\n\n*\"{self.mensagem}\"*"
-            ),
-            color=COR_DESPEDIDA,
-        )
-        await interaction.channel.send(embed=embed)
-        await interaction.response.send_message("✅ Recado enviado!", ephemeral=True)
-
-
-# ── View com o botão de recado (custom_id guarda o ID de quem saiu) ─────────
-class DespedidaView(discord.ui.View):
-    def __init__(self, membro_id: int):
-        super().__init__(timeout=None)
-        self.membro_id = membro_id
-        self.deixar_recado.custom_id = f"despedida_recado:{membro_id}"
-
-    @discord.ui.button(label="💌 Deixar um recado", style=discord.ButtonStyle.secondary)
-    async def deixar_recado(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            usuario = await interaction.client.fetch_user(self.membro_id)
-            nome = usuario.name
-        except discord.NotFound:
-            nome = "essa pessoa"
-        await interaction.response.send_modal(DespedidaModal(nome))
-
-
 class Despedida(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -115,7 +73,8 @@ class Despedida(commands.Cog):
             icon_url=guild.icon.url if guild.icon else discord.Embed.Empty,
         )
 
-        await channel.send(embed=embed, view=DespedidaView(member.id))
+        # Menciona quem saiu fora do embed também
+        await channel.send(content=member.mention, embed=embed)
         print(f"[LEAVE] ✅ Mensagem de saída enviada para {member} no canal #{channel.name}.")
 
 

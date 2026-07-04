@@ -3,6 +3,8 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import os
 
+from cogs.players import CARGOS
+
 load_dotenv()
 WELCOME_CHANNEL_ID   = int(os.getenv("WELCOME_CHANNEL_ID", 0))
 NOVO_JOGADOR_ROLE_ID = 1514788887300538531
@@ -15,9 +17,55 @@ NOVO_JOGADOR_ROLE_ID = 1514788887300538531
 
 COR_BOAS_VINDAS = 0xFFD700  # dourado vibrante — bem diferente do tom da despedida
 
+RANKS = [c for c in CARGOS if c["secao"] == "rank"]
+RANK_IDS = {c["id"] for c in RANKS}
+
+
+# ── Select menu: escolher o rank já dá o cargo na hora ──────────────────────
+class RegistrarRankSelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label=c["nome"], emoji=c["emoji"], value=str(c["id"]))
+            for c in RANKS
+        ]
+        super().__init__(
+            placeholder="Escolha o seu rank atual...",
+            options=options,
+            custom_id="boasvindas_select_rank",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        membro = interaction.user
+        novo_cargo = guild.get_role(int(self.values[0]))
+
+        if novo_cargo is None:
+            await interaction.response.send_message("❌ Não encontrei esse cargo no servidor. Chama a staff!", ephemeral=True)
+            return
+
+        # Rank é único — tira qualquer outro rank que a pessoa já tenha antes de dar o novo
+        cargos_rank_atuais = [r for r in membro.roles if r.id in RANK_IDS and r.id != novo_cargo.id]
+
+        try:
+            if cargos_rank_atuais:
+                await membro.remove_roles(*cargos_rank_atuais, reason="Trocou de rank pelo menu de boas-vindas")
+            if novo_cargo not in membro.roles:
+                await membro.add_roles(novo_cargo, reason="Registrou o rank pelo menu de boas-vindas")
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ Não tenho permissão pra te dar esse cargo. Chama a staff!", ephemeral=True)
+            return
+
+        await interaction.response.send_message(f"✅ Prontinho! Agora você tem o rank **{novo_cargo.name}**.", ephemeral=True)
+
+
+class RegistrarRankView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(RegistrarRankSelect())
+
 
 class BoasVindasView(discord.ui.View):
-    """Botões só com dicas/instruções — não precisam de link pra nenhum canal."""
+    """Botões de dicas + o de registrar rank, que abre o menu de seleção."""
 
     def __init__(self):
         super().__init__(timeout=None)
@@ -25,9 +73,8 @@ class BoasVindasView(discord.ui.View):
     @discord.ui.button(label="🎮 Registrar meu Rank", style=discord.ButtonStyle.primary, custom_id="boasvindas_rank")
     async def registrar_rank(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "🎮 **Pra registrar seu rank:**\n"
-            "Use o comando `!tracker <seu perfil do Rocket League>` em qualquer canal.\n"
-            "O bot busca seu rank automaticamente e te dá o cargo certinho!",
+            "🎮 Escolha o rank que você faz atualmente no Rocket League:",
+            view=RegistrarRankView(),
             ephemeral=True,
         )
 
@@ -95,8 +142,10 @@ class Welcome(commands.Cog):
             icon_url=guild.icon.url if guild.icon else discord.Embed.Empty
         )
 
-        # Envia a menção do cargo fora do embed (para notificar) + o embed com os botões
-        await channel.send(content=mencao_cargo if mencao_cargo else None, embed=embed, view=BoasVindasView())
+        # Menciona a pessoa que entrou + o cargo de Novo Jogador (fora do embed, pra notificar)
+        conteudo = f"{member.mention} {mencao_cargo}".strip()
+
+        await channel.send(content=conteudo, embed=embed, view=BoasVindasView())
         print(f"[WELCOME] ✅ Boas-vindas enviadas para {member} no canal #{channel.name}.")
 
 
