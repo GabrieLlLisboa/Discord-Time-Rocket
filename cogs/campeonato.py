@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 import json
 import os
 from datetime import datetime, timezone
@@ -97,6 +97,54 @@ def construir_embed_lista(info: dict) -> discord.Embed:
     return embed
 
 
+async def _dar_cargo(bot: commands.Bot, info: dict, membro_id: int):
+    """Dá o cargo exclusivo do torneio pra alguém, se ele ainda não tiver."""
+    guild = bot.get_guild(info.get("guild_id"))
+    role_id = info.get("role_id")
+    if guild is None or role_id is None:
+        return
+    role = guild.get_role(role_id)
+    membro = guild.get_member(membro_id)
+    if role is None or membro is None:
+        return
+    if role not in membro.roles:
+        try:
+            await membro.add_roles(role, reason="Inscrito no torneio")
+        except discord.Forbidden:
+            print(f"[CAMPEONATO] ⚠️ Sem permissão pra dar o cargo do torneio '{info['nome']}' em {membro}.")
+
+
+async def _remover_cargo(bot: commands.Bot, info: dict, membro_id: int):
+    """Tira o cargo exclusivo do torneio de alguém, se ele tiver."""
+    guild = bot.get_guild(info.get("guild_id"))
+    role_id = info.get("role_id")
+    if guild is None or role_id is None:
+        return
+    role = guild.get_role(role_id)
+    membro = guild.get_member(membro_id)
+    if role is None or membro is None:
+        return
+    if role in membro.roles:
+        try:
+            await membro.remove_roles(role, reason="Saiu do torneio")
+        except discord.Forbidden:
+            print(f"[CAMPEONATO] ⚠️ Sem permissão pra tirar o cargo do torneio '{info['nome']}' de {membro}.")
+
+
+async def _apagar_cargo(bot: commands.Bot, info: dict):
+    """Apaga o cargo do torneio inteiro (usado quando o campeonato acaba/é apagado)."""
+    guild = bot.get_guild(info.get("guild_id"))
+    role_id = info.get("role_id")
+    if guild is None or role_id is None:
+        return
+    role = guild.get_role(role_id)
+    if role is not None:
+        try:
+            await role.delete(reason=f"Campeonato '{info['nome']}' encerrado")
+        except discord.Forbidden:
+            print(f"[CAMPEONATO] ⚠️ Sem permissão pra apagar o cargo do torneio '{info['nome']}'.")
+
+
 async def _atualizar_lista(bot: commands.Bot, chave: str):
     dados = ler_campeonatos()
     info = dados.get(chave)
@@ -134,6 +182,7 @@ class PaisModal(discord.ui.Modal, title="Inscrição no Torneio"):
         info["inscritos"][str(interaction.user.id)] = {"pais": str(self.pais)}
         salvar_campeonatos(dados)
         await _atualizar_lista(self.bot, self.chave)
+        await _dar_cargo(self.bot, info, interaction.user.id)
         await interaction.response.send_message(
             f"✅ Inscrição confirmada no campeonato **{info['nome']}**!", ephemeral=True
         )
@@ -201,6 +250,7 @@ async def _apagar_campeonato(bot: commands.Bot, chave: str):
                 await msg.delete()
             except discord.NotFound:
                 pass
+    await _apagar_cargo(bot, info)
     del dados[chave]
     salvar_campeonatos(dados)
 
@@ -233,6 +283,26 @@ async def _autocomplete_campeonato(interaction: discord.Interaction, current: st
 class Campeonato(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.verificar_cargos_torneio.start()
+
+    def cog_unload(self):
+        self.verificar_cargos_torneio.cancel()
+
+    # ── A cada 10 min, confere se todo mundo inscrito ainda tem o cargo do
+    # torneio dele — se por algum motivo sumiu (ex: alguém removeu na mão,
+    # bot caiu no meio da inscrição), devolve o cargo automaticamente.
+    @tasks.loop(minutes=10)
+    async def verificar_cargos_torneio(self):
+        dados = ler_campeonatos()
+        for info in dados.values():
+            if info.get("role_id") is None or info.get("guild_id") is None:
+                continue
+            for uid_str in info.get("inscritos", {}).keys():
+                await _dar_cargo(self.bot, info, int(uid_str))
+
+    @verificar_cargos_torneio.before_loop
+    async def antes_verificar_cargos_torneio(self):
+        await self.bot.wait_until_ready()
 
     # ── /criar-campeonato ────────────────────────────────────────────────────
     @app_commands.command(name="criar-campeonato", description="Cria o anúncio de um campeonato com botão de inscrição.")
@@ -269,10 +339,25 @@ class Campeonato(commands.Cog):
             "tipo": tipo.value,
             "organizador": organizador,
             "canal_id": interaction.channel_id,
+            "guild_id": interaction.guild_id,
             "message_id": None,
             "lista_message_id": None,
+            "role_id": None,
             "inscritos": {},
         }
+
+        # Cargo exclusivo do torneio: só enfeite, sem permissão nenhuma,
+        # pra facilitar marcar todo mundo inscrito de uma vez depois
+        try:
+            role = await interaction.guild.create_role(
+                name=f"🏆 {nome}",
+                permissions=discord.Permissions.none(),
+                mentionable=True,
+                reason=f"Cargo do campeonato '{nome}'",
+            )
+            info["role_id"] = role.id
+        except discord.Forbidden:
+            print(f"[CAMPEONATO] ⚠️ Sem permissão pra criar o cargo do torneio '{nome}'.")
 
         # Responde só pra você, de forma discreta — o anúncio de verdade vai
         # como mensagem própria do bot, sem aparecer como resposta ao seu comando
@@ -327,15 +412,19 @@ class Campeonato(commands.Cog):
 
         inscritos_agora = []
         ja_estavam = []
+        ids_novos = []
         for membro in membros:
             if str(membro.id) in info["inscritos"]:
                 ja_estavam.append(membro.display_name)
             else:
                 info["inscritos"][str(membro.id)] = {"pais": "—"}
                 inscritos_agora.append(membro.display_name)
+                ids_novos.append(membro.id)
 
         salvar_campeonatos(dados)
         await _atualizar_lista(self.bot, chave)
+        for membro_id in ids_novos:
+            await _dar_cargo(self.bot, info, membro_id)
 
         partes = []
         if inscritos_agora:
@@ -402,6 +491,7 @@ class Campeonato(commands.Cog):
         del info["inscritos"][str(membro.id)]
         salvar_campeonatos(dados)
         await _atualizar_lista(self.bot, chave)
+        await _remover_cargo(self.bot, info, membro.id)
 
         await ctx.send(f"✅ **{membro.display_name}** foi removido de **{info['nome']}**.", delete_after=8)
 

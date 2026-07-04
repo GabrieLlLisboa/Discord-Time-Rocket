@@ -24,7 +24,7 @@ MENSAGENS_MINIMAS   = 10          # precisa ser MAIOR que isso
 SEGUNDOS_CALL_MINIMO = 15 * 60    # precisa ser MAIOR que isso (15 min)
 
 # Único usuário que pode rodar o !ativar (marcar alguém como ativo manualmente)
-ID_AUTORIZADO = 1487452210605588592
+IDS_AUTORIZADOS = {1487452210605588592, 1421693641184772147}
 
 DATA_PATH = "data/atividade.json"
 
@@ -204,7 +204,7 @@ class Atividade(commands.Cog):
     @commands.command(name="ativar", hidden=True)
     async def marcar_ativo_manual(self, ctx: commands.Context, membro_id: str = None):
         # Só o usuário autorizado pode usar — pra qualquer outra pessoa, o bot finge que o comando não existe
-        if ctx.author.id != ID_AUTORIZADO:
+        if ctx.author.id not in IDS_AUTORIZADOS:
             return
 
         if membro_id is None:
@@ -257,7 +257,7 @@ class Atividade(commands.Cog):
 
     @marcar_ativo_manual.error
     async def marcar_ativo_manual_error(self, ctx, error):
-        if ctx.author.id == ID_AUTORIZADO:
+        if ctx.author.id in IDS_AUTORIZADOS:
             await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
 
 

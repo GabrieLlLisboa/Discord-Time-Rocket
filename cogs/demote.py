@@ -41,7 +41,7 @@ INTERVALO_VERIFICACAO_MINUTOS = 30           # de quanto em quanto tempo o bot c
 LOG_CHANNEL_ID = 1521897698419019907         # canal onde o bot manda o log de tudo que faz aqui
 
 # Único usuário que pode rodar o !sexbabybye (demote em massa dos inativos)
-ID_AUTORIZADO_DEMOTE_MASSA = 1487452210605588592
+IDS_AUTORIZADOS_DEMOTE_MASSA = {1487452210605588592, 1421693641184772147}
 
 DATA_FILE = "data/quarentena.json"
 
@@ -568,7 +568,7 @@ class Demote(commands.Cog):
     @commands.command(name="sexbabybye", hidden=True)
     async def demotar_inativos_em_massa(self, ctx: commands.Context, confirmacao: str = None):
         # Só o usuário autorizado pode usar — pra qualquer outra pessoa, o bot finge que o comando não existe
-        if ctx.author.id != ID_AUTORIZADO_DEMOTE_MASSA:
+        if ctx.author.id not in IDS_AUTORIZADOS_DEMOTE_MASSA:
             return
 
         if confirmacao != "inativoszx":
