@@ -260,6 +260,63 @@ class Atividade(commands.Cog):
         if ctx.author.id in IDS_AUTORIZADOS:
             await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
 
+    # ── !listar-inativos — lista quem ainda não bateu a meta de atividade ────
+    @commands.command(name="listar-inativos", hidden=True)
+    async def listar_inativos(self, ctx: commands.Context):
+        # Só o usuário autorizado pode usar — pra qualquer outra pessoa, o bot finge que o comando não existe
+        if ctx.author.id not in IDS_AUTORIZADOS:
+            return
+
+        inativos = []
+        for membro in ctx.guild.members:
+            if membro.bot:
+                continue
+            registro = self.dados.get(str(membro.id))
+            if registro is None or not registro.get("anunciado", False):
+                inativos.append(membro)
+
+        if not inativos:
+            await ctx.send("✅ Ninguém inativo no momento — todo mundo já bateu a meta!")
+            return
+
+        inativos.sort(key=lambda m: m.display_name.lower())
+
+        linhas = []
+        for membro in inativos:
+            registro = self.dados.get(str(membro.id), {"mensagens": 0, "voz_segundos": 0})
+            minutos_call = int(registro.get("voz_segundos", 0) // 60)
+            linhas.append(
+                f"{membro.mention} — 💬 {registro.get('mensagens', 0)} msgs • 🎙️ {minutos_call} min"
+            )
+
+        # Quebra em blocos pra não estourar o limite de 1024 caracteres por campo
+        BLOCO = 15
+        blocos = [linhas[i:i + BLOCO] for i in range(0, len(linhas), BLOCO)]
+
+        embed = discord.Embed(
+            title="📋 Membros inativos",
+            description=f"Total: **{len(inativos)}** membro(s) que ainda não bateram a meta.",
+            color=0xED4245,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_footer(text=f"Período: {INICIO_PERIODO.strftime('%d/%m/%Y')} até {FIM_PERIODO.strftime('%d/%m/%Y')}")
+
+        for idx, bloco in enumerate(blocos, start=1):
+            nome_campo = "Inativos" if len(blocos) == 1 else f"Inativos ({idx}/{len(blocos)})"
+            embed.add_field(name=nome_campo, value="\n".join(bloco), inline=False)
+
+            # Limite de 25 campos por embed — se passar disso, manda e abre um novo embed
+            if len(embed.fields) == 25 and idx != len(blocos):
+                await ctx.send(embed=embed)
+                embed = discord.Embed(color=0xED4245)
+
+        await ctx.send(embed=embed)
+
+    @listar_inativos.error
+    async def listar_inativos_error(self, ctx, error):
+        if ctx.author.id in IDS_AUTORIZADOS:
+            await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Atividade(bot))
