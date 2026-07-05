@@ -96,8 +96,9 @@ async def registrar_views_persistentes():
         from cogs.campeonato import EntrarTorneioView, ler_campeonatos
         campeonatos = ler_campeonatos()
         count = 0
-        for chave in campeonatos.keys():
-            bot.add_view(EntrarTorneioView(chave))
+        for chave, info in campeonatos.items():
+            fechado = not info.get("inscricoes_abertas", True)
+            bot.add_view(EntrarTorneioView(chave, fechado=fechado))
             count += 1
         if count:
             print(f"[VIEWS] ✅ {count} view(s) de campeonato(s) recarregada(s).")

@@ -206,10 +206,14 @@ class ConfirmarRankView(discord.ui.View):
 
 # ── View fixa no anúncio do campeonato (persistente, sobrevive a restart) ───
 class EntrarTorneioView(discord.ui.View):
-    def __init__(self, chave: str):
+    def __init__(self, chave: str, fechado: bool = False):
         super().__init__(timeout=None)
         self.chave = chave
         self.entrar.custom_id = f"campeonato_entrar:{chave}"
+        if fechado:
+            self.entrar.label = "🔒 Inscrições fechadas"
+            self.entrar.style = discord.ButtonStyle.secondary
+            self.entrar.disabled = True
 
     @discord.ui.button(label="🎮 Entrar no Torneio", style=discord.ButtonStyle.primary)
     async def entrar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -218,6 +222,9 @@ class EntrarTorneioView(discord.ui.View):
         info = dados.get(self.chave)
         if info is None:
             await interaction.response.send_message("❌ Esse campeonato não existe mais.", ephemeral=True)
+            return
+        if not info.get("inscricoes_abertas", True):
+            await interaction.response.send_message("🔒 As inscrições desse campeonato estão fechadas no momento.", ephemeral=True)
             return
         if str(interaction.user.id) in info["inscritos"]:
             await interaction.response.send_message("⚠️ Você já está inscrito nesse campeonato.", ephemeral=True)
@@ -233,6 +240,23 @@ class EntrarTorneioView(discord.ui.View):
                 view=ConfirmarRankView(self.chave, bot),
                 ephemeral=True,
             )
+
+
+async def _atualizar_botao_inscricao(bot: commands.Bot, chave: str, fechado: bool):
+    """Reedita a mensagem de anúncio pra trocar o botão de Entrar no Torneio
+    pro estado de aberto/fechado (mantém tudo mais igual)."""
+    dados = ler_campeonatos()
+    info = dados.get(chave)
+    if info is None or info.get("canal_id") is None or info.get("message_id") is None:
+        return
+    canal = bot.get_channel(info["canal_id"])
+    if canal is None:
+        return
+    try:
+        msg = await canal.fetch_message(info["message_id"])
+        await msg.edit(view=EntrarTorneioView(chave, fechado=fechado))
+    except discord.NotFound:
+        pass
 
 
 async def _apagar_campeonato(bot: commands.Bot, chave: str):
@@ -344,6 +368,7 @@ class Campeonato(commands.Cog):
             "lista_message_id": None,
             "role_id": None,
             "inscritos": {},
+            "inscricoes_abertas": True,
         }
 
         # Cargo exclusivo do torneio: só enfeite, sem permissão nenhuma,
@@ -464,6 +489,64 @@ class Campeonato(commands.Cog):
 
     @deletar_torneio.error
     async def deletar_torneio_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Só **Administradores** podem usar este comando.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
+
+    # ── /fechar-inscricoes ───────────────────────────────────────────────────
+    @app_commands.command(name="fechar-inscricoes", description="Fecha as inscrições de um campeonato (o botão fica travado).")
+    @app_commands.describe(campeonato="Qual campeonato fechar")
+    @app_commands.autocomplete(campeonato=_autocomplete_campeonato)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def fechar_inscricoes(self, interaction: discord.Interaction, campeonato: str):
+        chave = _chave(campeonato)
+        dados = ler_campeonatos()
+        info = dados.get(chave)
+        if info is None:
+            await interaction.response.send_message(f"❌ Não encontrei nenhum campeonato chamado **{campeonato}**.", ephemeral=True)
+            return
+
+        if not info.get("inscricoes_abertas", True):
+            await interaction.response.send_message(f"⚠️ As inscrições de **{info['nome']}** já estavam fechadas.", ephemeral=True)
+            return
+
+        info["inscricoes_abertas"] = False
+        salvar_campeonatos(dados)
+        await _atualizar_botao_inscricao(self.bot, chave, fechado=True)
+        await interaction.response.send_message(f"🔒 Inscrições de **{info['nome']}** fechadas.", ephemeral=True)
+
+    @fechar_inscricoes.error
+    async def fechar_inscricoes_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Só **Administradores** podem usar este comando.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
+
+    # ── /abrir-inscricoes ────────────────────────────────────────────────────
+    @app_commands.command(name="abrir-inscricoes", description="Reabre as inscrições de um campeonato.")
+    @app_commands.describe(campeonato="Qual campeonato reabrir")
+    @app_commands.autocomplete(campeonato=_autocomplete_campeonato)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def abrir_inscricoes(self, interaction: discord.Interaction, campeonato: str):
+        chave = _chave(campeonato)
+        dados = ler_campeonatos()
+        info = dados.get(chave)
+        if info is None:
+            await interaction.response.send_message(f"❌ Não encontrei nenhum campeonato chamado **{campeonato}**.", ephemeral=True)
+            return
+
+        if info.get("inscricoes_abertas", True):
+            await interaction.response.send_message(f"⚠️ As inscrições de **{info['nome']}** já estavam abertas.", ephemeral=True)
+            return
+
+        info["inscricoes_abertas"] = True
+        salvar_campeonatos(dados)
+        await _atualizar_botao_inscricao(self.bot, chave, fechado=False)
+        await interaction.response.send_message(f"✅ Inscrições de **{info['nome']}** reabertas.", ephemeral=True)
+
+    @abrir_inscricoes.error
+    async def abrir_inscricoes_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.MissingPermissions):
             await interaction.response.send_message("❌ Só **Administradores** podem usar este comando.", ephemeral=True)
         else:
