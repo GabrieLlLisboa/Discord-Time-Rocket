@@ -182,6 +182,28 @@ class Logs(commands.Cog):
     async def on_message_delete(self, message: discord.Message):
         if message.guild is None:
             return
+
+        # ── Alguém tentou apagar uma mensagem de log? Denuncia e reenvia ────
+        if message.channel.id == LOG_CHANNEL_ID and message.author.id == self.bot.user.id:
+            executor, _ = await self._executor(message.guild, discord.AuditLogAction.message_delete, target_id=message.author.id)
+            aviso = (
+                f"🚨 {executor.mention} tentou apagar uma log!"
+                if executor else
+                "🚨 Alguém tentou apagar uma log, mas não consegui identificar quem "
+                "(dá uma olhada se o bot tem permissão de **Ver Registro de Auditoria**)."
+            )
+            try:
+                await message.channel.send(aviso)
+            except discord.Forbidden:
+                print("[LOGS] ⚠️ Sem permissão pra avisar sobre tentativa de apagar log.")
+
+            if message.embeds:
+                try:
+                    await message.channel.send(embed=message.embeds[0])
+                except discord.Forbidden:
+                    print("[LOGS] ⚠️ Sem permissão pra reenviar a log apagada.")
+            return  # não precisa cair no log genérico de "mensagem apagada" abaixo
+
         conteudo = message.content or "*(sem texto — anexo, embed ou imagem)*"
 
         # Tenta descobrir se foi um moderador quem apagou (senão, foi o próprio autor).
@@ -209,6 +231,26 @@ class Logs(commands.Cog):
         if not messages or messages[0].guild is None:
             return
         canal = messages[0].channel
+
+        # ── Apagaram um monte de logs de uma vez? Denuncia e reenvia tudo ───
+        if canal.id == LOG_CHANNEL_ID:
+            logs_do_bot = [m for m in messages if m.author.id == self.bot.user.id and m.embeds]
+            if logs_do_bot:
+                executor, _ = await self._executor(messages[0].guild, discord.AuditLogAction.message_bulk_delete, target_id=canal.id)
+                aviso = (
+                    f"🚨 {executor.mention} tentou apagar **{len(logs_do_bot)}** log(s) de uma vez!"
+                    if executor else
+                    f"🚨 Alguém tentou apagar **{len(logs_do_bot)}** log(s) de uma vez, mas não consegui "
+                    "identificar quem (dá uma olhada se o bot tem permissão de **Ver Registro de Auditoria**)."
+                )
+                try:
+                    await canal.send(aviso)
+                    for m in sorted(logs_do_bot, key=lambda x: x.created_at):
+                        await canal.send(embed=m.embeds[0])
+                except discord.Forbidden:
+                    print("[LOGS] ⚠️ Sem permissão pra avisar/reenviar logs apagadas em massa.")
+                return  # não precisa do log genérico de "apagadas em massa" abaixo
+
         executor, _ = await self._executor(messages[0].guild, discord.AuditLogAction.message_bulk_delete, target_id=canal.id)
         await self.log(
             title="🧹 Mensagens apagadas em massa",
