@@ -123,6 +123,31 @@ class Atividade(commands.Cog):
         await self._checar_e_anunciar(message.author)
 
     # ── Voz ──────────────────────────────────────────────────────────────────
+    # Regra: só conta tempo de call se a pessoa estiver acompanhada por pelo
+    # menos +1 humano no canal. Se ficar sozinha, o cronômetro dela para (mas
+    # não é perdido: quando alguém entra de novo no canal, volta a contar).
+    async def _atualizar_canal(self, canal: discord.VoiceChannel, agora: datetime):
+        humanos = [m for m in canal.members if not m.bot]
+        acompanhado = len(humanos) >= 2
+        mudou = False
+
+        for m in humanos:
+            if acompanhado and m.id not in self.voz_entrada:
+                if _periodo_ativo():
+                    self.voz_entrada[m.id] = agora
+            elif not acompanhado and m.id in self.voz_entrada:
+                entrada = self.voz_entrada.pop(m.id)
+                if _periodo_ativo():
+                    decorrido = (agora - entrada).total_seconds()
+                    registro = self._registro(m.id)
+                    registro["voz_segundos"] += max(decorrido, 0)
+                    mudou = True
+
+        if mudou:
+            _salvar(self.dados)
+        for m in humanos:
+            await self._checar_e_anunciar(m)
+
     @commands.Cog.listener()
     async def on_voice_state_update(self, membro: discord.Member, antes: discord.VoiceState, depois: discord.VoiceState):
         if membro.bot:
@@ -131,13 +156,14 @@ class Atividade(commands.Cog):
         agora = datetime.now(timezone.utc)
         canal_afk = membro.guild.afk_channel
 
-        entrou_em_call = depois.channel is not None and depois.channel != canal_afk
-        saiu_da_call = antes.channel is not None and antes.channel != canal_afk and (
-            depois.channel is None or depois.channel == canal_afk
-        )
+        antes_canal = antes.channel if (antes.channel is not None and antes.channel != canal_afk) else None
+        depois_canal = depois.channel if (depois.channel is not None and depois.channel != canal_afk) else None
 
-        # Encerrou tempo em call (saiu ou foi pro canal AFK) → soma o tempo
-        if saiu_da_call and membro.id in self.voz_entrada:
+        if antes_canal == depois_canal:
+            return  # só mudou mute/deaf/etc — não trocou de canal, nada a recalcular
+
+        # Encerra a sessão de contagem do próprio membro (se estava rodando)
+        if membro.id in self.voz_entrada:
             entrada = self.voz_entrada.pop(membro.id)
             if _periodo_ativo():
                 decorrido = (agora - entrada).total_seconds()
@@ -145,12 +171,15 @@ class Atividade(commands.Cog):
                 registro["voz_segundos"] += max(decorrido, 0)
                 _salvar(self.dados)
                 await self._checar_e_anunciar(membro)
-            return
 
-        # Entrou em call agora (vindo de fora ou do AFK) → começa a contar
-        if entrou_em_call and membro.id not in self.voz_entrada:
-            if _periodo_ativo():
-                self.voz_entrada[membro.id] = agora
+        # Reavalia o canal antigo — quem ficou lá pode ter sobrado sozinho agora
+        if antes_canal is not None:
+            await self._atualizar_canal(antes_canal, agora)
+
+        # Reavalia o canal novo — o próprio membro entra na contagem se tiver
+        # companhia, e quem já estava lá sozinho passa a contar também
+        if depois_canal is not None:
+            await self._atualizar_canal(depois_canal, agora)
 
     # ── Ao iniciar o bot: retoma contagem de quem já está em call ───────────────
     @commands.Cog.listener()
@@ -163,9 +192,7 @@ class Atividade(commands.Cog):
             for canal in guild.voice_channels:
                 if canal == canal_afk:
                     continue
-                for membro in canal.members:
-                    if not membro.bot and membro.id not in self.voz_entrada:
-                        self.voz_entrada[membro.id] = agora
+                await self._atualizar_canal(canal, agora)
         print("[ATIVIDADE] ✅ Rastreador de atividade pronto.")
 
     # ── Encerra a contagem de call pendente quando o período acabar ────────────
@@ -275,8 +302,12 @@ class Atividade(commands.Cog):
             if registro is None or not registro.get("anunciado", False):
                 inativos.append(membro)
 
+        total_membros = sum(1 for m in ctx.guild.members if not m.bot)
+        percentual = (len(inativos) / total_membros * 100) if total_membros else 0
+
         if not inativos:
             await ctx.send("✅ Ninguém inativo no momento — todo mundo já bateu a meta!")
+            await ctx.send(f"**0** inativos\nIsso representa **0%** dos membros.")
             return
 
         inativos.sort(key=lambda m: m.display_name.lower())
@@ -311,6 +342,7 @@ class Atividade(commands.Cog):
                 embed = discord.Embed(color=0xED4245)
 
         await ctx.send(embed=embed)
+        await ctx.send(f"**{len(inativos)}** inativos\nIsso representa **{percentual:.1f}%** dos membros.")
 
     @listar_inativos.error
     async def listar_inativos_error(self, ctx, error):
