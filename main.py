@@ -31,6 +31,7 @@ COGS = [
     "cogs.atividade",
     "cogs.campeonato",
     "cogs.logs",
+    "cogs.convites",
 ]
 
 async def load_cogs():
