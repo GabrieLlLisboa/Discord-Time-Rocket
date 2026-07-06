@@ -4,6 +4,11 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 
+from cogs.players import CARGOS as _CARGOS_JOGADORES
+
+RANKS_ORDENADOS = [c for c in _CARGOS_JOGADORES if c["secao"] == "rank"]
+RANK_IDS_SET = {c["id"] for c in RANKS_ORDENADOS}
+
 # ─────────────────────────────────────────────
 #  Cog: Rastreador de Atividade
 #  Arquivo: cogs/atividade.py
@@ -312,6 +317,28 @@ class Atividade(commands.Cog):
 
         inativos.sort(key=lambda m: m.display_name.lower())
 
+        # ── Top dos ranks com mais gente inativa ────────────────────────────
+        contagem_por_rank = {c["id"]: 0 for c in RANKS_ORDENADOS}
+        sem_rank = 0
+        for membro in inativos:
+            rank_id = next((r.id for r in membro.roles if r.id in RANK_IDS_SET), None)
+            if rank_id is not None:
+                contagem_por_rank[rank_id] += 1
+            else:
+                sem_rank += 1
+
+        top_ranks = [
+            (c, contagem_por_rank[c["id"]]) for c in RANKS_ORDENADOS if contagem_por_rank[c["id"]] > 0
+        ]
+        top_ranks.sort(key=lambda par: par[1], reverse=True)
+        if sem_rank > 0:
+            top_ranks.append(({"nome": "Sem rank", "emoji": "❔"}, sem_rank))
+
+        linhas_top = [
+            f"**{i+1}.** {c['emoji']} {c['nome']} — **{qtd}** inativo(s)"
+            for i, (c, qtd) in enumerate(top_ranks)
+        ]
+
         linhas = []
         for membro in inativos:
             registro = self.dados.get(str(membro.id), {"mensagens": 0, "voz_segundos": 0})
@@ -331,6 +358,9 @@ class Atividade(commands.Cog):
             timestamp=datetime.now(timezone.utc),
         )
         embed.set_footer(text=f"Período: {INICIO_PERIODO.strftime('%d/%m/%Y')} até {FIM_PERIODO.strftime('%d/%m/%Y')}")
+
+        if linhas_top:
+            embed.add_field(name="🏆 Top ranks com mais inativos", value="\n".join(linhas_top), inline=False)
 
         for idx, bloco in enumerate(blocos, start=1):
             nome_campo = "Inativos" if len(blocos) == 1 else f"Inativos ({idx}/{len(blocos)})"
