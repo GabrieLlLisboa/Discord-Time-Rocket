@@ -55,15 +55,21 @@ CARGO_SEM_ACESSO_ID = 1521890714873757707
 # Cargos de staff — quem tiver qualquer um desses, recebe automaticamente
 # o cargo de "tag" de staff abaixo (isso é feito em cogs/staff_tag.py).
 STAFF_ROLE_IDS = {c["id"] for c in PLAYER_CARGOS if c["secao"] == "staff"} | {
-    1511894837790769204,  # Sub-Dono  (⚠️ mesmo ID do cargo "Administrador" — confere se não é engano)
+    1511894837790769204,  # Sub-Dono
     1523835085475020932,  # Diretor
     1523835045872275566,  # Gerente
     1523835010795176027,  # Moderador
     1523833330175442954,  # Suporte
 }
 
-# Cargos que sempre podem ver os canais de whitelist (além do próprio membro)
-CARGOS_QUE_VEEM_WHITELIST = STAFF_ROLE_IDS
+# Cargos que podem ver os canais de whitelist (além do próprio membro).
+# Só estes 3 — os demais cargos de staff (Gerente, Moderador, Suporte etc.)
+# não têm acesso aos canais de whitelist.
+CARGOS_QUE_VEEM_WHITELIST = {
+    1511895253777649704,  # Dono do Clube
+    1511894837790769204,  # Sub-Dono
+    1523835085475020932,  # Diretor
+}
 
 RANK_IDS = set(CARGO_RANKS.values())
 

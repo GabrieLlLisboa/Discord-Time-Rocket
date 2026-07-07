@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 # ───────────────── CONFIGURAÇÕES (preencha os IDs do seu servidor) ─────────────────
 STAFF_ROLE_IDS = [
     1511895253777649704,   # Dono do Clube
-    1511894837790769204,   # Administrador
+    1511894837790769204,   # Sub-Dono
 ]                                             # cargos que enxergam os canais de quarentena
 
 MEMBRO_ROLE_ID = 0                           # não há cargo de "Membro" no servidor — deixado em 0,

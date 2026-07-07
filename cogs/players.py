@@ -10,10 +10,9 @@ JOGADORES_CHANNEL_ID = 1514775408124367149
 
 CARGOS = [
     {"nome": "Dono do Clube",      "id": 1511895253777649704, "emoji": "👑", "secao": "staff"},
-    {"nome": "Sub-Dono",           "id": 1511894837790769204, "emoji": "🥈", "secao": "staff"},  # ⚠️ mesmo ID do cargo "Administrador" logo abaixo — confirma se não é engano
+    {"nome": "Sub-Dono",           "id": 1511894837790769204, "emoji": "🥈", "secao": "staff"},
     {"nome": "Diretor",            "id": 1523835085475020932, "emoji": "🎖️", "secao": "staff"},
     {"nome": "Gerente",            "id": 1523835045872275566, "emoji": "🗂️", "secao": "staff"},
-    {"nome": "Administrador",      "id": 1511894837790769204, "emoji": "🛡️", "secao": "staff"},
     {"nome": "Moderador",          "id": 1523835010795176027, "emoji": "🔨", "secao": "staff"},
     {"nome": "Suporte",            "id": 1523833330175442954, "emoji": "🎧", "secao": "staff"},
     {"nome": "Coach",              "id": 1513356584946896946, "emoji": "📋", "secao": "staff"},
