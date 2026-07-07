@@ -87,7 +87,7 @@ class EnqueteModal(discord.ui.Modal, title="📊 Nova Enquete"):
         placeholder="Sim\nNão\nTalvez",
     )
     mencionar = discord.ui.TextInput(
-        label="Mencionar cargo? (nome do cargo, 'todos' ou 'não')",
+        label="Mencionar cargo? (nome ou 'não')",
         placeholder="Ex: Membro / todos / não",
         required=False,
         max_length=100,
