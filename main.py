@@ -32,6 +32,8 @@ COGS = [
     "cogs.campeonato",
     "cogs.logs",
     "cogs.convites",
+    "cogs.whitelist",
+    "cogs.staff_tag",
 ]
 
 async def load_cogs():
@@ -53,6 +55,7 @@ async def registrar_views_persistentes():
     from cogs.friendly import ConfirmarPresencaView, SairAmistosoView
     from cogs.tracker import TrackerView
     from cogs.welcome import BoasVindasView, RegistrarRankView
+    from cogs.whitelist import ComecarWhitelistView, FinalizarWhitelistView
 
     # Views sem estado (não precisam de argumentos)
     bot.add_view(TicketSetupView())
@@ -61,6 +64,8 @@ async def registrar_views_persistentes():
     bot.add_view(TrackerView())
     bot.add_view(BoasVindasView())
     bot.add_view(RegistrarRankView())
+    bot.add_view(ComecarWhitelistView())
+    bot.add_view(FinalizarWhitelistView())
 
     # ConfirmarPresencaView precisa de rank_alvo, rank_id e canal_id
     # Recria a partir dos amistosos salvos no JSON
