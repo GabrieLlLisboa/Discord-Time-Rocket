@@ -147,12 +147,12 @@ class GraficoJogadores(commands.Cog):
             title=TITULO_EMBED,
             description=(
                 f"**{total}** jogador(es) entraram nos últimos 7 dias.\n"
-                f"**{ativos}** já bateram a meta de atividade — **{pct:.0f}%** dos novatos."
+                f"**{ativos}** já são considerados ativos — **{pct:.0f}%** dos novatos."
             ),
             color=0xD4A843,
         )
         embed.set_image(url="attachment://grafico_jogadores.png")
-        embed.set_footer(text="Atualiza a cada 15 min  •  Ativo = mais de 10 msgs ou mais de 15 min em call")
+        embed.set_footer(text="Atualiza a cada 15 min")
         embed.timestamp = discord.utils.utcnow()
 
         if self.message_id:
