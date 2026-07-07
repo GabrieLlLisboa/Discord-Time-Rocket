@@ -65,18 +65,10 @@ class RegistrarRankView(discord.ui.View):
 
 
 class BoasVindasView(discord.ui.View):
-    """Botões de dicas + o de registrar rank, que abre o menu de seleção."""
+    """Botões de dicas do servidor (o rank agora é definido no fluxo de whitelist)."""
 
     def __init__(self):
         super().__init__(timeout=None)
-
-    @discord.ui.button(label="🎮 Registrar meu Rank", style=discord.ButtonStyle.primary, custom_id="boasvindas_rank")
-    async def registrar_rank(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "🎮 Escolha o rank que você faz atualmente no Rocket League:",
-            view=RegistrarRankView(),
-            ephemeral=True,
-        )
 
     @discord.ui.button(label="📜 Como funciona aqui", style=discord.ButtonStyle.secondary, custom_id="boasvindas_como_funciona")
     async def como_funciona(self, interaction: discord.Interaction, button: discord.ui.Button):

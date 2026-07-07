@@ -54,7 +54,7 @@ async def registrar_views_persistentes():
     from cogs.notifications import NotificacaoView
     from cogs.friendly import ConfirmarPresencaView, SairAmistosoView
     from cogs.tracker import TrackerView
-    from cogs.welcome import BoasVindasView, RegistrarRankView
+    from cogs.welcome import BoasVindasView
     from cogs.whitelist import ComecarWhitelistView, FinalizarWhitelistView
 
     # Views sem estado (não precisam de argumentos)
@@ -63,7 +63,6 @@ async def registrar_views_persistentes():
     bot.add_view(SairAmistosoView())
     bot.add_view(TrackerView())
     bot.add_view(BoasVindasView())
-    bot.add_view(RegistrarRankView())
     bot.add_view(ComecarWhitelistView())
     bot.add_view(FinalizarWhitelistView())
 

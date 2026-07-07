@@ -29,9 +29,14 @@ NOME_CATEGORIA_WHITELIST = "🔒 Whitelist"
 # 0 = desativado. Me passa o ID que eu preencho aqui.
 CANAL_LOG_WHITELIST_ID = 1521897698419019907
 
-# Cargo dado a todo mundo que termina a whitelist (vira "membro da equipe").
-# Cargo normal — não está ligado a nenhuma checagem de comando admin do bot.
+# Cargo "membro da equipe" — NÃO é dado automaticamente no fim da whitelist
+# (deixado aqui só de referência, caso você use em outro lugar).
 CARGO_MEMBRO_ID = 1523830313141272586
+
+# Cargo que a pessoa recebe assim que entra no servidor — é ele que bloqueia
+# a visão de todos os canais (configurado nas permissões dos canais como
+# "negar" pra esse cargo). É removido automaticamente quando termina a whitelist.
+CARGO_SEM_ACESSO_ID = 1521890714873757707
 
 # Cargos de staff — quem tiver qualquer um desses, recebe automaticamente
 # o cargo de "tag" de staff abaixo (isso é feito em cogs/staff_tag.py).
@@ -216,6 +221,14 @@ class Whitelist(commands.Cog):
 
     async def criar_canal_whitelist(self, member: discord.Member) -> discord.TextChannel:
         guild = member.guild
+
+        cargo_sem_acesso = guild.get_role(CARGO_SEM_ACESSO_ID)
+        if cargo_sem_acesso and cargo_sem_acesso not in member.roles:
+            try:
+                await member.add_roles(cargo_sem_acesso, reason="Entrou no servidor — aguardando whitelist")
+            except discord.Forbidden:
+                pass
+
         nome_canal = f"whitelist-{_slug(member.name)}"
 
         existente = discord.utils.get(guild.text_channels, name=nome_canal)
@@ -349,10 +362,10 @@ class Whitelist(commands.Cog):
             await interaction.response.send_message("⚠️ Não achei seus dados de whitelist. Chama a staff.", ephemeral=True)
             return
 
-        cargo_membro = guild.get_role(CARGO_MEMBRO_ID)
+        cargo_sem_acesso = guild.get_role(CARGO_SEM_ACESSO_ID)
         try:
-            if cargo_membro and cargo_membro not in membro.roles:
-                await membro.add_roles(cargo_membro, reason="Whitelist concluída")
+            if cargo_sem_acesso and cargo_sem_acesso in membro.roles:
+                await membro.remove_roles(cargo_sem_acesso, reason="Whitelist concluída — libera acesso")
         except discord.Forbidden:
             pass
 
