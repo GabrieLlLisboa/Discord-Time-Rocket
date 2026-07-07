@@ -4,14 +4,37 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-TOKEN  = os.getenv("DISCORD_TOKEN")
-PREFIX = os.getenv("PREFIX", "!")
+TOKEN    = os.getenv("DISCORD_TOKEN")
+PREFIX   = os.getenv("PREFIX", "!")
+GUILD_ID = os.getenv("GUILD_ID")  # opcional — se preencher, sincroniza slash commands na hora nesse servidor
 
 intents = discord.Intents.default()
 intents.members         = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+    import traceback
+
+    # Loga o erro completo no console (é aqui que dá pra ver a causa real)
+    print(f"[SLASH] ❌ Erro no comando '/{interaction.command.name if interaction.command else '?'}':")
+    traceback.print_exception(type(error), error, error.__traceback__)
+
+    mensagem = "❌ Deu erro ao executar esse comando. A staff já foi avisada (olha o console)."
+    if isinstance(error, discord.app_commands.MissingPermissions):
+        mensagem = "❌ Você não tem permissão pra usar esse comando."
+    elif isinstance(error, discord.app_commands.CommandOnCooldown):
+        mensagem = f"⏳ Calma, tenta de novo em {error.retry_after:.0f}s."
+
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(mensagem, ephemeral=True)
+        else:
+            await interaction.response.send_message(mensagem, ephemeral=True)
+    except discord.HTTPException:
+        pass
 
 COGS = [
     "cogs.welcome",
@@ -153,7 +176,13 @@ async def on_ready():
 
     try:
         synced = await bot.tree.sync()
-        print(f"[SLASH] ✅ {len(synced)} comando(s) sincronizado(s).")
+        print(f"[SLASH] ✅ {len(synced)} comando(s) global(is) sincronizado(s) (pode levar até 1h pra aparecer em todo lugar).")
+
+        if GUILD_ID:
+            guild_obj = discord.Object(id=int(GUILD_ID))
+            bot.tree.copy_global_to(guild=guild_obj)
+            synced_guild = await bot.tree.sync(guild=guild_obj)
+            print(f"[SLASH] ✅ {len(synced_guild)} comando(s) sincronizado(s) na hora no servidor {GUILD_ID}.")
     except Exception as e:
         print(f"[SLASH] ❌ Erro ao sincronizar: {e}")
 
