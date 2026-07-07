@@ -26,7 +26,7 @@ CARGO_RANKS = {c["nome"]: c["id"] for c in PLAYER_CARGOS if c["secao"] == "rank"
 CATEGORIA_WHITELIST_ID = 0
 NOME_CATEGORIA_WHITELIST = "🔒 Whitelist"
 
-# Canal onde fica o log de cada whitelist concluída (nick, rank, idade, etc).
+# Canal onde fica o log de cada whitelist concluída (nick, rank, plataforma, etc).
 # 0 = desativado. Me passa o ID que eu preencho aqui.
 CANAL_LOG_WHITELIST_ID = 1521897698419019907
 
@@ -443,12 +443,8 @@ class Whitelist(commands.Cog):
     # ── Envia a pergunta correspondente ao passo ────────────────────
     async def enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str):
         if step == "rank":
-            view = EscolhaView(self, "rank", list(CARGO_RANKS.keys()), "Escolha seu rank atual...", "idade")
+            view = EscolhaView(self, "rank", list(CARGO_RANKS.keys()), "Escolha seu rank atual...", "plataforma")
             await canal.send("🎮 **Qual o seu rank atual no Rocket League?**", view=view)
-
-        elif step == "idade":
-            view = EscolhaView(self, "idade", ["Menos de 13", "Maior que 13", "Maior que 18"], "Escolha sua idade...", "plataforma")
-            await canal.send("🎂 **Quantos anos você tem?**\n*(seja sincero, isso não muda quase nada)*", view=view)
 
         elif step == "plataforma":
             view = EscolhaView(self, "plataforma", PLATAFORMAS, "Escolha sua plataforma...", "peak_rank")
@@ -528,7 +524,6 @@ class Whitelist(commands.Cog):
                 embed.set_thumbnail(url=membro.display_avatar.url)
                 embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
                 embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
-                embed.add_field(name="Idade", value=r.get("idade", "—"), inline=True)
                 embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
                 embed.add_field(name="Maior rank", value=f"{r.get('peak_rank','—')} ({r.get('peak_div','—')})", inline=True)
                 embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
