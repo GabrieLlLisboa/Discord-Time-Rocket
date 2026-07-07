@@ -112,6 +112,21 @@ async def registrar_views_persistentes():
 
     print("[VIEWS] ✅ Views persistentes registradas.")
 
+    # Whitelists pendentes/em análise: recria os botões de revisão
+    try:
+        from cogs.whitelist import RevisaoWhitelistView
+        from cogs.backup import ler as ler_backup
+        whitelist_dados = ler_backup("whitelist")
+        count = 0
+        for uid_str, registro in whitelist_dados.items():
+            if registro.get("status") in ("pendente", "visualizada"):
+                bot.add_view(RevisaoWhitelistView(int(uid_str)))
+                count += 1
+        if count:
+            print(f"[VIEWS] ✅ {count} view(s) de revisão de whitelist recarregada(s).")
+    except Exception as e:
+        print(f"[VIEWS] ⚠️  Erro ao recarregar views de whitelist: {e}")
+
 @bot.event
 async def on_ready():
     print(f"\n{'─'*40}")
