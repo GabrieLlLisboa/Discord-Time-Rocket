@@ -1,7 +1,8 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import re
+import time
 
 from cogs.backup import ler, salvar
 from cogs.players import CARGOS as PLAYER_CARGOS
@@ -244,6 +245,37 @@ class Whitelist(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.dados = ler("whitelist")  # {user_id_str: {"respostas": {...}, "canal_id":..., "status":...}}
+        self.limpeza_canais.start()
+
+    def cog_unload(self):
+        self.limpeza_canais.cancel()
+
+    @tasks.loop(minutes=1)
+    async def limpeza_canais(self):
+        await self.bot.wait_until_ready()
+        agora = time.time()
+        mudou = False
+        for uid_str, registro in list(self.dados.items()):
+            if registro.get("status") != "aprovada" or registro.get("canal_apagado"):
+                continue
+            deletar_em = registro.get("deletar_em")
+            if not deletar_em or agora < deletar_em:
+                continue
+            canal_id = registro.get("canal_id")
+            canal = self.bot.get_channel(canal_id) if canal_id else None
+            if canal:
+                try:
+                    await canal.delete(reason="Whitelist aprovada — canal removido automaticamente após 10 minutos")
+                except discord.HTTPException:
+                    pass
+            registro["canal_apagado"] = True
+            mudou = True
+        if mudou:
+            salvar("whitelist", self.dados)
+
+    @limpeza_canais.before_loop
+    async def antes_limpeza(self):
+        await self.bot.wait_until_ready()
 
     # ── Persistência ─────────────────────────────────────────────
     def salvar_resposta(self, user_id: int, chave: str, valor: str):
@@ -539,8 +571,21 @@ class Whitelist(commands.Cog):
 
         await interaction.response.send_message(
             f"✅ **Whitelist aprovada por {interaction.user.mention}!** "
-            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🚀{aviso_rank}"
+            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🚀{aviso_rank}\n"
+            f"*(este canal vai ser apagado automaticamente em 10 minutos)*"
         )
+
+        # Tira a visão do canal de whitelist pro membro (ele não precisa mais dele)
+        if membro:
+            try:
+                await interaction.channel.set_permissions(membro, overwrite=None)
+            except discord.Forbidden:
+                pass
+
+        # Agenda a exclusão do canal em 10 minutos (sobrevive a restart do bot)
+        registro["deletar_em"] = time.time() + 600
+        registro["canal_apagado"] = False
+        salvar("whitelist", self.dados)
 
     # ── Admin recusa -> reinicia a whitelist da pessoa ───────────────
     async def recusar(self, interaction: discord.Interaction, membro_id: int):
