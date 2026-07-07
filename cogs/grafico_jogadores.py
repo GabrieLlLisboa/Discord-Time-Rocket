@@ -4,9 +4,13 @@ from datetime import datetime, timedelta, timezone
 import discord
 from discord.ext import commands, tasks
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_OK = True
+except ImportError:
+    MATPLOTLIB_OK = False
 
 from cogs.players import JOGADORES_CHANNEL_ID, _esta_oculto
 from cogs.atividade import _ler as ler_atividade, MENSAGENS_MINIMAS, SEGUNDOS_CALL_MINIMO
@@ -37,6 +41,8 @@ class GraficoJogadores(commands.Cog):
     @tasks.loop(minutes=15)
     async def atualizar_grafico(self):
         await self.bot.wait_until_ready()
+        if not MATPLOTLIB_OK:
+            return
         channel = self.bot.get_channel(JOGADORES_CHANNEL_ID)
         if channel is None:
             print(f"[GRAFICO] ⚠️  Canal {JOGADORES_CHANNEL_ID} não encontrado.")
@@ -173,6 +179,9 @@ class GraficoJogadores(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def forcar_atualizacao(self, ctx: commands.Context):
         await ctx.message.delete()
+        if not MATPLOTLIB_OK:
+            await ctx.send("❌ `matplotlib` não está instalado no servidor do bot. Rode `pip install matplotlib`.", delete_after=8)
+            return
         channel = self.bot.get_channel(JOGADORES_CHANNEL_ID)
         await self._editar_ou_criar(channel)
         await ctx.send("✅ Gráfico atualizado!", delete_after=4)
@@ -184,4 +193,6 @@ class GraficoJogadores(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
+    if not MATPLOTLIB_OK:
+        print("[GRAFICO] ❌ matplotlib não está instalado — rode `pip install matplotlib` (ou `pip install -r requirements.txt`). O gráfico de novatos não vai funcionar até isso ser resolvido.")
     await bot.add_cog(GraficoJogadores(bot))
