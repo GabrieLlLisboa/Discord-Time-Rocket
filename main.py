@@ -21,6 +21,7 @@ COGS = [
     "cogs.clear",
     "cogs.notifications",
     "cogs.players",
+    "cogs.grafico_jogadores",
     "cogs.friendly",
     "cogs.tiktok",
     "cogs.backup",
@@ -34,6 +35,7 @@ COGS = [
     "cogs.convites",
     "cogs.whitelist",
     "cogs.staff_tag",
+    "cogs.enquete",
 ]
 
 async def load_cogs():
@@ -126,6 +128,20 @@ async def registrar_views_persistentes():
             print(f"[VIEWS] ✅ {count} view(s) de revisão de whitelist recarregada(s).")
     except Exception as e:
         print(f"[VIEWS] ⚠️  Erro ao recarregar views de whitelist: {e}")
+
+    # Enquetes abertas: recria os botões de voto/encerrar
+    try:
+        from cogs.enquete import EnqueteView
+        from cogs.backup import ler as ler_backup
+        enquetes_dados = ler_backup("enquetes")
+        count = 0
+        for poll_id, registro in enquetes_dados.items():
+            bot.add_view(EnqueteView(poll_id, registro["opcoes"], aberta=registro.get("aberta", True)))
+            count += 1
+        if count:
+            print(f"[VIEWS] ✅ {count} enquete(s) recarregada(s).")
+    except Exception as e:
+        print(f"[VIEWS] ⚠️  Erro ao recarregar views de enquetes: {e}")
 
 @bot.event
 async def on_ready():

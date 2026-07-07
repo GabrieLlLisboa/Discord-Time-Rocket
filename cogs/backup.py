@@ -20,6 +20,7 @@ FILES = {
     "treinos":     "data/treinos.json",
     "demotados":   "data/demotados.json",
     "whitelist":   "data/whitelist.json",
+    "enquetes":    "data/enquetes.json",
 }
 
 os.makedirs(DATA_DIR, exist_ok=True)
