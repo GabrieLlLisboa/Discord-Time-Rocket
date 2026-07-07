@@ -137,9 +137,10 @@ class EscolhaSelect(discord.ui.Select):
         valor = self.values[0]
         self.cog.salvar_resposta(membro.id, self.step, valor)
 
-        # Passo especial: rank atual dá cargo na hora
         if self.step == "rank":
-            await self.cog.aplicar_rank(interaction, membro, valor)
+            await interaction.response.send_message(
+                f"✅ Rank registrado: **{valor}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
+            )
         else:
             await interaction.response.send_message(f"✅ Resposta registrada: **{valor}**")
 
@@ -386,23 +387,20 @@ class Whitelist(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    # ── Aplica o cargo de rank atual (remove outros ranks antes) ────
-    async def aplicar_rank(self, interaction: discord.Interaction, membro: discord.Member, rank_nome: str):
-        guild = interaction.guild
+    # ── Dá o cargo de rank (remove outros ranks antes) — só na aprovação ──
+    async def dar_cargo_rank(self, guild: discord.Guild, membro: discord.Member, rank_nome: str) -> str | None:
         cargo = guild.get_role(CARGO_RANKS.get(rank_nome, 0))
         if cargo is None:
-            await interaction.response.send_message("⚠️ Não achei o cargo desse rank, chama a staff.")
-            return
+            return f"⚠️ Não achei o cargo do rank **{rank_nome}**."
         cargos_rank_atuais = [r for r in membro.roles if r.id in RANK_IDS and r.id != cargo.id]
         try:
             if cargos_rank_atuais:
-                await membro.remove_roles(*cargos_rank_atuais, reason="Whitelist — troca de rank")
+                await membro.remove_roles(*cargos_rank_atuais, reason="Whitelist aprovada — troca de rank")
             if cargo not in membro.roles:
-                await membro.add_roles(cargo, reason="Whitelist — rank informado")
+                await membro.add_roles(cargo, reason="Whitelist aprovada — rank aplicado")
         except discord.Forbidden:
-            await interaction.response.send_message("⚠️ Não tenho permissão pra dar esse cargo, chama a staff.")
-            return
-        await interaction.response.send_message(f"✅ Cargo de rank **{rank_nome}** aplicado!")
+            return "⚠️ Não tenho permissão pra dar o cargo de rank."
+        return None
 
     # ── Envia a pergunta correspondente ao passo ────────────────────
     async def enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str):
@@ -528,13 +526,20 @@ class Whitelist(commands.Cog):
             except discord.Forbidden:
                 pass
 
+        aviso_rank = ""
+        rank_nome = registro["respostas"].get("rank")
+        if membro and rank_nome:
+            erro = await self.dar_cargo_rank(guild, membro, rank_nome)
+            if erro:
+                aviso_rank = f"\n{erro}"
+
         registro["status"] = "aprovada"
         salvar("whitelist", self.dados)
         await self.atualizar_status_board(guild, membro_id)
 
         await interaction.response.send_message(
             f"✅ **Whitelist aprovada por {interaction.user.mention}!** "
-            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🚀"
+            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🚀{aviso_rank}"
         )
 
     # ── Admin recusa -> reinicia a whitelist da pessoa ───────────────
@@ -546,15 +551,6 @@ class Whitelist(commands.Cog):
             return
 
         membro = guild.get_member(membro_id)
-
-        # Tira o rank que tinha sido dado, já que ela vai refazer tudo
-        if membro:
-            cargos_rank_atuais = [r for r in membro.roles if r.id in RANK_IDS]
-            if cargos_rank_atuais:
-                try:
-                    await membro.remove_roles(*cargos_rank_atuais, reason=f"Whitelist recusada por {interaction.user} — reiniciando")
-                except discord.Forbidden:
-                    pass
 
         registro["status"] = "recusada"
         salvar("whitelist", self.dados)
