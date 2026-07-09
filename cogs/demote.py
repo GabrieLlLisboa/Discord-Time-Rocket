@@ -469,12 +469,16 @@ class Demote(commands.Cog):
             await ctx.send("⚠️ Uso: `!sexbabybye inativoszx`", delete_after=6)
             return
 
-        from cogs.atividade import _ler as ler_atividade
+        from cogs.atividade import _ler as ler_atividade, entrou_durante_periodo
         atividade = ler_atividade()
 
         candidatos = []
+        ignorados_grace = 0
         for membro in ctx.guild.members:
             if membro.bot or membro.id == ctx.author.id:
+                continue
+            if entrou_durante_periodo(membro):
+                ignorados_grace += 1
                 continue
             registro = atividade.get(str(membro.id))
             ja_ativo = bool(registro and registro.get("anunciado"))
@@ -482,19 +486,23 @@ class Demote(commands.Cog):
                 candidatos.append(membro)
 
         if not candidatos:
-            await ctx.send("✅ Ninguém pra demotar — todo mundo já está marcado como ativo.", delete_after=8)
+            aviso_grace = f"\n({ignorados_grace} entraram durante o período de avaliação e ficaram de fora da checagem.)" if ignorados_grace else ""
+            await ctx.send(f"✅ Ninguém pra demotar — todo mundo já está marcado como ativo.{aviso_grace}", delete_after=8)
             return
 
         preview = ", ".join(m.display_name for m in candidatos[:15])
         if len(candidatos) > 15:
             preview += f" e mais {len(candidatos) - 15}..."
 
+        aviso_grace = f"\n\nℹ️ **{ignorados_grace}** pessoa(s) entraram durante o período de avaliação e ficaram de fora dessa lista." if ignorados_grace else ""
+
         embed_confirma = discord.Embed(
             title="⚠️ Confirmar expulsão em massa",
             description=(
                 f"Isso vai **expulsar direto** **{len(candidatos)} pessoas** do servidor "
                 f"(cada uma recebe uma DM de aviso antes de ser expulsa).\n\n"
-                f"**Quem será afetado:** {preview}\n\n"
+                f"**Quem será afetado:** {preview}"
+                f"{aviso_grace}\n\n"
                 f"Reaja com ✅ em até 30 segundos pra confirmar, ou ❌ pra cancelar."
             ),
             color=0xED4245,

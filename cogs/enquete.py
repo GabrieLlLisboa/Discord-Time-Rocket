@@ -64,12 +64,33 @@ class FecharButton(discord.ui.Button):
         await cog.encerrar(interaction, self.poll_id)
 
 
+# ─────────────────────────────────────────────
+#  Botão de ver quem votou (só admin, só em enquete pública)
+# ─────────────────────────────────────────────
+class VerVotosButton(discord.ui.Button):
+    def __init__(self, poll_id: str):
+        super().__init__(
+            label="Ver Votos",
+            emoji="👥",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"enquete_verVotos_{poll_id}",
+            row=4,
+        )
+        self.poll_id = poll_id
+
+    async def callback(self, interaction: discord.Interaction):
+        cog: "Enquete" = interaction.client.get_cog("Enquete")
+        await cog.ver_votos(interaction, self.poll_id)
+
+
 class EnqueteView(discord.ui.View):
-    def __init__(self, poll_id: str, opcoes: list[str], aberta: bool = True):
+    def __init__(self, poll_id: str, opcoes: list[str], aberta: bool = True, anonima: bool = False):
         super().__init__(timeout=None)
         for idx, opcao in enumerate(opcoes[:MAX_OPCOES]):
             self.add_item(VotoButton(poll_id, idx, opcao, disabled=not aberta))
         self.add_item(FecharButton(poll_id, disabled=not aberta))
+        if not anonima:
+            self.add_item(VerVotosButton(poll_id))
 
 
 # ─────────────────────────────────────────────
@@ -205,7 +226,7 @@ class Enquete(commands.Cog):
         self._salvar()
 
         embed = self.construir_embed(poll_id)
-        view = EnqueteView(poll_id, opcoes, aberta=True)
+        view = EnqueteView(poll_id, opcoes, aberta=True, anonima=privada)
         await mensagem.edit(embed=embed, view=view)
 
     # ── Registra o voto de quem clicou ───────────────────────────
@@ -220,7 +241,7 @@ class Enquete(commands.Cog):
         self._salvar()
 
         embed = self.construir_embed(poll_id)
-        view = EnqueteView(poll_id, registro["opcoes"], aberta=True)
+        view = EnqueteView(poll_id, registro["opcoes"], aberta=True, anonima=registro.get("anonima", False))
         await interaction.response.edit_message(embed=embed, view=view)
 
         opcao_texto = registro["opcoes"][idx]
@@ -240,7 +261,7 @@ class Enquete(commands.Cog):
         self._salvar()
 
         embed = self.construir_embed(poll_id)
-        view = EnqueteView(poll_id, registro["opcoes"], aberta=False)
+        view = EnqueteView(poll_id, registro["opcoes"], aberta=False, anonima=registro.get("anonima", False))
         await interaction.response.edit_message(embed=embed, view=view)
 
         contagem = [0] * len(registro["opcoes"])
@@ -259,6 +280,38 @@ class Enquete(commands.Cog):
                 resultado = f"🔒 Enquete **{registro['tema']}** encerrada por {interaction.user.mention}.\n🤝 Empate entre {texto} com {maior} voto(s) cada!"
 
         await interaction.followup.send(resultado)
+
+    # ── Mostra quem votou em cada opção (só admin, só se não for anônima) ──
+    async def ver_votos(self, interaction: discord.Interaction, poll_id: str):
+        registro = self.dados.get(poll_id)
+        if not registro:
+            await interaction.response.send_message("⚠️ Não achei essa enquete.", ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Só administradores podem ver os votos.", ephemeral=True)
+            return
+        if registro.get("anonima"):
+            await interaction.response.send_message("🔒 Essa enquete é privada — nem admin vê quem votou.", ephemeral=True)
+            return
+
+        opcoes = registro["opcoes"]
+        votos: dict = registro["votos"]
+
+        por_opcao = {i: [] for i in range(len(opcoes))}
+        for uid_str, idx in votos.items():
+            if 0 <= idx < len(opcoes):
+                por_opcao[idx].append(int(uid_str))
+
+        embed = discord.Embed(title=f"👥 Quem votou — {registro['tema']}", color=0x5865F2)
+        for i, opcao in enumerate(opcoes):
+            ids = por_opcao[i]
+            if ids:
+                valor = "\n".join(f"<@{uid}>" for uid in ids)
+            else:
+                valor = "*— ninguém —*"
+            embed.add_field(name=f"{_emoji(i)} {opcao} ({len(ids)})", value=valor, inline=True)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # ── Comando /enquete ──────────────────────────────────────────
     @app_commands.command(name="enquete", description="Cria uma enquete (só administradores)")

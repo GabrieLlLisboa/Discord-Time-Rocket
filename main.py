@@ -59,6 +59,7 @@ COGS = [
     "cogs.whitelist",
     "cogs.staff_tag",
     "cogs.enquete",
+    "cogs.auto_update",
 ]
 
 async def load_cogs():
@@ -81,6 +82,7 @@ async def registrar_views_persistentes():
     from cogs.tracker import TrackerView
     from cogs.welcome import BoasVindasView
     from cogs.whitelist import ComecarWhitelistView, FinalizarWhitelistView
+    from cogs.atividade import SetupAtividadeView
 
     # Views sem estado (não precisam de argumentos)
     bot.add_view(TicketSetupView())
@@ -90,6 +92,7 @@ async def registrar_views_persistentes():
     bot.add_view(BoasVindasView())
     bot.add_view(ComecarWhitelistView())
     bot.add_view(FinalizarWhitelistView())
+    bot.add_view(SetupAtividadeView())
 
     # ConfirmarPresencaView precisa de rank_alvo, rank_id e canal_id
     # Recria a partir dos amistosos salvos no JSON
@@ -159,7 +162,12 @@ async def registrar_views_persistentes():
         enquetes_dados = ler_backup("enquetes")
         count = 0
         for poll_id, registro in enquetes_dados.items():
-            bot.add_view(EnqueteView(poll_id, registro["opcoes"], aberta=registro.get("aberta", True)))
+            bot.add_view(EnqueteView(
+                poll_id,
+                registro["opcoes"],
+                aberta=registro.get("aberta", True),
+                anonima=registro.get("anonima", False),
+            ))
             count += 1
         if count:
             print(f"[VIEWS] ✅ {count} enquete(s) recarregada(s).")
