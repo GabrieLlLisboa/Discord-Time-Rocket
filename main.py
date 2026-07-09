@@ -202,9 +202,11 @@ async def on_ready():
     )
 
 async def main():
+    from console import iniciar_console
     async with bot:
         await load_cogs()
         await registrar_views_persistentes()
+        asyncio.create_task(iniciar_console(bot))
         await bot.start(TOKEN)
 
 if __name__ == "__main__":
