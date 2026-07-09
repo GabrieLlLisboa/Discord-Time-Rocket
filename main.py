@@ -60,6 +60,12 @@ COGS = [
     "cogs.staff_tag",
     "cogs.enquete",
     "cogs.auto_update",
+    # ── Sistema de Moderação ──
+    "cogs.moderation",
+    "cogs.automod",
+    "cogs.antiraid",
+    "cogs.mod_config",
+    "cogs.mod_setup",
 ]
 
 async def load_cogs():
@@ -83,6 +89,7 @@ async def registrar_views_persistentes():
     from cogs.welcome import BoasVindasView
     from cogs.whitelist import ComecarWhitelistView, FinalizarWhitelistView
     from cogs.atividade import SetupAtividadeView
+    from cogs.mod_setup import PainelModeracaoView
 
     # Views sem estado (não precisam de argumentos)
     bot.add_view(TicketSetupView())
@@ -93,6 +100,7 @@ async def registrar_views_persistentes():
     bot.add_view(ComecarWhitelistView())
     bot.add_view(FinalizarWhitelistView())
     bot.add_view(SetupAtividadeView())
+    bot.add_view(PainelModeracaoView())
 
     # ConfirmarPresencaView precisa de rank_alvo, rank_id e canal_id
     # Recria a partir dos amistosos salvos no JSON

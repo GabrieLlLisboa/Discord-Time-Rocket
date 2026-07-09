@@ -87,14 +87,14 @@ async def iniciar_console(bot: discord.Client):
         elif comando in ("desligar", "shutdown", "sair", "exit"):
             print("[CONSOLE] 🛑 Desligando o bot...")
             await bot.close()
-            returns
+            return
 
-        elif comando in ("down", "restart"):
+        elif comando in ("reiniciar", "restart"):
             print("[CONSOLE] 🔄 Reiniciando o bot...")
             await bot.close()
             _reiniciar_processo()
 
-        elif comando in ("up", "atualizar"):
+        elif comando in ("update", "atualizar"):
             print("[CONSOLE] ⬇️  Rodando 'git pull'...")
             sucesso, saida = await _rodar_git_pull()
             if saida:
