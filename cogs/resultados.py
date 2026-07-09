@@ -3,6 +3,9 @@ from discord.ext import commands
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 import asyncio
+import os
+import re
+import uuid
 
 # ─────────────────────────────────────────────
 #  Cog: Resultados
@@ -14,6 +17,38 @@ import asyncio
 
 ADMIN_ROLE_ID        = 1511894837790769204
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
+
+# Diretório dedicado (dentro de data/) pra transcrições temporárias.
+TRANSCRICOES_DIR = "data/transcricoes"
+
+
+def _nome_arquivo_seguro(adversario: str) -> str:
+    """
+    Constrói um nome de arquivo seguro a partir do texto livre digitado
+    pelo usuário em `/resultado adversario:`.
+
+    ANTES: o nome do arquivo era `f"transcricao-amistoso-{adversario...}.txt"`
+    escrito direto no diretório de trabalho do bot, usando o texto do
+    usuário quase sem filtrar (só trocava espaço por hífen). Como
+    `adversario` é um campo de texto livre, alguém poderia digitar algo
+    como "../../main" e o bot escreveria (e depois LERIA e reenviaria via
+    DM/canal) um arquivo fora da pasta esperada — na prática, uma falha de
+    path traversal / escrita arbitrária de arquivo. Mesmo sendo um comando
+    restrito à staff, isso é perigoso (erro de digitação ou conta staff
+    comprometida vira sobrescrita de arquivo do próprio bot).
+
+    AGORA: qualquer caractere que não seja letra/número/hífen/underscore é
+    removido, o nome fica limitado a 60 caracteres, e ainda é acrescentado
+    um sufixo aleatório (uuid4) — isso também evita colisão entre dois
+    amistosos contra adversários com nomes parecidos ou rodando ao mesmo
+    tempo. O arquivo final sempre fica dentro de TRANSCRICOES_DIR.
+    """
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", adversario.strip().lower()).strip("-")
+    slug = slug[:60] or "adversario"
+    nome = f"transcricao-amistoso-{slug}-{uuid.uuid4().hex[:8]}.txt"
+    os.makedirs(TRANSCRICOES_DIR, exist_ok=True)
+    return os.path.join(TRANSCRICOES_DIR, nome)
+
 
 FRASES_JOGO = [
     "O jogo foi pegado!",
@@ -114,7 +149,7 @@ class Resultados(commands.Cog):
         if canal_amistoso:
             try:
                 transcricao_texto   = await gerar_transcricao(canal_amistoso)
-                nome_arquivo        = f"transcricao-amistoso-{adversario.lower().replace(' ', '-')}.txt"
+                nome_arquivo        = _nome_arquivo_seguro(adversario)
                 transcricao_arquivo = nome_arquivo
                 with open(nome_arquivo, "w", encoding="utf-8") as f:
                     f.write(transcricao_texto)
@@ -190,7 +225,7 @@ class Resultados(commands.Cog):
                 if transcricao_arquivo:
                     await dm.send(
                         embed=embed_dm,
-                        file=discord.File(transcricao_arquivo, filename=transcricao_arquivo)
+                        file=discord.File(transcricao_arquivo, filename=os.path.basename(transcricao_arquivo))
                     )
                 else:
                     await dm.send(embed=embed_dm)
@@ -250,7 +285,6 @@ class Resultados(commands.Cog):
         # Limpa arquivo de transcrição temporário
         if transcricao_arquivo:
             try:
-                import os
                 os.remove(transcricao_arquivo)
             except Exception:
                 pass

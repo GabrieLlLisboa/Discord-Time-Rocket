@@ -1,3 +1,5 @@
+import asyncio
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -40,8 +42,7 @@ COGS = [
     "cogs.welcome",
     "cogs.leave",
     "cogs.tickets",
-    "cogs.demote",
-    "cogs.clear",
+
     "cogs.notifications",
     "cogs.players",
     "cogs.grafico_jogadores",
@@ -60,6 +61,8 @@ COGS = [
     "cogs.staff_tag",
     "cogs.enquete",
     "cogs.auto_update",
+    # ── Sistema de Moderação ──
+
 ]
 
 async def load_cogs():
@@ -174,34 +177,55 @@ async def registrar_views_persistentes():
     except Exception as e:
         print(f"[VIEWS] ⚠️  Erro ao recarregar views de enquetes: {e}")
 
+_pronto_uma_vez = False
+
+
 @bot.event
 async def on_ready():
+    global _pronto_uma_vez
     print(f"\n{'─'*40}")
     print(f"  Bot online: {bot.user} ({bot.user.id})")
     print(f"  Prefixo: {PREFIX}")
     print(f"  Servidores: {len(bot.guilds)}")
     print(f"{'─'*40}\n")
 
+    # on_ready pode disparar mais de uma vez no mesmo processo (ex: o bot
+    # perde e recupera a conexão com o Discord — RESUME/reconnect). Sincronizar
+    # os slash commands globais toda vez que isso acontece é desnecessário e
+    # arriscado: syncs repetidos em pouco tempo podem esbarrar em rate limit
+    # da API do Discord. Por isso só sincronizamos na primeira vez.
+    if not _pronto_uma_vez:
+        _pronto_uma_vez = True
+        try:
+            synced = await bot.tree.sync()
+            print(f"[SLASH] ✅ {len(synced)} comando(s) global(is) sincronizado(s) (pode levar até 1h pra aparecer em todo lugar).")
+
+            if GUILD_ID:
+                guild_obj = discord.Object(id=int(GUILD_ID))
+                bot.tree.copy_global_to(guild=guild_obj)
+                synced_guild = await bot.tree.sync(guild=guild_obj)
+                print(f"[SLASH] ✅ {len(synced_guild)} comando(s) sincronizado(s) na hora no servidor {GUILD_ID}.")
+        except Exception as e:
+            print(f"[SLASH] ❌ Erro ao sincronizar: {e}")
+
     try:
-        synced = await bot.tree.sync()
-        print(f"[SLASH] ✅ {len(synced)} comando(s) global(is) sincronizado(s) (pode levar até 1h pra aparecer em todo lugar).")
-
-        if GUILD_ID:
-            guild_obj = discord.Object(id=int(GUILD_ID))
-            bot.tree.copy_global_to(guild=guild_obj)
-            synced_guild = await bot.tree.sync(guild=guild_obj)
-            print(f"[SLASH] ✅ {len(synced_guild)} comando(s) sincronizado(s) na hora no servidor {GUILD_ID}.")
-    except Exception as e:
-        print(f"[SLASH] ❌ Erro ao sincronizar: {e}")
-
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name="TryHarders RL"
+        await bot.change_presence(
+            activity=discord.Activity(
+                type=discord.ActivityType.watching,
+                name="TryHarders RL"
+            )
         )
-    )
+    except discord.HTTPException:
+        pass
 
 async def main():
+    if not TOKEN:
+        raise SystemExit(
+            "[FATAL] ❌ A variável de ambiente DISCORD_TOKEN não foi definida.\n"
+            "         Crie um arquivo .env na raiz do projeto com a linha:\n"
+            "         DISCORD_TOKEN=seu_token_aqui"
+        )
+
     from console import iniciar_console
     async with bot:
         await load_cogs()
@@ -210,5 +234,4 @@ async def main():
         await bot.start(TOKEN)
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())

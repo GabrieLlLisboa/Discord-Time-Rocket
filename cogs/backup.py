@@ -1,8 +1,10 @@
 import discord
 from discord.ext import commands, tasks
-import json
 import os
+import shutil
 from datetime import datetime, timezone
+
+from cogs.json_store import ler_json, salvar_json
 
 # ─────────────────────────────────────────────
 #  Cog: Backup Automático
@@ -27,19 +29,17 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 
 # ── Helpers de leitura/escrita ─────────────────────────────────────────────────
+# NOTA: a leitura/escrita real (com escrita atômica + proteção contra JSON
+# corrompido) mora em cogs/json_store.py e é compartilhada com os outros
+# cogs que também guardam dados em JSON (evita ter a mesma lógica de I/O
+# duplicada, cada cópia com um nível de segurança diferente).
 def ler(chave: str) -> dict | list:
-    path = FILES[chave]
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    # Valor padrão por chave
-    return [] if chave in ("amistosos", "treinos") else {}
+    padrao = [] if chave in ("amistosos", "treinos") else {}
+    return ler_json(FILES[chave], padrao)
 
 
 def salvar(chave: str, dados):
-    path = FILES[chave]
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(dados, f, ensure_ascii=False, indent=2)
+    salvar_json(FILES[chave], dados)
 
 
 def agora_str() -> str:
@@ -62,24 +62,42 @@ class Backup(commands.Cog):
     @tasks.loop(hours=6)
     async def backup_loop(self):
         await self.bot.wait_until_ready()
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
-        backup_dir = f"data/backups/{timestamp}"
-        os.makedirs(backup_dir, exist_ok=True)
+        # Por padrão, se uma exceção não tratada acontecer dentro de um
+        # @tasks.loop, o discord.py registra o erro e PARA o loop de vez
+        # (não tenta de novo em 6h). Isso significa que uma falha pontual
+        # (ex: disco cheio por um instante) faria os backups automáticos
+        # pararem silenciosamente pro resto da vida do processo. O
+        # try/except abaixo garante que só aquele ciclo falha — o próximo
+        # ainda roda normalmente em 6h.
+        try:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+            backup_dir = f"data/backups/{timestamp}"
+            os.makedirs(backup_dir, exist_ok=True)
 
-        for chave, path in FILES.items():
-            if os.path.exists(path):
-                dados = ler(chave)
-                backup_path = f"{backup_dir}/{chave}.json"
-                with open(backup_path, "w", encoding="utf-8") as f:
-                    json.dump(dados, f, ensure_ascii=False, indent=2)
+            for chave, path in FILES.items():
+                if os.path.exists(path):
+                    dados = ler(chave)
+                    backup_path = f"{backup_dir}/{chave}.json"
+                    salvar_json(backup_path, dados)
 
-        # Mantém apenas os últimos 10 backups
-        backups = sorted(os.listdir("data/backups"))
-        while len(backups) > 10:
-            import shutil
-            shutil.rmtree(f"data/backups/{backups.pop(0)}")
+            # Mantém apenas os últimos 10 backups
+            # (só considera diretórios — um arquivo perdido em data/backups,
+            # tipo um .DS_Store ou um .tmp deixado por uma escrita
+            # interrompida, não deve derrubar o loop por exceção)
+            backups = sorted(
+                nome for nome in os.listdir("data/backups")
+                if os.path.isdir(os.path.join("data/backups", nome))
+            )
+            while len(backups) > 10:
+                antigo = backups.pop(0)
+                try:
+                    shutil.rmtree(os.path.join("data/backups", antigo))
+                except OSError as e:
+                    print(f"[BACKUP] ⚠️ Não foi possível remover backup antigo '{antigo}': {e}")
 
-        print(f"[BACKUP] ✅ Backup realizado em {backup_dir}")
+            print(f"[BACKUP] ✅ Backup realizado em {backup_dir}")
+        except Exception as e:
+            print(f"[BACKUP] ❌ Falha ao realizar backup automático: {e}")
 
     @backup_loop.before_loop
     async def antes(self):

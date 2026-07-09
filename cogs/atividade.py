@@ -1,10 +1,10 @@
 import discord
 from discord.ext import commands, tasks
-import json
 import os
 from datetime import datetime, timedelta, timezone
 
 from cogs.players import CARGOS as _CARGOS_JOGADORES
+from cogs.json_store import ler_json, salvar_json
 
 RANKS_ORDENADOS = [c for c in _CARGOS_JOGADORES if c["secao"] == "rank"]
 RANK_IDS_SET = {c["id"] for c in RANKS_ORDENADOS}
@@ -40,16 +40,11 @@ def _config_padrao() -> dict:
 
 
 def _ler_config() -> dict:
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return _config_padrao()
+    return ler_json(CONFIG_PATH, _config_padrao)
 
 
 def _salvar_config(config: dict):
-    os.makedirs("data", exist_ok=True)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    salvar_json(CONFIG_PATH, config)
 
 
 # Config carregada uma vez na importação do módulo. Depois disso, só é alterada
@@ -84,16 +79,11 @@ def _periodo_ativo() -> bool:
 
 
 def _ler() -> dict:
-    if os.path.exists(DATA_PATH):
-        with open(DATA_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+    return ler_json(DATA_PATH, {})
 
 
 def _salvar(dados: dict):
-    os.makedirs("data", exist_ok=True)
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(dados, f, ensure_ascii=False, indent=2)
+    salvar_json(DATA_PATH, dados)
 
 
 # ─────────────────────────────────────────────

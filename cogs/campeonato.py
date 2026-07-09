@@ -1,11 +1,11 @@
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-import json
 import os
 from datetime import datetime, timezone
 
 from cogs.players import CARGOS
+from cogs.json_store import ler_json, salvar_json
 
 # ─────────────────────────────────────────────
 #  Cog: Campeonatos / Torneios
@@ -40,16 +40,11 @@ TIPO_CHOICES = [
 
 
 def ler_campeonatos() -> dict:
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+    return ler_json(DATA_FILE, {})
 
 
 def salvar_campeonatos(dados: dict):
-    os.makedirs("data", exist_ok=True)
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(dados, f, ensure_ascii=False, indent=2)
+    salvar_json(DATA_FILE, dados)
 
 
 def _chave(nome: str) -> str:

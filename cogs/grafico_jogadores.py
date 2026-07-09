@@ -1,3 +1,4 @@
+import asyncio
 import io
 from datetime import datetime, timedelta, timezone
 
@@ -141,7 +142,7 @@ class GraficoJogadores(commands.Cog):
         total = len(novatos)
         pct = (ativos / total * 100) if total else 0
 
-        buffer = self._gerar_grafico(total, ativos, guild.name)
+        buffer = await asyncio.to_thread(self._gerar_grafico, total, ativos, guild.name)
         arquivo = discord.File(buffer, filename="grafico_jogadores.png")
 
         embed = discord.Embed(

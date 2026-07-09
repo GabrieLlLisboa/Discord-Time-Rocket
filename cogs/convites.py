@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands
-import json
 import os
+
+from cogs.json_store import ler_json, salvar_json
 
 # ─────────────────────────────────────────────
 #  Cog: Rastreador de Convites
@@ -22,16 +23,11 @@ DATA_PATH = "data/convites.json"
 
 
 def _ler() -> dict:
-    if os.path.exists(DATA_PATH):
-        with open(DATA_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+    return ler_json(DATA_PATH, {})
 
 
 def _salvar(dados: dict):
-    os.makedirs("data", exist_ok=True)
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(dados, f, ensure_ascii=False, indent=2)
+    salvar_json(DATA_PATH, dados)
 
 
 class Convites(commands.Cog):
