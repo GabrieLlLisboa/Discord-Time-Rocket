@@ -31,11 +31,21 @@ from cogs.coach_utils import pode_finalizar
 class Coaches(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._mensagens_iniciais_ok = False
 
-    async def cog_load(self) -> None:
-        # Garante que todo coach configurado tenha as duas mensagens fixas
-        # no canal (cria se estiver faltando — ex: primeira vez rodando,
-        # ou mensagens apagadas enquanto o bot estava offline).
+    @commands.Cog.listener()
+    async def on_ready(self):
+        # cog_load() roda ANTES do bot se conectar ao Discord (main.py chama
+        # load_cogs() antes de bot.start()), então qualquer chamada à API
+        # feita ali (como buscar o canal do coach) falharia sempre. on_ready
+        # só dispara depois que o bot já está conectado e autenticado — por
+        # isso a criação das mensagens fixas mora aqui. A trava evita
+        # recriar tudo de novo caso on_ready dispare mais de uma vez
+        # (reconexão/RESUME).
+        if self._mensagens_iniciais_ok:
+            return
+        self._mensagens_iniciais_ok = True
+
         for coach_key in COACHES:
             try:
                 await garantir_mensagens_existem(self.bot, coach_key)
