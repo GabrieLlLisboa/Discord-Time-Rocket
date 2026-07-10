@@ -140,6 +140,7 @@ async def criar_ticket(cliente_id: int, coach_key: str, canal_ticket_id: int) ->
             "cliente_id": cliente_id,
             "coach_key": coach_key,
             "canal_ticket_id": canal_ticket_id,
+            "canal_voz_id": None,
             "status": "Em andamento",
             "avaliado": False,
             "nota": None,
@@ -206,6 +207,15 @@ async def registrar_mensagem_avaliacao(canal_ticket_id: int, mensagem_id: int) -
         ticket = dados["tickets"].get(str(canal_ticket_id))
         if ticket is not None:
             ticket["mensagem_avaliacao_publicada_id"] = mensagem_id
+            _salvar(dados)
+
+
+async def registrar_canal_voz(canal_ticket_id: int, canal_voz_id: int) -> None:
+    async with _lock:
+        dados = _ler()
+        ticket = dados["tickets"].get(str(canal_ticket_id))
+        if ticket is not None:
+            ticket["canal_voz_id"] = canal_voz_id
             _salvar(dados)
 
 

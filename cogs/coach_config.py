@@ -33,6 +33,9 @@ MANAGER_ROLE_IDS: set[int] = {
     1511894837790769204,
 }
 
+# Categoria onde o canal de voz de cada atendimento é criado.
+CATEGORIA_VOZ_ID: int = 1525158787894218884
+
 
 def coach_por_chave(chave: str) -> dict | None:
     return COACHES.get(chave)

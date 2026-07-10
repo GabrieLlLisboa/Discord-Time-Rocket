@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import discord
 
-from cogs.coach_config import coach_por_chave, MANAGER_ROLE_IDS
+from cogs.coach_config import coach_por_chave, MANAGER_ROLE_IDS, CATEGORIA_VOZ_ID
 from cogs.coach_storage import (
     criar_ticket,
     finalizar_ticket,
     marcar_avaliado,
     registrar_mensagem_avaliacao,
+    registrar_canal_voz,
     TicketJaAbertoError,
     TicketNaoEncontradoError,
     TicketJaFinalizadoError,
@@ -89,12 +90,39 @@ async def criar_ticket_atendimento(interaction: discord.Interaction, coach_key: 
         )
         return
 
+    # ── Canal de voz privado (só cliente + coach) ────────────────────────
+    canal_voz = None
+    categoria_voz = guild.get_channel(CATEGORIA_VOZ_ID)
+    if categoria_voz is not None:
+        overwrites_voz = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
+            guild.me: discord.PermissionOverwrite(view_channel=True, connect=True),
+            cliente: discord.PermissionOverwrite(view_channel=True, connect=True),
+        }
+        if coach_membro is not None:
+            overwrites_voz[coach_membro] = discord.PermissionOverwrite(view_channel=True, connect=True)
+
+        try:
+            canal_voz = await guild.create_voice_channel(
+                name=f"🔊-{coach_key}-{cliente.display_name}"[:100],
+                category=categoria_voz,
+                overwrites=overwrites_voz,
+                reason=f"Canal de voz de atendimento ({coach_key}) para {cliente}",
+            )
+            await registrar_canal_voz(canal_ticket.id, canal_voz.id)
+        except discord.Forbidden:
+            print(f"[COACH] ⚠️ Sem permissão para criar canal de voz do ticket {canal_ticket.id}.")
+        except discord.HTTPException as e:
+            print(f"[COACH] ⚠️ Erro ao criar canal de voz do ticket {canal_ticket.id}: {e}")
+    else:
+        print(f"[COACH] ⚠️ Categoria de voz ({CATEGORIA_VOZ_ID}) não encontrada — canal de voz não criado.")
+
     embed = montar_embed_ticket(coach["nome"], cliente, "Em andamento")
+    conteudo = f"{cliente.mention} " + (coach_membro.mention if coach_membro else "")
+    if canal_voz is not None:
+        conteudo += f"\n🔊 Canal de voz do atendimento: {canal_voz.mention}"
     try:
-        await canal_ticket.send(
-            content=f"{cliente.mention} " + (coach_membro.mention if coach_membro else ""),
-            embed=embed,
-        )
+        await canal_ticket.send(content=conteudo, embed=embed)
     except discord.HTTPException as e:
         print(f"[COACH] ⚠️ Erro ao enviar mensagem inicial do ticket {canal_ticket.id}: {e}")
 
@@ -121,6 +149,15 @@ async def finalizar_atendimento(channel: discord.TextChannel) -> dict:
         raise TicketNaoEncontradoError()
 
     ticket = await finalizar_ticket(channel.id)  # levanta TicketJaFinalizadoError se preciso
+
+    canal_voz_id = ticket.get("canal_voz_id")
+    if canal_voz_id:
+        canal_voz = channel.guild.get_channel(canal_voz_id)
+        if canal_voz is not None:
+            try:
+                await canal_voz.delete(reason=f"Atendimento finalizado — ticket {channel.id}")
+            except discord.HTTPException as e:
+                print(f"[COACH] ⚠️ Erro ao apagar canal de voz do ticket {channel.id}: {e}")
 
     cliente = channel.guild.get_member(ticket["cliente_id"])
     mencao_cliente = cliente.mention if cliente else f"<@{ticket['cliente_id']}>"
