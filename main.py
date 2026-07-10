@@ -61,6 +61,7 @@ COGS = [
     "cogs.staff_tag",
     "cogs.enquete",
     "cogs.auto_update",
+    "cogs.coach_commands",
     # ── Sistema de Moderação ──
 
 ]
@@ -140,6 +141,28 @@ async def registrar_views_persistentes():
             print(f"[VIEWS] ✅ {count} view(s) de campeonato(s) recarregada(s).")
     except Exception as e:
         print(f"[VIEWS] ⚠️  Erro ao recarregar views de campeonatos: {e}")
+
+    # Sistema de Coaches: um botão "Comprar Atendimento" por coach + um
+    # botão "Avaliar Coach" para cada ticket já finalizado mas ainda sem
+    # avaliação (senão o botão pararia de funcionar após um restart).
+    try:
+        from cogs.coach_config import COACHES
+        from cogs.coach_views import ComprarAtendimentoView, AvaliarCoachView
+        from cogs.coach_storage import listar_tickets_para_reavaliacao
+
+        for coach_key in COACHES:
+            bot.add_view(ComprarAtendimentoView(coach_key))
+
+        tickets_pendentes = await listar_tickets_para_reavaliacao()
+        for ticket in tickets_pendentes:
+            bot.add_view(AvaliarCoachView(ticket["canal_ticket_id"]))
+
+        print(
+            f"[VIEWS] ✅ {len(COACHES)} view(s) de coach(es) e "
+            f"{len(tickets_pendentes)} view(s) de avaliação pendente(s) recarregada(s)."
+        )
+    except Exception as e:
+        print(f"[VIEWS] ⚠️  Erro ao recarregar views do sistema de coaches: {e}")
 
     print("[VIEWS] ✅ Views persistentes registradas.")
 

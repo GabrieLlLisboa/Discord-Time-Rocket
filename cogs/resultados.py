@@ -15,8 +15,14 @@ import uuid
 #  /ranking   — placar geral acumulado
 # ─────────────────────────────────────────────
 
-ADMIN_ROLE_ID        = 1511894837790769204
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
+
+# Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
+# pelo sistema de coaches — ver cogs/coach_config.py).
+ADMIN_ROLE_IDS = {
+    1511895253777649704,
+    1511894837790769204,
+}
 
 # Diretório dedicado (dentro de data/) pra transcrições temporárias.
 TRANSCRICOES_DIR = "data/transcricoes"
@@ -94,7 +100,7 @@ class Resultados(commands.Cog):
 
     # ── /resultado ────────────────────────────────────────────────────────────
     @app_commands.command(name="resultado", description="Registra o resultado de um amistoso.")
-    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     @app_commands.describe(
         adversario="Nome do adversário",
         resultado="Resultado do amistoso",
@@ -394,7 +400,7 @@ class Resultados(commands.Cog):
 
     # ── /cancelar_amistoso ───────────────────────────────────────────────────
     @app_commands.command(name="cancelar_amistoso", description="Cancela um amistoso e notifica os jogadores.")
-    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     @app_commands.describe(
         adversario="Nome do adversário (como foi anunciado)",
         link_mensagem="Link da mensagem do anúncio do amistoso",
@@ -502,7 +508,7 @@ class Resultados(commands.Cog):
 
     # ── /listar_resultados ───────────────────────────────────────────────────
     @app_commands.command(name="listar_resultados", description="Lista todos os resultados com número para deletar.")
-    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     async def listar_resultados(self, interaction: discord.Interaction):
         resultados = ler("resultados")
         if not isinstance(resultados, list) or not resultados:
@@ -536,7 +542,7 @@ class Resultados(commands.Cog):
 
     # ── /deletar_resultado ────────────────────────────────────────────────────
     @app_commands.command(name="deletar_resultado", description="Deleta um resultado pelo número (use /listar_resultados primeiro).")
-    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     @app_commands.describe(numero="Número do resultado (veja com /listar_resultados)")
     async def deletar_resultado(self, interaction: discord.Interaction, numero: int):
         resultados = ler("resultados")

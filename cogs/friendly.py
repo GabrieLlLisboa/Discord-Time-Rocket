@@ -4,7 +4,14 @@ from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
-ADMIN_ROLE_ID        = 1511894837790769204
+
+# Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
+# pelo sistema de coaches — ver cogs/coach_config.py). Antes havia apenas
+# um ADMIN_ROLE_ID; agora são dois cargos, e qualquer um dos dois basta.
+ADMIN_ROLE_IDS = {
+    1511895253777649704,
+    1511894837790769204,
+}
 
 RANKS = {
     "Super Sonic Legend": 1514772134327488642,
@@ -181,13 +188,14 @@ async def criar_amistoso(
     nome_canal = "amistoso-" + "".join(c if c.isalnum() or c == "-" else "-" for c in adversario.lower().strip())
     nome_canal = nome_canal[:50]
 
-    admin_role = guild.get_role(ADMIN_ROLE_ID)
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         guild.me:           discord.PermissionOverwrite(view_channel=True, send_messages=True),
     }
-    if admin_role:
-        overwrites[admin_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+    for admin_role_id in ADMIN_ROLE_IDS:
+        admin_role = guild.get_role(admin_role_id)
+        if admin_role:
+            overwrites[admin_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
     canal_ref      = guild.get_channel(AMISTOSOS_CHANNEL_ID)
     categoria      = canal_ref.category if canal_ref else None
@@ -269,7 +277,7 @@ class Friendly(commands.Cog):
             print(f"[AMISTOSO] 🗑️ Canal {canal.name} deletado junto com o anúncio.")
 
     @app_commands.command(name="amistoso", description="Anuncia um amistoso no canal de amistosos.")
-    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     @app_commands.describe(
         adversario="Nome do time adversário",
         data_hora="Data e horário (ex: 15/06 às 20h00)",
