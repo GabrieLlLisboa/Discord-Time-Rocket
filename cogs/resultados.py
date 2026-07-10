@@ -128,19 +128,47 @@ class Resultados(commands.Cog):
         frase_resultado = FRASES_RESULTADO[resultado.value]
         titulo_resultado = TITULOS[resultado.value]
 
-        # Encontra o amistoso mais recente com esse adversário
+        # Encontra o amistoso mais recente com esse adversário que AINDA NÃO
+        # tenha um resultado registrado.
+        #
+        # ANTES: pegava o primeiro amistoso cujo nome batesse (substring) e
+        # nunca checava se ele já tinha "resultado" preenchido. Isso permitia
+        # rodar /resultado duas vezes pro mesmo amistoso (duplicando vitórias/
+        # derrotas/partidas nos perfis, reenviando DMs e tentando deletar de
+        # novo um canal que já tinha sido removido) e também escolher o
+        # amistoso errado quando dois adversários tinham nomes parecidos.
+        #
+        # AGORA: ao encontrar um amistoso com "resultado" já preenchido
+        # (inclusive cancelado), ele é ignorado e a busca continua por um
+        # amistoso mais antigo, ainda em aberto, com o mesmo adversário. Se
+        # só existirem amistosos já finalizados com esse nome, o comando é
+        # bloqueado (nada é processado de novo) — isso torna a operação
+        # idempotente: executar /resultado repetidas vezes para o mesmo
+        # amistoso não tem mais efeito duplicado.
         amistoso_idx  = None
         canal_amistoso = None
         confirmados_ids = []
+        amistoso_ja_processado = False
 
         for i in range(len(amistosos) - 1, -1, -1):
             if adversario.lower() in amistosos[i]["adversario"].lower():
+                if amistosos[i].get("resultado"):
+                    amistoso_ja_processado = True
+                    continue
                 amistoso_idx    = i
                 confirmados_ids = amistosos[i].get("confirmados", [])
                 canal_id        = amistosos[i].get("canal_id")
                 if canal_id:
                     canal_amistoso = self.bot.get_channel(canal_id)
                 break
+
+        if amistoso_idx is None and amistoso_ja_processado:
+            await interaction.followup.send(
+                f"⚠️ Já existe um resultado registrado para o amistoso vs **{adversario}**. "
+                f"Use `/listar_resultados` para conferir ou `/deletar_resultado` caso precise corrigir.",
+                ephemeral=True
+            )
+            return
 
         # ── Gera transcrição antes de deletar o canal ──────────────────────
         transcricao_texto = None

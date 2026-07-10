@@ -16,13 +16,19 @@ DATA_DIR = "data"
 
 # Arquivos de dados
 FILES = {
-    "amistosos":   "data/amistosos.json",
-    "resultados":  "data/resultados.json",
-    "perfis":      "data/perfis.json",
-    "treinos":     "data/treinos.json",
-    "demotados":   "data/demotados.json",
-    "whitelist":   "data/whitelist.json",
-    "enquetes":    "data/enquetes.json",
+    "amistosos":    "data/amistosos.json",
+    "resultados":   "data/resultados.json",
+    "perfis":       "data/perfis.json",
+    "treinos":      "data/treinos.json",
+    "demotados":    "data/demotados.json",
+    "whitelist":    "data/whitelist.json",
+    "enquetes":     "data/enquetes.json",
+    # ANTES: campeonatos.json era usado normalmente pelo cog de campeonatos
+    # (cogs/campeonato.py) mas não fazia parte desta lista — ou seja, não
+    # entrava na rotina automática de backup nem era restaurado junto com os
+    # demais arquivos em caso de corrupção. AGORA ele participa do mesmo
+    # ciclo de backup/restauração que todos os outros arquivos de dados.
+    "campeonatos":  "data/campeonatos.json",
 }
 
 os.makedirs(DATA_DIR, exist_ok=True)
