@@ -61,6 +61,7 @@ COGS = [
     "cogs.staff_tag",
     "cogs.enquete",
     "cogs.auto_update",
+    "cogs.demote",
     "cogs.coach_commands",
     # ── Sistema de Moderação ──
 
