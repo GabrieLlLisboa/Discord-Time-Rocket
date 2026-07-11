@@ -10,6 +10,8 @@ responsabilidade única e evita duplicar regras em mais de um lugar.
 
 from __future__ import annotations
 
+import asyncio
+
 import discord
 
 from cogs.coach_config import coach_por_chave, MANAGER_ROLE_IDS, CATEGORIA_VOZ_ID
@@ -230,3 +232,22 @@ async def concluir_avaliacao(
 
     # 2-5. Atualiza estatísticas e recria as duas mensagens fixas no final do canal
     await reordenar_mensagens_finais(interaction.client, ticket["coach_key"])
+
+    # 6. Apaga o canal do atendimento — o cliente já avaliou, não precisa mais dele
+    canal_ticket = interaction.client.get_channel(canal_ticket_id)
+    if canal_ticket is None:
+        try:
+            canal_ticket = await interaction.client.fetch_channel(canal_ticket_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            canal_ticket = None
+
+    if canal_ticket is not None:
+        try:
+            await canal_ticket.send("✅ Avaliação recebida — este canal será apagado em alguns segundos.")
+        except discord.HTTPException:
+            pass
+        await asyncio.sleep(5)
+        try:
+            await canal_ticket.delete(reason=f"Atendimento avaliado pelo cliente — ticket {canal_ticket_id}")
+        except discord.HTTPException as e:
+            print(f"[COACH] ⚠️ Erro ao apagar o canal do ticket {canal_ticket_id}: {e}")

@@ -152,15 +152,26 @@ class EscolhaSelect(discord.ui.Select):
         self.cog.salvar_resposta(membro.id, self.step, valor)
 
         if self.step == "idioma":
-            # Conta quantas outras pessoas já escolheram o mesmo idioma
-            contagem = sum(
-                1 for uid, registro in self.cog.dados.items()
-                if uid != str(membro.id) and registro.get("respostas", {}).get("idioma") == valor
+            guild = interaction.guild
+            cargo_ingles = guild.get_role(CARGO_IDIOMA_INGLES_ID)
+
+            # Conta com base nos membros reais do servidor (não só em quem já
+            # respondeu a whitelist): quem tem o cargo de Inglês é falante de
+            # Inglês, todo o resto (menos bots e o próprio membro) é considerado
+            # falante de Português, já que é o idioma padrão do servidor.
+            falantes_ingles = sum(
+                1 for m in (cargo_ingles.members if cargo_ingles else [])
+                if not m.bot and m.id != membro.id
             )
+            total_humanos = sum(1 for m in guild.members if not m.bot and m.id != membro.id)
+
+            if valor == "Inglês":
+                contagem = falantes_ingles
+            else:
+                contagem = total_humanos - falantes_ingles
 
             cargo_msg = ""
             if valor == "Inglês":
-                cargo_ingles = interaction.guild.get_role(CARGO_IDIOMA_INGLES_ID)
                 if cargo_ingles:
                     try:
                         await membro.add_roles(cargo_ingles, reason="Whitelist — idioma Inglês selecionado")

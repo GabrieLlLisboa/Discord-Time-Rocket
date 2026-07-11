@@ -25,9 +25,11 @@ CARGOS = [
     {"nome": "Ouro",               "id": 1512571913849933956, "emoji": "🥇", "secao": "rank"},
 ]
 
-IDS_MONITORADOS = {c["id"] for c in CARGOS}
-CARGO_MAP       = {c["id"]: c for c in CARGOS}
-RANK_IDS        = {c["id"] for c in CARGOS if c["secao"] == "rank"}
+IDS_MONITORADOS  = {c["id"] for c in CARGOS}
+CARGO_MAP        = {c["id"]: c for c in CARGOS}
+RANK_IDS         = {c["id"] for c in CARGOS if c["secao"] == "rank"}
+STAFF_IDS        = {c["id"] for c in CARGOS if c["secao"] == "staff"}
+CARGOS_RANK      = [c for c in CARGOS if c["secao"] == "rank"]  # usados no painel !setup-rank
 
 # Quem tiver qualquer um desses cargos não aparece na lista de jogadores
 IDS_OCULTOS = {1521890714873757707, 1514782308031533116}
@@ -51,22 +53,16 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
         color=0xD4A843,
     )
 
-    secao_atual = None
-    membros_unicos = set()  # pra não contar 2x quem tem mais de um cargo monitorado (ex: staff + rank)
+    embed.add_field(name="\u200b", value="```╔══════════  🏢  STAFF  ══════════╗```", inline=False)
 
     for cargo_info in CARGOS:
-        if cargo_info["secao"] != secao_atual:
-            secao_atual = cargo_info["secao"]
-            if secao_atual == "staff":
-                embed.add_field(name="\u200b", value="```╔══════════  🏢  STAFF  ══════════╗```", inline=False)
-            else:
-                embed.add_field(name="\u200b", value="```╔══════════  🎮  RANKS  ══════════╗```", inline=False)
+        if cargo_info["secao"] != "staff":
+            continue
 
         membros = sorted(
             _membros_do_cargo(guild, cargo_info["id"]),
             key=lambda m: m.display_name.lower()
         )
-        membros_unicos.update(m.id for m in membros)
 
         if membros:
             lista = "\n".join(f"  ▸  {m.display_name}" for m in membros)
@@ -79,17 +75,140 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
             inline=False,
         )
 
-    # Total de PESSOAS diferentes com pelo menos um cargo monitorado
-    # (soma por cargo daria número errado, pois quem tem staff + rank seria contado 2x)
-    embed.set_footer(text=f"⚡ {len(membros_unicos)} membros com cargo  •  Atualiza a cada 5 min")
+    total_membros = sum(1 for m in guild.members if not m.bot and not _esta_oculto(m))
+    embed.set_footer(text=f"⚡ {total_membros} membros no clube  •  Atualiza a cada 5 min")
     embed.timestamp = discord.utils.utcnow()
     return embed
+
+
+class SelecionarJogador(discord.ui.UserSelect):
+    def __init__(self):
+        super().__init__(placeholder="1️⃣ Selecione o jogador...", min_values=1, max_values=1, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "SelecaoRankView" = self.view
+        await interaction.response.defer(ephemeral=True)
+        alvo = self.values[0]
+        if not isinstance(alvo, discord.Member):
+            alvo = interaction.guild.get_member(alvo.id) or alvo
+        view.jogador = alvo
+        await view.tentar_executar(interaction)
+
+
+class SelecionarRank(discord.ui.Select):
+    def __init__(self):
+        opcoes = [
+            discord.SelectOption(label=c["nome"], value=str(c["id"]), emoji=c["emoji"])
+            for c in CARGOS_RANK
+        ]
+        super().__init__(placeholder="2️⃣ Selecione o novo rank...", min_values=1, max_values=1, options=opcoes, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "SelecaoRankView" = self.view
+        await interaction.response.defer(ephemeral=True)
+        view.novo_rank_id = int(self.values[0])
+        await view.tentar_executar(interaction)
+
+
+class SelecaoRankView(discord.ui.View):
+    """Aparece (ephemeral) depois que a staff clica em Subir/Descer no painel.
+    Só executa quando jogador E novo rank já foram escolhidos — assim o bot
+    sempre acerta a mensagem, sem depender de adivinhar pelo diff de cargos."""
+
+    def __init__(self, tipo: str):
+        super().__init__(timeout=180)
+        self.tipo = tipo  # "subir" ou "descer"
+        self.jogador: discord.Member | None = None
+        self.novo_rank_id: int | None = None
+        self.add_item(SelecionarJogador())
+        self.add_item(SelecionarRank())
+
+    async def tentar_executar(self, interaction: discord.Interaction):
+        if self.jogador is None or self.novo_rank_id is None:
+            faltando = "o jogador" if self.jogador is None else "o novo rank"
+            await interaction.followup.send(f"☑️ Escolha registrada. Ainda falta selecionar {faltando}.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        novo_info = CARGO_MAP[self.novo_rank_id]
+        novo_cargo = guild.get_role(self.novo_rank_id)
+        if novo_cargo is None:
+            await interaction.followup.send("⚠️ Esse cargo de rank não existe mais no servidor.", ephemeral=True)
+            return
+
+        cargos_rank_atuais = [r for r in self.jogador.roles if r.id in RANK_IDS]
+        antigo_info = CARGO_MAP.get(cargos_rank_atuais[0].id) if cargos_rank_atuais else None
+
+        try:
+            if cargos_rank_atuais:
+                await self.jogador.remove_roles(*cargos_rank_atuais, reason=f"Rank atualizado via !setup-rank ({self.tipo})")
+            await self.jogador.add_roles(novo_cargo, reason=f"Rank atualizado via !setup-rank ({self.tipo})")
+        except discord.Forbidden:
+            await interaction.followup.send("❌ Não tenho permissão pra alterar os cargos desse jogador.", ephemeral=True)
+            return
+
+        channel = interaction.client.get_channel(JOGADORES_CHANNEL_ID)
+        if channel is not None:
+            if self.tipo == "subir":
+                if antigo_info:
+                    msg = (
+                        f"⬆️ **{self.jogador.display_name}** upou do rank {antigo_info['emoji']} **{antigo_info['nome']}** "
+                        f"para o rank {novo_info['emoji']} **{novo_info['nome']}**!"
+                    )
+                else:
+                    msg = f"🎉 **{self.jogador.display_name}** entrou no clube com o rank {novo_info['emoji']} **{novo_info['nome']}**!"
+            else:
+                if antigo_info:
+                    msg = (
+                        f"⬇️ **{self.jogador.display_name}** desceu do rank {antigo_info['emoji']} **{antigo_info['nome']}** "
+                        f"para o rank {novo_info['emoji']} **{novo_info['nome']}**."
+                    )
+                else:
+                    msg = f"📉 **{self.jogador.display_name}** entrou no rank {novo_info['emoji']} **{novo_info['nome']}**."
+
+            notif = await channel.send(msg)
+            await notif.delete(delay=300)
+
+            players_cog = interaction.client.get_cog("Players")
+            if players_cog:
+                await players_cog._editar_ou_criar(channel)
+
+        await interaction.followup.send(
+            f"✅ Rank de **{self.jogador.display_name}** atualizado pra {novo_info['emoji']} **{novo_info['nome']}**! "
+            f"Mensagem enviada em {channel.mention if channel else '#canal de jogadores'}.",
+            ephemeral=True,
+        )
+        self.stop()
+
+
+class PainelRankView(discord.ui.View):
+    """Painel fixo enviado pelo comando !setup-rank."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Subir de Rank", emoji="⬆️", style=discord.ButtonStyle.success, custom_id="players_rank_subir")
+    async def subir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "**⬆️ Subida de rank**\nEscolha o jogador e o novo rank abaixo:",
+            view=SelecaoRankView("subir"),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Descer de Rank", emoji="⬇️", style=discord.ButtonStyle.danger, custom_id="players_rank_descer")
+    async def descer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "**⬇️ Descida de rank**\nEscolha o jogador e o novo rank abaixo:",
+            view=SelecaoRankView("descer"),
+            ephemeral=True,
+        )
 
 
 class Players(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot        = bot
         self.message_id = None
+        self.bot.add_view(PainelRankView())  # mantém os botões funcionando após restart
         self.atualizar_lista.start()
 
     def cog_unload(self):
@@ -97,54 +216,26 @@ class Players(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
+        # Ranks não são mais detectados automaticamente por diff de cargo
+        # (isso causava mensagem errada às vezes). Agora eles só são
+        # anunciados via painel `!setup-rank`. Aqui só sobra a staff.
         cargos_antes  = {r.id for r in before.roles}
         cargos_depois = {r.id for r in after.roles}
-        ganhou  = (cargos_depois - cargos_antes) & IDS_MONITORADOS
-        perdeu  = (cargos_antes - cargos_depois) & IDS_MONITORADOS
+        ganhou  = (cargos_depois - cargos_antes) & STAFF_IDS
+        perdeu  = (cargos_antes - cargos_depois) & STAFF_IDS
         if not ganhou and not perdeu:
             return
         channel = self.bot.get_channel(JOGADORES_CHANNEL_ID)
         if channel is None:
             return
 
-        ganhou_rank  = ganhou & RANK_IDS
-        perdeu_rank  = perdeu & RANK_IDS
-        ganhou_staff = ganhou - RANK_IDS
-        perdeu_staff = perdeu - RANK_IDS
-
         linhas = []
-        ranks_consumidos = set()
-
-        # Ganhou um rank novo: distingue "entrou no clube" de "upou de rank"
-        for cid in ganhou_rank:
-            info_novo = CARGO_MAP[cid]
-            candidatos = perdeu_rank - ranks_consumidos
-            rank_anterior_id = next(iter(candidatos), None)
-            if rank_anterior_id is not None:
-                info_antigo = CARGO_MAP[rank_anterior_id]
-                ranks_consumidos.add(rank_anterior_id)
-                linhas.append(
-                    f"⬆️ **{after.display_name}** upou do rank {info_antigo['emoji']} **{info_antigo['nome']}** "
-                    f"para o rank {info_novo['emoji']} **{info_novo['nome']}**!"
-                )
-            else:
-                linhas.append(
-                    f"🎉 **{after.display_name}** entrou no clube com o rank {info_novo['emoji']} **{info_novo['nome']}**!"
-                )
-
-        # Cargos de staff (não são rank) seguem a mensagem antiga
-        for cid in ganhou_staff:
+        for cid in ganhou:
             info = CARGO_MAP[cid]
             linhas.append(f"📈 **{after.display_name}** subiu para {info['emoji']} **{info['nome']}**!")
-
-        for cid in perdeu_staff:
+        for cid in perdeu:
             info = CARGO_MAP[cid]
             linhas.append(f"📉 **{after.display_name}** saiu de {info['emoji']} **{info['nome']}**.")
-
-        # Rank perdido sem ganhar outro no lugar (rebaixamento "seco")
-        for cid in perdeu_rank - ranks_consumidos:
-            info = CARGO_MAP[cid]
-            linhas.append(f"📉 **{after.display_name}** saiu do rank {info['emoji']} **{info['nome']}**.")
 
         if linhas:
             notif = await channel.send("\n".join(linhas))
@@ -191,6 +282,31 @@ class Players(commands.Cog):
         channel = self.bot.get_channel(JOGADORES_CHANNEL_ID)
         await self._editar_ou_criar(channel)
         await ctx.send("✅ Lista de jogadores atualizada!", delete_after=4)
+
+    @commands.command(name="setup-rank")
+    @commands.has_permissions(administrator=True)
+    async def setup_rank(self, ctx: commands.Context):
+        """Envia o painel de atualização de rank (Subir/Descer) neste canal."""
+        embed = discord.Embed(
+            title="🎮 Painel de Atualização de Rank",
+            description=(
+                "Use os botões abaixo quando um jogador **subir** ou **descer** de rank.\n\n"
+                "Você escolhe o jogador e o novo rank, o bot troca o cargo automaticamente "
+                "e manda a mensagem certinha no canal de jogadores — sem depender de adivinhar "
+                "a troca de cargo sozinho."
+            ),
+            color=0xD4A843,
+        )
+        await ctx.send(embed=embed, view=PainelRankView())
+        try:
+            await ctx.message.delete()
+        except discord.HTTPException:
+            pass
+
+    @setup_rank.error
+    async def setup_rank_error(self, ctx: commands.Context, error: commands.CommandError):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
 
     @forcar_atualizacao.error
     async def forcar_atualizacao_error(self, ctx, error):
