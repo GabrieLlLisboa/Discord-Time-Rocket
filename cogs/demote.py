@@ -14,8 +14,6 @@ from datetime import datetime, timedelta, timezone
 #
 #  Fluxo atual:
 #    1) !demotar @pessoa -> expulsa a pessoa NA HORA e manda uma DM avisando.
-#    2) !sexbabybye      -> mesma coisa, só que em massa pra todo mundo
-#                           marcado como inativo.
 #
 #  Os comandos !fecharquarentena / !tirardemote e a checagem automática de
 #  expiração continuam aqui, mas só entram em ação se ainda existir alguma
@@ -42,9 +40,6 @@ INTERVALO_VERIFICACAO_MINUTOS = 30           # de quanto em quanto tempo o bot c
 
 LOG_CHANNEL_ID = 1521897698419019907         # canal onde o bot manda o log de tudo que faz aqui
 
-# Único usuário que pode rodar o !sexbabybye (demote em massa dos inativos)
-IDS_AUTORIZADOS_DEMOTE_MASSA = {1487452210605588592, 1421693641184772147}
-
 DATA_FILE = "data/quarentena.json"
 
 MENSAGEM_QUARENTENA = (
@@ -55,7 +50,7 @@ MENSAGEM_QUARENTENA = (
     "Caso deseje continuar fazendo parte da **TryHarders RL**, basta responder neste canal "
     "dentro de **7 dias**.\n\n"
     "Se não houver nenhuma resposta nesse período, você será removido automaticamente do clube."
-)  # legado — não é mais usada pelo !demotar/!sexbabybye, só fica aqui pra não quebrar quarentenas antigas
+)  # legado — não é mais usada pelo !demotar, só fica aqui pra não quebrar quarentenas antigas
 
 MENSAGEM_REMOCAO_FINAL = (
     "Olá! Você foi removido da **TryHarders RL** porque não houve nenhuma interação "
@@ -457,116 +452,6 @@ class Demote(commands.Cog):
             color=0x57F287,
         )
         return True
-
-    # ── !sexbabybye inativoszx — demote em massa de todo mundo não marcado como ativo ──
-    @commands.command(name="sexbabybye", hidden=True)
-    async def demotar_inativos_em_massa(self, ctx: commands.Context, confirmacao: str = None):
-        # Só o usuário autorizado pode usar — pra qualquer outra pessoa, o bot finge que o comando não existe
-        if ctx.author.id not in IDS_AUTORIZADOS_DEMOTE_MASSA:
-            return
-
-        if confirmacao != "inativoszx":
-            await ctx.send("⚠️ Uso: `!sexbabybye inativoszx`", delete_after=6)
-            return
-
-        from cogs.atividade import _ler as ler_atividade, entrou_durante_periodo
-        atividade = ler_atividade()
-
-        candidatos = []
-        ignorados_grace = 0
-        for membro in ctx.guild.members:
-            if membro.bot or membro.id == ctx.author.id:
-                continue
-            if entrou_durante_periodo(membro):
-                ignorados_grace += 1
-                continue
-            registro = atividade.get(str(membro.id))
-            ja_ativo = bool(registro and registro.get("anunciado"))
-            if not ja_ativo:
-                candidatos.append(membro)
-
-        if not candidatos:
-            aviso_grace = f"\n({ignorados_grace} entraram durante o período de avaliação e ficaram de fora da checagem.)" if ignorados_grace else ""
-            await ctx.send(f"✅ Ninguém pra demotar — todo mundo já está marcado como ativo.{aviso_grace}", delete_after=8)
-            return
-
-        preview = ", ".join(m.display_name for m in candidatos[:15])
-        if len(candidatos) > 15:
-            preview += f" e mais {len(candidatos) - 15}..."
-
-        aviso_grace = f"\n\nℹ️ **{ignorados_grace}** pessoa(s) entraram durante o período de avaliação e ficaram de fora dessa lista." if ignorados_grace else ""
-
-        embed_confirma = discord.Embed(
-            title="⚠️ Confirmar expulsão em massa",
-            description=(
-                f"Isso vai **expulsar direto** **{len(candidatos)} pessoas** do servidor "
-                f"(cada uma recebe uma DM de aviso antes de ser expulsa).\n\n"
-                f"**Quem será afetado:** {preview}"
-                f"{aviso_grace}\n\n"
-                f"Reaja com ✅ em até 30 segundos pra confirmar, ou ❌ pra cancelar."
-            ),
-            color=0xED4245,
-        )
-        msg_confirma = await ctx.send(embed=embed_confirma)
-        await msg_confirma.add_reaction("✅")
-        await msg_confirma.add_reaction("❌")
-
-        def check(reaction: discord.Reaction, user: discord.User):
-            return (
-                user.id == ctx.author.id
-                and reaction.message.id == msg_confirma.id
-                and str(reaction.emoji) in ("✅", "❌")
-            )
-
-        try:
-            reaction, _ = await self.bot.wait_for("reaction_add", timeout=30.0, check=check)
-        except asyncio.TimeoutError:
-            await msg_confirma.edit(embed=discord.Embed(title="⌛ Cancelado (tempo esgotado).", color=0x99AAB5))
-            return
-
-        if str(reaction.emoji) == "❌":
-            await msg_confirma.edit(embed=discord.Embed(title="❌ Cancelado.", color=0x99AAB5))
-            return
-
-        await msg_confirma.edit(embed=discord.Embed(
-            title="⏳ Processando...",
-            description=f"Demotando {len(candidatos)} pessoa(s). Isso pode levar um tempinho.",
-            color=0xFEE75C,
-        ))
-
-        sucesso = 0
-        falha = 0
-        detalhes_falha = []
-
-        for membro in candidatos:
-            status, detalhe = await self._executar_expulsao_individual(
-                ctx.guild, membro, "Inativo no período de verificação", ctx.author
-            )
-            if status == "sucesso":
-                sucesso += 1
-            else:
-                falha += 1
-                detalhes_falha.append(f"**{membro.display_name}**: {detalhe}")
-            await asyncio.sleep(1.0)  # evita rate limit ao expulsar vários de uma vez
-
-        resumo = discord.Embed(title="🏁 Expulsão em massa concluída", color=0x57F287)
-        resumo.add_field(name="✅ Expulsos", value=str(sucesso), inline=True)
-        resumo.add_field(name="❌ Falharam", value=str(falha), inline=True)
-        if detalhes_falha:
-            resumo.add_field(name="Detalhes das falhas", value="\n".join(detalhes_falha[:10]), inline=False)
-        await ctx.send(embed=resumo)
-
-        await self.enviar_log(
-            title="🔻 Expulsão em massa executada",
-            description=f"{ctx.author.mention} executou `!sexbabybye` (expulsão em massa dos inativos).",
-            color=0xED4245,
-            fields=[
-                ("Total processado", str(len(candidatos))),
-                ("Sucesso", str(sucesso)),
-                ("Falhas", str(falha)),
-            ],
-        )
-        print(f"[DEMOTE] 🔻 Expulsão em massa executada por {ctx.author}: {sucesso} sucesso, {falha} falhas.")
 
     # ── Detecta resposta do jogador no canal de quarentena ──────────────────
     @commands.Cog.listener()

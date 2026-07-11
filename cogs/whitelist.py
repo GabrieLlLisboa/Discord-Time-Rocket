@@ -47,6 +47,13 @@ STATUS_LABELS = {
 # (deixado aqui só de referência, caso você use em outro lugar).
 CARGO_MEMBRO_ID = 1523830313141272586
 
+# Cargo dado automaticamente (na hora, sem precisar de aprovação) pra quem
+# escolhe "Inglês" na pergunta de idioma da whitelist.
+CARGO_IDIOMA_INGLES_ID = 1525312330831892481
+
+IDIOMAS = ["Português", "Inglês"]
+IDIOMA_EMOJIS = {"Português": "🇧🇷", "Inglês": "🇬🇧"}
+
 # Cargo que a pessoa recebe assim que entra no servidor — é ele que bloqueia
 # a visão de todos os canais (configurado nas permissões dos canais como
 # "negar" pra esse cargo). É removido automaticamente quando termina a whitelist.
@@ -122,7 +129,7 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
             f"✅ Nick registrado: **{nick_valor}**{aviso_nick}",
         )
         await asyncio.sleep(5)
-        await self.cog.enviar_pergunta(interaction.channel, membro, "rank")
+        await self.cog.enviar_pergunta(interaction.channel, membro, "idioma")
 
 
 # ─────────────────────────────────────────────
@@ -144,7 +151,30 @@ class EscolhaSelect(discord.ui.Select):
         valor = self.values[0]
         self.cog.salvar_resposta(membro.id, self.step, valor)
 
-        if self.step == "rank":
+        if self.step == "idioma":
+            # Conta quantas outras pessoas já escolheram o mesmo idioma
+            contagem = sum(
+                1 for uid, registro in self.cog.dados.items()
+                if uid != str(membro.id) and registro.get("respostas", {}).get("idioma") == valor
+            )
+
+            cargo_msg = ""
+            if valor == "Inglês":
+                cargo_ingles = interaction.guild.get_role(CARGO_IDIOMA_INGLES_ID)
+                if cargo_ingles:
+                    try:
+                        await membro.add_roles(cargo_ingles, reason="Whitelist — idioma Inglês selecionado")
+                        cargo_msg = f"\n🏷️ Cargo {cargo_ingles.mention} atribuído!"
+                    except discord.Forbidden:
+                        cargo_msg = "\n⚠️ Não consegui atribuir o cargo de idioma (permissão)."
+                else:
+                    cargo_msg = "\n⚠️ Cargo de idioma configurado não foi encontrado no servidor."
+
+            await interaction.response.send_message(
+                f"✅ Idioma registrado: **{valor}**.\n"
+                f"🌐 Mais **{contagem}** pessoa(s) falam o mesmo idioma que você.{cargo_msg}"
+            )
+        elif self.step == "rank":
             await interaction.response.send_message(
                 f"✅ Rank registrado: **{valor}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
             )
@@ -442,7 +472,11 @@ class Whitelist(commands.Cog):
 
     # ── Envia a pergunta correspondente ao passo ────────────────────
     async def enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str):
-        if step == "rank":
+        if step == "idioma":
+            view = EscolhaView(self, "idioma", IDIOMAS, "Escolha seu idioma...", "rank", emojis=IDIOMA_EMOJIS)
+            await canal.send("🌐 **Qual é a sua linguagem?**\n(Português ou Inglês — só pode escolher uma)", view=view)
+
+        elif step == "rank":
             view = EscolhaView(self, "rank", list(CARGO_RANKS.keys()), "Escolha seu rank atual...", "plataforma")
             await canal.send("🎮 **Qual o seu rank atual no Rocket League?**", view=view)
 
@@ -507,6 +541,26 @@ class Whitelist(commands.Cog):
 
         await self.atualizar_status_board(guild, membro.id)
 
+        r = registro["respostas"]
+
+        # Resumo completo pra staff, direto no canal privado da whitelist
+        embed_resumo = discord.Embed(
+            title=f"📋 Resumo da Whitelist — {membro}",
+            description="Confira as respostas antes de decidir abaixo.",
+            color=0x5865F2,
+        )
+        embed_resumo.set_thumbnail(url=membro.display_avatar.url)
+        embed_resumo.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
+        embed_resumo.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
+        embed_resumo.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
+        embed_resumo.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
+        embed_resumo.add_field(name="Maior rank", value=f"{r.get('peak_rank','—')} ({r.get('peak_div','—')})", inline=True)
+        embed_resumo.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
+        embed_resumo.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
+        embed_resumo.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
+        embed_resumo.set_footer(text=f"ID: {membro.id}")
+        await interaction.channel.send(embed=embed_resumo)
+
         # Painel de revisão pra staff, só dentro do próprio canal privado
         embed_revisao = discord.Embed(
             title="🔎 Whitelist aguardando revisão",
@@ -519,9 +573,9 @@ class Whitelist(commands.Cog):
         if CANAL_LOG_WHITELIST_ID:
             canal_log = self.bot.get_channel(CANAL_LOG_WHITELIST_ID)
             if canal_log:
-                r = registro["respostas"]
                 embed = discord.Embed(title=f"📋 Whitelist enviada para análise — {membro}", color=0xFEE75C)
                 embed.set_thumbnail(url=membro.display_avatar.url)
+                embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
                 embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
                 embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
                 embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
