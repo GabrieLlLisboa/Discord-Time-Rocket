@@ -22,7 +22,6 @@ CARGOS = [
     {"nome": "Champion",           "id": 1512304793534861313, "emoji": "🏅", "secao": "rank"},
     {"nome": "Diamante",           "id": 1512305401075466320, "emoji": "💎", "secao": "rank"},
     {"nome": "Platina",            "id": 1512305547544625273, "emoji": "🪙", "secao": "rank"},
-    {"nome": "Ouro",               "id": 1512571913849933956, "emoji": "🥇", "secao": "rank"},
 ]
 
 IDS_MONITORADOS  = {c["id"] for c in CARGOS}

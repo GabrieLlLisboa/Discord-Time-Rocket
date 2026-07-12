@@ -205,35 +205,35 @@ async def concluir_avaliacao(
         return
 
     coach = coach_por_chave(ticket["coach_key"])
-    if coach is None:
-        await interaction.response.send_message(
-            "✅ Avaliação registrada, mas o coach não foi encontrado para publicação.",
-            ephemeral=True,
-        )
-        return
 
     await interaction.response.send_message("✅ Avaliação registrada, obrigado!", ephemeral=True)
 
-    canal_coach = interaction.client.get_channel(coach["channel_id"])
-    if canal_coach is None:
-        try:
-            canal_coach = await interaction.client.fetch_channel(coach["channel_id"])
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
-            print(f"[COACH] ⚠️ Não foi possível acessar o canal do coach '{ticket['coach_key']}': {e}")
-            return
+    if coach is None:
+        print(f"[COACH] ⚠️ Coach '{ticket['coach_key']}' não encontrado — avaliação registrada, mas não publicada.")
+    else:
+        canal_coach = interaction.client.get_channel(coach["channel_id"])
+        if canal_coach is None:
+            try:
+                canal_coach = await interaction.client.fetch_channel(coach["channel_id"])
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
+                canal_coach = None
+                print(f"[COACH] ⚠️ Não foi possível acessar o canal do coach '{ticket['coach_key']}': {e}")
 
-    # 1. Publica a avaliação
-    try:
-        embed = montar_embed_avaliacao(interaction.user, nota, comentario)
-        msg = await canal_coach.send(embed=embed)
-        await registrar_mensagem_avaliacao(canal_ticket_id, msg.id)
-    except discord.HTTPException as e:
-        print(f"[COACH] ⚠️ Erro ao publicar avaliação do ticket {canal_ticket_id}: {e}")
+        # 1. Publica a avaliação
+        if canal_coach is not None:
+            try:
+                embed = montar_embed_avaliacao(interaction.user, nota, comentario)
+                msg = await canal_coach.send(embed=embed)
+                await registrar_mensagem_avaliacao(canal_ticket_id, msg.id)
+            except discord.HTTPException as e:
+                print(f"[COACH] ⚠️ Erro ao publicar avaliação do ticket {canal_ticket_id}: {e}")
 
     # 2-5. Atualiza estatísticas e recria as duas mensagens fixas no final do canal
+    # (não faz nada se o coach não existir mais — seguro chamar sempre)
     await reordenar_mensagens_finais(interaction.client, ticket["coach_key"])
 
-    # 6. Apaga o canal do atendimento — o cliente já avaliou, não precisa mais dele
+    # 6. Apaga o canal do atendimento — o cliente já avaliou, não precisa mais dele.
+    # Isso roda sempre, mesmo se o coach não tiver sido encontrado acima.
     canal_ticket = interaction.client.get_channel(canal_ticket_id)
     if canal_ticket is None:
         try:
