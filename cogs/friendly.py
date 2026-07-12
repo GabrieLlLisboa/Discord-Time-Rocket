@@ -39,6 +39,41 @@ def rank_info(role: discord.Role):
     return None
 
 
+def _construir_lista_confirmados(guild: discord.Guild, ids_confirmados: list) -> str:
+    """Monta o texto da lista de confirmados SEMPRE a partir dos IDs
+    salvos no JSON (fonte única de verdade) — nunca de uma lista guardada
+    em memória, que pode ficar desincronizada (ex: alguém sai e a lista
+    em memória de outra view não fica sabendo)."""
+    linhas = []
+    for mid in ids_confirmados:
+        membro = guild.get_member(mid)
+        nome = membro.display_name if membro else f"Usuário {mid}"
+        linhas.append(f"  ▸  {nome}")
+    return "\n".join(linhas)
+
+
+async def _atualizar_embed_confirmados(mensagem: discord.Message, guild: discord.Guild, ids_confirmados: list):
+    """Reconstrói o campo '✅ Jogadores Confirmados' do embed de anúncio a
+    partir da lista canônica de IDs (JSON), e salva o embed editado."""
+    if not mensagem.embeds:
+        return
+    embed = mensagem.embeds[0]
+    outros_campos = [f for f in embed.fields if not f.name.startswith("✅  Jogadores Confirmados")]
+    embed.clear_fields()
+    for f in outros_campos:
+        embed.add_field(name=f.name, value=f.value, inline=f.inline)
+    lista = _construir_lista_confirmados(guild, ids_confirmados)
+    embed.add_field(
+        name=f"✅  Jogadores Confirmados  `({len(ids_confirmados)})`",
+        value=lista if lista else "  *— ninguém ainda —*",
+        inline=False,
+    )
+    try:
+        await mensagem.edit(embed=embed)
+    except discord.HTTPException as e:
+        print(f"[AMISTOSO] ⚠️ Erro ao atualizar embed de confirmados: {e}")
+
+
 # ── Botão de sair ──────────────────────────────────────────────────────────────
 class SairAmistosoView(discord.ui.View):
     def __init__(self):
@@ -52,34 +87,27 @@ class SairAmistosoView(discord.ui.View):
         await canal.set_permissions(membro, overwrite=None)
 
         amistosos = ler("amistosos")
+        amistoso_atual = None
         for a in amistosos:
             if a.get("canal_id") == canal.id:
                 if membro.id in a["confirmados"]:
                     a["confirmados"].remove(membro.id)
+                amistoso_atual = a
                 break
         salvar("amistosos", amistosos)
 
-        # Atualiza embed do anúncio removendo o nick
-        canal_anuncio = interaction.client.get_channel(AMISTOSOS_CHANNEL_ID)
-        if canal_anuncio:
-            async for msg in canal_anuncio.history(limit=20):
-                if msg.author == interaction.client.user and msg.embeds:
-                    embed = msg.embeds[0]
-                    campos = list(embed.fields)
-                    embed.clear_fields()
-                    for f in campos:
-                        if f.name.startswith("✅  Jogadores Confirmados"):
-                            linhas = [l for l in f.value.split("\n") if membro.display_name not in l]
-                            if linhas:
-                                embed.add_field(
-                                    name=f"✅  Jogadores Confirmados  `({len(linhas)})`",
-                                    value="\n".join(linhas),
-                                    inline=False
-                                )
-                        else:
-                            embed.add_field(name=f.name, value=f.value, inline=f.inline)
-                    await msg.edit(embed=embed)
-                    break
+        # Atualiza embed do anúncio a partir do JSON (fonte única de verdade
+        # — assim a próxima tentativa de confirmar presença desse membro,
+        # seja pela mesma view ou depois de um restart do bot, já vê que
+        # ele não está mais confirmado)
+        if amistoso_atual and amistoso_atual.get("msg_anuncio_id"):
+            canal_anuncio = interaction.client.get_channel(AMISTOSOS_CHANNEL_ID)
+            if canal_anuncio:
+                try:
+                    msg_anuncio = await canal_anuncio.fetch_message(amistoso_atual["msg_anuncio_id"])
+                    await _atualizar_embed_confirmados(msg_anuncio, interaction.guild, amistoso_atual["confirmados"])
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
 
         await canal.send(f"🚪 **{membro.display_name}** saiu do amistoso.")
         await interaction.response.send_message("✅ Você saiu do amistoso e perdeu o acesso ao canal.", ephemeral=True)
@@ -94,7 +122,17 @@ class ConfirmarPresencaView(discord.ui.View):
         self.rank_id           = rank_id
         self.rank_ids_extras   = rank_ids_extras or [rank_id]
         self.canal_amistoso_id = canal_amistoso_id
-        self.confirmados: list = []  # [(display_name, member_id)]
+        # OBS: NÃO guarda mais a lista de confirmados aqui em memória.
+        # Isso era a causa do bug de "já confirmou presença" mesmo depois
+        # de sair — e também não sobrevivia a um restart do bot. Agora
+        # tudo lê/escreve direto no JSON (self.cog.dados / arquivo
+        # "amistosos"), que é a única fonte de verdade.
+
+    def _buscar_amistoso(self, amistosos: list):
+        for a in amistosos:
+            if a.get("canal_id") == self.canal_amistoso_id:
+                return a
+        return None
 
     @discord.ui.button(label="✅  Confirmar Presença", style=discord.ButtonStyle.success, custom_id="confirmar_amistoso")
     async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -108,34 +146,21 @@ class ConfirmarPresencaView(discord.ui.View):
             )
             return
 
-        if any(mid == membro.id for _, mid in self.confirmados):
+        amistosos = ler("amistosos")
+        amistoso = self._buscar_amistoso(amistosos)
+        if amistoso is None:
+            await interaction.response.send_message("⚠️ Não achei os dados desse amistoso — fala com um admin.", ephemeral=True)
+            return
+
+        if membro.id in amistoso["confirmados"]:
             await interaction.response.send_message("⚠️ Você já confirmou presença neste amistoso!", ephemeral=True)
             return
 
-        self.confirmados.append((membro.display_name, membro.id))
-
-        # Atualiza embed do anúncio
-        embed = interaction.message.embeds[0]
-        novos = [f for f in embed.fields if not f.name.startswith("✅  Jogadores Confirmados")]
-        embed.clear_fields()
-        for f in novos:
-            embed.add_field(name=f.name, value=f.value, inline=f.inline)
-        lista = "\n".join(f"  ▸  {nome}" for nome, _ in self.confirmados)
-        embed.add_field(
-            name=f"✅  Jogadores Confirmados  `({len(self.confirmados)})`",
-            value=lista,
-            inline=False
-        )
-        await interaction.message.edit(embed=embed, view=self)
-
-        # Salva no JSON
-        amistosos = ler("amistosos")
-        for a in amistosos:
-            if a.get("canal_id") == self.canal_amistoso_id:
-                if membro.id not in a["confirmados"]:
-                    a["confirmados"].append(membro.id)
-                break
+        amistoso["confirmados"].append(membro.id)
         salvar("amistosos", amistosos)
+
+        # Atualiza embed do anúncio a partir da lista canônica (JSON)
+        await _atualizar_embed_confirmados(interaction.message, interaction.guild, amistoso["confirmados"])
 
         # Libera acesso ao canal e notifica
         canal_amistoso = interaction.client.get_channel(self.canal_amistoso_id)
@@ -236,6 +261,9 @@ async def criar_amistoso(
         "id": len(amistosos) + 1, "adversario": adversario, "data": data_hora,
         "rank": rank_salvo, "resultado": None, "placar": "", "confirmados": [],
         "canal_id": canal_amistoso.id, "criado_em": agora_str(),
+        "msg_anuncio_id": msg_anuncio.id,
+        "rank_id": ranks_ids[0],
+        "rank_ids_extras": ranks_ids,
     })
     salvar("amistosos", amistosos)
 
@@ -260,6 +288,36 @@ class Friendly(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.amistoso_map: dict[int, int] = {}
+
+        # Reconstrói os botões (✅ Confirmar Presença / 🚪 Sair do Amistoso)
+        # de todo amistoso que ainda não tem resultado registrado — assim,
+        # se o bot reiniciar no meio de um amistoso em andamento, os
+        # botões continuam funcionando normalmente (nada de "essa
+        # interação falhou" pro pessoal que for confirmar presença depois
+        # do restart).
+        self.bot.add_view(SairAmistosoView())  # custom_id fixo, serve pra qualquer canal de amistoso
+
+        for a in ler("amistosos"):
+            if a.get("resultado") is not None:
+                continue  # já finalizado — não precisa mais reativar os botões dele
+
+            msg_id   = a.get("msg_anuncio_id")
+            canal_id = a.get("canal_id")
+            rank_id  = a.get("rank_id")
+            if msg_id is None or canal_id is None:
+                # Amistosos criados antes dessa atualização não têm esses
+                # dados salvos — sem eles não dá pra reconstruir a view
+                # com segurança, então só pula (não trava o bot).
+                continue
+
+            view = ConfirmarPresencaView(
+                rank_alvo=a.get("rank", ""),
+                rank_id=rank_id,
+                canal_amistoso_id=canal_id,
+                rank_ids_extras=a.get("rank_ids_extras") or ([rank_id] if rank_id else []),
+            )
+            self.bot.add_view(view, message_id=msg_id)
+            self.amistoso_map[msg_id] = canal_id
 
     def registrar(self, message_id: int, canal_id: int):
         self.amistoso_map[message_id] = canal_id

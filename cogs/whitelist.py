@@ -616,6 +616,25 @@ class Whitelist(commands.Cog):
             await interaction.response.send_message("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
             return
 
+        if registro.get("status") in ("aprovada", "recusada"):
+            acao = "aprovada" if registro["status"] == "aprovada" else "recusada"
+            quem = registro.get("decidido_por_nome", "outro administrador")
+            await interaction.response.send_message(
+                f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela.",
+                ephemeral=True,
+            )
+            return
+
+        # Trava a whitelist JÁ AQUI, antes de qualquer `await`. Como o bot
+        # roda tudo num único loop assíncrono, nada mais executa entre uma
+        # linha e outra até a primeira pausa (await) — então, se dois
+        # admins clicarem "Aprovar"/"Recusar" quase ao mesmo tempo, só o
+        # primeiro clique passa por essa checagem; o segundo já vai cair
+        # no bloco acima e ser barrado.
+        registro["status"] = "aprovada"
+        registro["decidido_por_nome"] = str(interaction.user)
+        salvar("whitelist", self.dados)
+
         membro = guild.get_member(membro_id)
         cargo_sem_acesso = guild.get_role(CARGO_SEM_ACESSO_ID)
         if membro and cargo_sem_acesso and cargo_sem_acesso in membro.roles:
@@ -631,8 +650,6 @@ class Whitelist(commands.Cog):
             if erro:
                 aviso_rank = f"\n{erro}"
 
-        registro["status"] = "aprovada"
-        salvar("whitelist", self.dados)
         await self.atualizar_status_board(guild, membro_id)
 
         await interaction.response.send_message(
@@ -661,10 +678,22 @@ class Whitelist(commands.Cog):
             await interaction.response.send_message("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
             return
 
+        if registro.get("status") in ("aprovada", "recusada"):
+            acao = "aprovada" if registro["status"] == "aprovada" else "recusada"
+            quem = registro.get("decidido_por_nome", "outro administrador")
+            await interaction.response.send_message(
+                f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela.",
+                ephemeral=True,
+            )
+            return
+
+        # Mesma trava imediata explicada em cima, em aprovar()
+        registro["status"] = "recusada"
+        registro["decidido_por_nome"] = str(interaction.user)
+        salvar("whitelist", self.dados)
+
         membro = guild.get_member(membro_id)
 
-        registro["status"] = "recusada"
-        salvar("whitelist", self.dados)
         await self.atualizar_status_board(guild, membro_id)
 
         await interaction.response.send_message(
