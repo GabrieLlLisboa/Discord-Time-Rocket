@@ -17,6 +17,8 @@ replicada; não trava o bot nem avisa erro pro usuário no canal.
 
 from __future__ import annotations
 
+import re
+
 import discord
 from discord.ext import commands
 import httpx
@@ -28,6 +30,92 @@ CANAL_PT_ID = 1511910275618443314
 # tradução reversa (EN -> PT) a partir daqui
 CANAL_EN_ID = 1525864485884137503
 CARGO_INGLES_ID = 1525312330831892481
+
+# Gírias/abreviações comuns de chat em português -> forma completa.
+# São expandidas ANTES de mandar pro tradutor, porque o Google Tradutor
+# geralmente não entende "dps", "blz" etc. e traduz errado (ou nem traduz).
+GIRIAS = {
+    "dps": "depois",
+    "blz": "beleza",
+    "vlw": "valeu",
+    "vlws": "valeu",
+    "flw": "falou",
+    "vc": "você",
+    "vcs": "vocês",
+    "tb": "também",
+    "tbm": "também",
+    "pq": "porque",
+    "pqp": "puta que pariu",
+    "mt": "muito",
+    "mto": "muito",
+    "mts": "muitos",
+    "td": "tudo",
+    "tds": "todos",
+    "to": "estou",
+    "tô": "estou",
+    "ta": "está",
+    "tá": "está",
+    "tava": "estava",
+    "tamo": "estamos",
+    "bora": "vamos",
+    "sla": "sei lá",
+    "slc": "sei lá cara",
+    "msg": "mensagem",
+    "pfv": "por favor",
+    "pf": "por favor",
+    "obg": "obrigado",
+    "obgda": "obrigada",
+    "vdd": "verdade",
+    "glr": "galera",
+    "gnt": "gente",
+    "hj": "hoje",
+    "agr": "agora",
+    "qq": "qualquer",
+    "cmg": "comigo",
+    "ctg": "contigo",
+    "sdd": "saudade",
+    "sdds": "saudades",
+    "bj": "beijo",
+    "bjo": "beijo",
+    "bjs": "beijos",
+    "abs": "abraço",
+    "fds": "final de semana",
+    "dnv": "de novo",
+    "oq": "o que",
+    "neh": "né",
+    "add": "adicionar",
+    "tmj": "tamo junto",
+    "fmz": "de boa",
+    "susp": "suspeito",
+    "n": "não",
+    "naum": "não",
+    "eh": "é",
+}
+
+# Ordena por tamanho decrescente pra evitar que uma giria menor "coma"
+# parte de uma maior no regex (ex: "vc" dentro de "vcs")
+_PADRAO_GIRIAS = re.compile(
+    r"\b(" + "|".join(re.escape(g) for g in sorted(GIRIAS, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _expandir_girias(texto: str) -> str:
+    """Troca gírias/abreviações conhecidas pela forma completa,
+    preservando a capitalização original (maiúscula/minúscula)."""
+
+    def _sub(match: re.Match) -> str:
+        original = match.group(0)
+        expandido = GIRIAS.get(original.lower())
+        if expandido is None:
+            return original
+        if original.isupper():
+            return expandido.upper()
+        if original[0].isupper():
+            return expandido[0].upper() + expandido[1:]
+        return expandido
+
+    return _PADRAO_GIRIAS.sub(_sub, texto)
 
 
 async def _traduzir(texto: str, idioma_destino: str) -> str | None:
@@ -87,6 +175,11 @@ class Tradutor(commands.Cog):
         texto = message.content
         if not texto or not texto.strip():
             return  # mensagem só com imagem/anexo/embed — nada de texto pra traduzir
+
+        # Só faz sentido expandir gírias em português quando a origem é o
+        # texto em português (ou seja, traduzindo PT -> EN)
+        if idioma_destino == "en":
+            texto = _expandir_girias(texto)
 
         traduzido = await _traduzir(texto, idioma_destino)
         if not traduzido:
