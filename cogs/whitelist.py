@@ -604,9 +604,14 @@ class Whitelist(commands.Cog):
             await interaction.response.send_message("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
             return
         registro["status"] = "visualizada"
+        registro["visualizado_por_id"] = interaction.user.id
+        registro["visualizado_por_nome"] = str(interaction.user)
         salvar("whitelist", self.dados)
         await self.atualizar_status_board(interaction.guild, membro_id)
-        await interaction.response.send_message(f"👀 Marcada como em análise por {interaction.user.mention}.")
+        await interaction.response.send_message(
+            f"👀 Marcada como em análise por {interaction.user.mention}. "
+            f"A partir de agora, só {interaction.user.mention} pode aprovar ou recusar essa whitelist."
+        )
 
     # ── Admin aprova ──────────────────────────────────────────────
     async def aprovar(self, interaction: discord.Interaction, membro_id: int):
@@ -621,6 +626,15 @@ class Whitelist(commands.Cog):
             quem = registro.get("decidido_por_nome", "outro administrador")
             await interaction.response.send_message(
                 f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela.",
+                ephemeral=True,
+            )
+            return
+
+        visualizado_por_id = registro.get("visualizado_por_id")
+        if visualizado_por_id is not None and visualizado_por_id != interaction.user.id:
+            nome = registro.get("visualizado_por_nome", "outro administrador")
+            await interaction.response.send_message(
+                f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar.",
                 ephemeral=True,
             )
             return
@@ -687,6 +701,15 @@ class Whitelist(commands.Cog):
             )
             return
 
+        visualizado_por_id = registro.get("visualizado_por_id")
+        if visualizado_por_id is not None and visualizado_por_id != interaction.user.id:
+            nome = registro.get("visualizado_por_nome", "outro administrador")
+            await interaction.response.send_message(
+                f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar.",
+                ephemeral=True,
+            )
+            return
+
         # Mesma trava imediata explicada em cima, em aprovar()
         registro["status"] = "recusada"
         registro["decidido_por_nome"] = str(interaction.user)
@@ -703,6 +726,8 @@ class Whitelist(commands.Cog):
         # Reabre o canal e reinicia do zero
         registro["respostas"] = {}
         registro["status"] = "em_andamento"
+        registro["visualizado_por_id"] = None
+        registro["visualizado_por_nome"] = None
         salvar("whitelist", self.dados)
 
         if membro:
