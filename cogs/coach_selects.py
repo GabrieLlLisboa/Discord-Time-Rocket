@@ -51,14 +51,12 @@ class NotaSelect(discord.ui.Select):
 
         nota = int(self.values[0])
         await interaction.response.send_modal(ComentarioModal(self.canal_ticket_id, nota))
-
-        # Desabilita o select para não permitir reenvio duplicado a partir
-        # da mesma mensagem ephemeral.
-        self.disabled = True
-        try:
-            await interaction.edit_original_response(view=self.view)
-        except discord.HTTPException:
-            pass
+        # OBS: não dá pra desabilitar o select depois daqui — o send_modal
+        # já consumiu a resposta desta interação, então não existe mais
+        # "mensagem original" pra editar (interaction.edit_original_response
+        # sempre falharia). A proteção contra reenvio duplicado já é feita
+        # no início deste callback e em coach_manager.concluir_avaliacao
+        # (via TicketJaAvaliadoError), então não é necessário aqui.
 
 
 class NotaSelectView(discord.ui.View):

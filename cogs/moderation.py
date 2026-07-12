@@ -118,8 +118,8 @@ class Moderation(commands.Cog):
         else:
             await interaction.response.send_message(embed=mu.embed_erro(f"Caso `#{caso_id}` não encontrado."), ephemeral=True)
 
-    # ── /historico ────────────────────────────────────────────────────────
-    @app_commands.command(name="historico", description="Mostra o histórico completo de punições de um membro.")
+    # ── /historico-punicoes ──────────────────────────────────────────────
+    @app_commands.command(name="historico-punicoes", description="Mostra o histórico completo de punições de um membro.")
     @app_commands.describe(membro="Membro a consultar")
     @app_commands.default_permissions(moderate_members=True)
     async def historico(self, interaction: discord.Interaction, membro: discord.Member):

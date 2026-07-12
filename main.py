@@ -63,8 +63,14 @@ COGS = [
     "cogs.auto_update",
     "cogs.demote",
     "cogs.coach_commands",
-    # ── Sistema de Moderação ──
 
+    # ── Sistema de Moderação ──
+    "cogs.mod_config",
+    "cogs.mod_setup",
+    "cogs.moderation",
+    "cogs.automod",
+    "cogs.antiraid",
+    "cogs.clear",
 ]
 
 async def load_cogs():
