@@ -42,10 +42,8 @@ COGS = [
     "cogs.welcome",
     "cogs.leave",
     "cogs.tickets",
-
     "cogs.notifications",
     "cogs.players",
-    "cogs.grafico_jogadores",
     "cogs.friendly",
     "cogs.tiktok",
     "cogs.backup",
