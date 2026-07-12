@@ -13,11 +13,23 @@ Usa o endpoint não-oficial do Google Tradutor (o mesmo que bibliotecas
 como googletrans usam por baixo dos panos) — não precisa de chave de API.
 Se a tradução falhar por qualquer motivo, a mensagem simplesmente não é
 replicada; não trava o bot nem avisa erro pro usuário no canal.
+
+Antes de mandar pro tradutor, o texto passa por um pré-processamento:
+  1. Protege menções (@fulano), emojis customizados, canais e links —
+     eles saem intactos, sem o tradutor tentar "traduzir" um ID ou quebrar
+     um link.
+  2. Normaliza risada (kkkkk, rsrsrs) e letras esticadas (muuuuito) pra não
+     confundir o tradutor.
+  3. Expande gírias/abreviações comuns de chat em português (dps, blz,
+     vlw, etc.) pela forma completa.
+Depois de traduzido, os tokens protegidos (menções/emojis/links) voltam
+pro lugar original.
 """
 
 from __future__ import annotations
 
 import re
+import time
 
 import discord
 from discord.ext import commands
@@ -31,23 +43,28 @@ CANAL_PT_ID = 1511910275618443314
 CANAL_EN_ID = 1525864485884137503
 CARGO_INGLES_ID = 1525312330831892481
 
-# Gírias/abreviações comuns de chat em português -> forma completa.
-# São expandidas ANTES de mandar pro tradutor, porque o Google Tradutor
-# geralmente não entende "dps", "blz" etc. e traduz errado (ou nem traduz).
+
+# ═══════════════════════════════════════════════════════════════════════
+#  1. GÍRIAS / ABREVIAÇÕES — expandidas ANTES de traduzir PT -> EN
+# ═══════════════════════════════════════════════════════════════════════
 GIRIAS = {
     "dps": "depois",
     "blz": "beleza",
+    "blza": "beleza",
     "vlw": "valeu",
     "vlws": "valeu",
     "flw": "falou",
+    "flws": "falou",
     "vc": "você",
     "vcs": "vocês",
     "tb": "também",
     "tbm": "também",
+    "tmb": "também",
     "pq": "porque",
     "pqp": "puta que pariu",
     "mt": "muito",
     "mto": "muito",
+    "mta": "muita",
     "mts": "muitos",
     "td": "tudo",
     "tds": "todos",
@@ -63,7 +80,9 @@ GIRIAS = {
     "msg": "mensagem",
     "pfv": "por favor",
     "pf": "por favor",
+    "pfvr": "por favor",
     "obg": "obrigado",
+    "obgd": "obrigado",
     "obgda": "obrigada",
     "vdd": "verdade",
     "glr": "galera",
@@ -71,6 +90,9 @@ GIRIAS = {
     "hj": "hoje",
     "agr": "agora",
     "qq": "qualquer",
+    "qnd": "quando",
+    "qm": "quem",
+    "cmo": "como",
     "cmg": "comigo",
     "ctg": "contigo",
     "sdd": "saudade",
@@ -90,9 +112,18 @@ GIRIAS = {
     "n": "não",
     "naum": "não",
     "eh": "é",
+    "aki": "aqui",
+    "aew": "aí",
+    "ae": "aí",
+    "rlx": "relaxa",
+    "mlk": "moleque",
+    "mds": "meu deus",
+    "sqn": "só que não",
+    "kd": "cadê",
+    "cad": "cadê",
 }
 
-# Ordena por tamanho decrescente pra evitar que uma giria menor "coma"
+# Ordena por tamanho decrescente pra evitar que uma gíria menor "coma"
 # parte de uma maior no regex (ex: "vc" dentro de "vcs")
 _PADRAO_GIRIAS = re.compile(
     r"\b(" + "|".join(re.escape(g) for g in sorted(GIRIAS, key=len, reverse=True)) + r")\b",
@@ -118,15 +149,100 @@ def _expandir_girias(texto: str) -> str:
     return _PADRAO_GIRIAS.sub(_sub, texto)
 
 
-async def _traduzir(texto: str, idioma_destino: str) -> str | None:
+# ═══════════════════════════════════════════════════════════════════════
+#  2. NORMALIZAÇÃO — risada e letras esticadas
+# ═══════════════════════════════════════════════════════════════════════
+_PADRAO_RISADA = re.compile(
+    r"\b(?:[kK]{3,}|[hH](?:[aA][hH]?)+|(?:[rR][sS]){2,}|[rR][sS]{2,})\b"
+)
+_PADRAO_LETRA_ESTICADA = re.compile(r"(.)\1{3,}")  # ex: "muuuuuito" (4+ repetições seguidas)
+
+
+def _normalizar_texto(texto: str) -> str:
+    # "kkkkkk", "hahaha", "rsrsrs" -> "haha" (o tradutor entende melhor
+    # e não gera um resultado aleatório tentando traduzir "kkkkkk")
+    texto = _PADRAO_RISADA.sub("haha", texto)
+    # "muuuuuito" -> "muiito" (encolhe repetição de 4+ letras pra 2,
+    # mantém um pouco da ênfase sem confundir o tradutor)
+    texto = _PADRAO_LETRA_ESTICADA.sub(r"\1\1", texto)
+    return texto
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  3. PROTEÇÃO DE TOKENS — menções, emojis, canais e links não podem
+#     passar pelo tradutor (ele quebra/mistura os IDs e URLs)
+# ═══════════════════════════════════════════════════════════════════════
+_PADRAO_PROTEGER = re.compile(
+    r"(https?://\S+|<a?:\w+:\d+>|<@!?\d+>|<#\d+>|<@&\d+>)"
+)
+_PADRAO_TOKEN = re.compile(r"Z0X(\d+)X0Z")
+
+
+def _proteger_tokens(texto: str) -> tuple[str, list[str]]:
+    tokens: list[str] = []
+
+    def _sub(match: re.Match) -> str:
+        tokens.append(match.group(0))
+        return f"Z0X{len(tokens) - 1}X0Z"
+
+    return _PADRAO_PROTEGER.sub(_sub, texto), tokens
+
+
+def _restaurar_tokens(texto: str, tokens: list[str]) -> str:
+    def _sub(match: re.Match) -> str:
+        idx = int(match.group(1))
+        return tokens[idx] if idx < len(tokens) else match.group(0)
+
+    return _PADRAO_TOKEN.sub(_sub, texto)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  4. TRADUÇÃO — cliente HTTP persistente (bem mais rápido que abrir uma
+#     conexão nova a cada mensagem), com 1 retry rápido, e um cache
+#     simples em memória pra frases repetidas ("gg", "bom jogo" etc.)
+# ═══════════════════════════════════════════════════════════════════════
+_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
+_CACHE_TTL = 60 * 30  # meia hora
+_CACHE_MAX = 500
+
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+}
+
+
+def _cache_get(texto: str, destino: str) -> str | None:
+    chave = (texto, destino)
+    item = _CACHE.get(chave)
+    if item is None:
+        return None
+    valor, expira_em = item
+    if time.monotonic() > expira_em:
+        _CACHE.pop(chave, None)
+        return None
+    return valor
+
+
+def _cache_set(texto: str, destino: str, valor: str) -> None:
+    if len(_CACHE) >= _CACHE_MAX:
+        _CACHE.pop(next(iter(_CACHE)), None)  # remove o mais antigo
+    _CACHE[(texto, destino)] = (valor, time.monotonic() + _CACHE_TTL)
+
+
+async def _traduzir(client: httpx.AsyncClient, texto: str, idioma_destino: str) -> str | None:
     """Traduz `texto` pro idioma `idioma_destino` ('en' ou 'pt').
     Retorna None se der qualquer erro (rede fora do ar, resposta
     inesperada, etc.) — quem chama trata isso simplesmente não
     republicando a mensagem."""
     if not texto or not texto.strip():
         return None
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
+
+    em_cache = _cache_get(texto, idioma_destino)
+    if em_cache is not None:
+        return em_cache
+
+    for tentativa in range(2):  # 1 tentativa + 1 retry rápido
+        try:
             resp = await client.get(
                 "https://translate.googleapis.com/translate_a/single",
                 params={
@@ -136,19 +252,33 @@ async def _traduzir(texto: str, idioma_destino: str) -> str | None:
                     "dt": "t",
                     "q": texto,
                 },
+                headers=_HEADERS,
             )
             resp.raise_for_status()
             dados = resp.json()
             # dados[0] é uma lista de segmentos [texto_traduzido, texto_original, ...]
-            return "".join(segmento[0] for segmento in dados[0] if segmento[0])
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
-        print(f"[TRADUTOR] ⚠️ Erro ao traduzir: {e}")
-        return None
+            traduzido = "".join(segmento[0] for segmento in dados[0] if segmento[0])
+            _cache_set(texto, idioma_destino, traduzido)
+            return traduzido
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
+            if tentativa == 0:
+                continue  # tenta mais uma vez rapidinho antes de desistir
+            print(f"[TRADUTOR] ⚠️ Erro ao traduzir: {e}")
+            return None
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  Cog
+# ═══════════════════════════════════════════════════════════════════════
 class Tradutor(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        # Cliente HTTP único e reutilizado (bem mais rápido do que abrir
+        # uma conexão TLS nova a cada mensagem mandada no canal)
+        self.client = httpx.AsyncClient(timeout=8)
+
+    async def cog_unload(self):
+        await self.client.aclose()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -172,18 +302,33 @@ class Tradutor(commands.Cog):
             await self._retransmitir(message, destino_id=CANAL_PT_ID, idioma_destino="pt", bandeira="🇧🇷")
 
     async def _retransmitir(self, message: discord.Message, destino_id: int, idioma_destino: str, bandeira: str):
-        texto = message.content
-        if not texto or not texto.strip():
+        texto_original = message.content
+        if not texto_original or not texto_original.strip():
             return  # mensagem só com imagem/anexo/embed — nada de texto pra traduzir
 
-        # Só faz sentido expandir gírias em português quando a origem é o
-        # texto em português (ou seja, traduzindo PT -> EN)
+        # 1. Protege menções, emojis, canais e links antes de mexer no texto
+        texto, tokens = _proteger_tokens(texto_original)
+
+        # 2. Normaliza risada e letras esticadas
+        texto = _normalizar_texto(texto)
+
+        # 3. Só faz sentido expandir gírias em português quando a origem é
+        #    o texto em português (ou seja, traduzindo PT -> EN)
         if idioma_destino == "en":
             texto = _expandir_girias(texto)
 
-        traduzido = await _traduzir(texto, idioma_destino)
+        # Se depois de tirar os tokens protegidos não sobrou texto de
+        # verdade (ex: mensagem que era só um link ou só uma menção),
+        # não há nada útil pra traduzir
+        if not _PADRAO_TOKEN.sub("", texto).strip():
+            return
+
+        traduzido = await _traduzir(self.client, texto, idioma_destino)
         if not traduzido:
             return
+
+        # 4. Devolve menções/emojis/links pro lugar
+        traduzido = _restaurar_tokens(traduzido, tokens)
 
         canal_destino = self.bot.get_channel(destino_id)
         if canal_destino is None:
