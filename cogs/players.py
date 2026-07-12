@@ -53,12 +53,7 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
         color=0xD4A843,
     )
 
-    embed.add_field(name="\u200b", value="```╔══════════  🏢  STAFF  ══════════╗```", inline=False)
-
     for cargo_info in CARGOS:
-        if cargo_info["secao"] != "staff":
-            continue
-
         membros = sorted(
             _membros_do_cargo(guild, cargo_info["id"]),
             key=lambda m: m.display_name.lower()
