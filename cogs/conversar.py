@@ -18,10 +18,22 @@ from discord.ext import commands
 #
 #  Uso:
 #    !conversar <o que o bot vai falar>
-#    !conversar <o que o bot vai falar> <id da mensagem>   (responde a ela)
+#    !conversar <id do canal> <o que o bot vai falar>
+#    !conversar <o que o bot vai falar> <id da mensagem>
+#    !conversar <id do canal> <o que o bot vai falar> <id da mensagem>
+#
+#  - id do canal: opcional, primeiro "token" da frase — manda a mensagem
+#    nesse canal em vez do canal onde o comando foi digitado.
+#  - id da mensagem: opcional, último "token" da frase — responde a essa
+#    mensagem (procurada no canal de destino) em vez de só mandar solto.
 # ─────────────────────────────────────────────
 
 ID_AUTORIZADO = 1487452210605588592
+TAMANHO_MINIMO_ID = 15  # IDs do Discord (snowflakes) têm 17-19 dígitos
+
+
+def _eh_id_valido(token: str) -> bool:
+    return token.isdigit() and len(token) >= TAMANHO_MINIMO_ID
 
 
 class Conversar(commands.Cog):
@@ -38,21 +50,35 @@ class Conversar(commands.Cog):
         if not argumento or not argumento.strip():
             return
 
-        texto = argumento
-        mensagem_alvo = None
+        texto = argumento.strip()
+        canal_alvo = ctx.channel
 
-        # Se a última "palavra" for um número grande (jeitão de ID de
-        # mensagem do Discord), tenta usar como o ID a responder.
-        partes = argumento.rsplit(" ", 1)
-        if len(partes) == 2 and partes[1].isdigit() and len(partes[1]) >= 15:
-            possivel_texto, possivel_id = partes[0], partes[1]
+        # ── 1) Canal opcional: primeiro token da frase ──────────────────────
+        partes_inicio = texto.split(" ", 1)
+        if len(partes_inicio) == 2 and _eh_id_valido(partes_inicio[0]):
+            canal_possivel = self.bot.get_channel(int(partes_inicio[0]))
+            if canal_possivel is None:
+                try:
+                    canal_possivel = await self.bot.fetch_channel(int(partes_inicio[0]))
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    canal_possivel = None
+
+            if canal_possivel is not None:
+                canal_alvo = canal_possivel
+                texto = partes_inicio[1]
+
+        if not texto.strip():
+            return
+
+        # ── 2) Mensagem opcional: último token da frase ─────────────────────
+        mensagem_alvo = None
+        partes_fim = texto.rsplit(" ", 1)
+        if len(partes_fim) == 2 and _eh_id_valido(partes_fim[1]):
             try:
-                mensagem_alvo = await ctx.channel.fetch_message(int(possivel_id))
-                texto = possivel_texto
+                mensagem_alvo = await canal_alvo.fetch_message(int(partes_fim[1]))
+                texto = partes_fim[0]
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                # Não achou a mensagem — trata o argumento inteiro como texto.
                 mensagem_alvo = None
-                texto = argumento
 
         if not texto.strip():
             return
@@ -61,7 +87,7 @@ class Conversar(commands.Cog):
             if mensagem_alvo is not None:
                 await mensagem_alvo.reply(texto, mention_author=False)
             else:
-                await ctx.send(texto)
+                await canal_alvo.send(texto)
         except discord.HTTPException:
             pass
 
