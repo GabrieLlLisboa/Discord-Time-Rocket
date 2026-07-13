@@ -63,38 +63,47 @@ def headers_aleatorios() -> dict:
     }
 
 
-def extrair_video_id(link: str) -> str | None:
-    """Tenta achar o ID numérico do vídeo direto na URL (funciona pra links completos, tipo tiktok.com/@user/video/123...)."""
-    m = re.search(r'/video/(\d+)', link)
-    return m.group(1) if m else None
+def extrair_video_id(link: str) -> tuple[str, str] | None:
+    """
+    Tenta achar o ID numérico do post direto na URL — funciona pra links
+    completos tanto de vídeo (tiktok.com/@user/video/123...) quanto de post
+    em foto (tiktok.com/@user/photo/123...), que é outro formato que o
+    TikTok usa desde que lançou o modo carrossel de fotos.
+    Retorna (tipo, id) onde tipo é "video" ou "photo", ou None se não achar.
+    """
+    m = re.search(r'/(video|photo)/(\d+)', link)
+    return (m.group(1), m.group(2)) if m else None
 
 
 async def buscar_por_link(client: httpx.AsyncClient, link: str) -> dict | None:
     """
-    Resolve um link de vídeo do TikTok informado manualmente (inclusive
-    links curtos, tipo vm.tiktok.com/xxxx ou vt.tiktok.com/xxxx, que
-    redirecionam pro link completo) e busca o título via oEmbed.
+    Resolve um link de post do TikTok informado manualmente — vídeo ou foto
+    —, inclusive links curtos (tipo vm.tiktok.com/xxxx ou vt.tiktok.com/xxxx,
+    que redirecionam pro link completo), e busca o título via oEmbed.
     """
     url_final = link.strip()
 
-    video_id = extrair_video_id(url_final)
-    if video_id is None:
-        # Link curto (vm.tiktok.com / vt.tiktok.com) ou sem /video/ na URL —
-        # segue os redirecionamentos até achar o link completo.
+    encontrado = extrair_video_id(url_final)
+    if encontrado is None:
+        # Link curto (vm.tiktok.com / vt.tiktok.com) ou sem /video/ /photo/
+        # na URL — segue os redirecionamentos até achar o link completo.
         try:
             resp = await client.get(url_final, headers=headers_aleatorios(), timeout=15, follow_redirects=True)
             url_final = str(resp.url)
-            video_id = extrair_video_id(url_final)
+            encontrado = extrair_video_id(url_final)
         except Exception as e:
             print(f"[TIKTOK] ⚠️  Falha ao resolver link curto '{link}': {e}")
 
-    if video_id is None:
+    if encontrado is None:
         return None
 
-    url_canonica = f"https://www.tiktok.com/@{TIKTOK_USER}/video/{video_id}"
+    tipo, post_id = encontrado
+    url_canonica = f"https://www.tiktok.com/@{TIKTOK_USER}/{tipo}/{post_id}"
     titulo = "Sem título"
     try:
-        oembed_url = f"https://www.tiktok.com/oembed?url={url_canonica}"
+        # O oEmbed do TikTok aceita tanto link de vídeo quanto de foto —
+        # usamos a própria URL original resolvida, que já é o formato certo.
+        oembed_url = f"https://www.tiktok.com/oembed?url={url_final}"
         oe = await client.get(oembed_url, headers=headers_aleatorios(), timeout=10)
         if oe.status_code == 200:
             titulo = oe.json().get("title", "Sem título")
@@ -102,9 +111,9 @@ async def buscar_por_link(client: httpx.AsyncClient, link: str) -> dict | None:
         print(f"[TIKTOK] ⚠️  oEmbed falhou pro link manual: {e}")
 
     return {
-        "id":     video_id,
+        "id":     post_id,
         "titulo": titulo,
-        "url":    url_final if "/video/" in url_final else url_canonica,
+        "url":    url_final if f"/{tipo}/" in url_final else url_canonica,
         "via":    "link manual",
     }
 
