@@ -48,7 +48,10 @@ class GraficoJogadores(commands.Cog):
         if channel is None:
             print(f"[GRAFICO] ⚠️  Canal {JOGADORES_CHANNEL_ID} não encontrado.")
             return
-        await self._editar_ou_criar(channel)
+        try:
+            await self._editar_ou_criar(channel)
+        except Exception as e:
+            print(f"[GRAFICO] ⚠️ Erro ao atualizar gráfico: {e}")
 
     @atualizar_grafico.before_loop
     async def antes_do_loop(self):

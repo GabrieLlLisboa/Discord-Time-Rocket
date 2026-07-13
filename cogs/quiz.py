@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import random
-import time
 
 from cogs.json_store import ler_json, salvar_json
 

@@ -57,7 +57,7 @@ class AvaliarCoachView(discord.ui.View):
         self.add_item(botao)
 
     async def _callback(self, interaction: discord.Interaction):
-        from cogs.coach_storage import obter_ticket, TicketNaoEncontradoError
+        from cogs.coach_storage import obter_ticket
         from cogs.coach_selects import NotaSelectView
 
         ticket = await obter_ticket(self.canal_ticket_id)

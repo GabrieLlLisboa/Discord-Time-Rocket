@@ -1,9 +1,9 @@
 import discord
 from discord.ext import commands, tasks
-import json
 import os
-import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+
+from cogs.json_store import ler_json, salvar_json
 
 # ─────────────────────────────────────────────
 #  Cog: Quarentena por inatividade
@@ -69,16 +69,11 @@ MENSAGEM_EXPULSAO_DIRETA = (
 
 # ── Helpers de leitura/escrita ──────────────────────────────────────────────
 def ler_dados() -> dict:
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"ativos": {}}
+    return ler_json(DATA_FILE, {"ativos": {}})
 
 
 def salvar_dados(dados: dict):
-    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(dados, f, ensure_ascii=False, indent=2)
+    salvar_json(DATA_FILE, dados)
 
 
 class Demote(commands.Cog):
@@ -565,63 +560,70 @@ class Demote(commands.Cog):
         alterou = False
 
         for uid, info in list(dados["ativos"].items()):
-            if info.get("respondido"):
-                continue
+            try:
+                if info.get("respondido"):
+                    continue
 
-            expira_em = datetime.fromisoformat(info["expira_em"])
-            if agora < expira_em:
-                continue
+                expira_em = datetime.fromisoformat(info["expira_em"])
+                if agora < expira_em:
+                    continue
 
-            guild = self.bot.get_guild(info["guild_id"])
-            if guild is None:
-                continue
+                guild = self.bot.get_guild(info["guild_id"])
+                if guild is None:
+                    continue
 
-            membro = guild.get_member(int(uid))
+                membro = guild.get_member(int(uid))
 
-            # Envia a DM final antes de expulsar
-            if membro:
-                try:
-                    embed = discord.Embed(
-                        title="🔻 Remoção do Clube",
-                        description=MENSAGEM_REMOCAO_FINAL,
-                        color=0xED4245,
-                    )
-                    embed.set_footer(text="TryHarders RL")
-                    await membro.send(embed=embed)
-                except discord.Forbidden:
-                    pass
+                # Envia a DM final antes de expulsar
+                if membro:
+                    try:
+                        embed = discord.Embed(
+                            title="🔻 Remoção do Clube",
+                            description=MENSAGEM_REMOCAO_FINAL,
+                            color=0xED4245,
+                        )
+                        embed.set_footer(text="TryHarders RL")
+                        await membro.send(embed=embed)
+                    except discord.Forbidden:
+                        pass
 
-                try:
-                    await guild.kick(membro, reason="Sem resposta durante os 7 dias de quarentena")
-                except discord.Forbidden:
-                    print(f"[DEMOTE] ❌ Sem permissão para expulsar {membro} após expiração da quarentena.")
+                    try:
+                        await guild.kick(membro, reason="Sem resposta durante os 7 dias de quarentena")
+                    except discord.Forbidden:
+                        print(f"[DEMOTE] ❌ Sem permissão para expulsar {membro} após expiração da quarentena.")
 
-            del dados["ativos"][uid]
-            alterou = True
-            salvar_dados(dados)  # salva antes de apagar o canal, pra não duplicar o log do listener de canal apagado
+                del dados["ativos"][uid]
+                alterou = True
+                salvar_dados(dados)  # salva antes de apagar o canal, pra não duplicar o log do listener de canal apagado
 
-            canal = self.bot.get_channel(info["channel_id"])
-            if canal:
-                try:
-                    await canal.delete(reason="Quarentena expirada — jogador expulso automaticamente")
-                except discord.Forbidden:
-                    pass
+                canal = self.bot.get_channel(info["channel_id"])
+                if canal:
+                    try:
+                        await canal.delete(reason="Quarentena expirada — jogador expulso automaticamente")
+                    except discord.Forbidden:
+                        pass
 
-            print(f"[DEMOTE] 🔻 {info.get('user_name', uid)} expulso automaticamente após {DIAS_QUARENTENA} dias sem resposta.")
+                print(f"[DEMOTE] 🔻 {info.get('user_name', uid)} expulso automaticamente após {DIAS_QUARENTENA} dias sem resposta.")
 
-            await self.enviar_log(
-                title="🔻 Expulsão automática após quarentena",
-                description=(
-                    f"**{info.get('user_name', uid)}** (`{uid}`) foi expulso(a) automaticamente "
-                    f"por não responder em {DIAS_QUARENTENA} dias."
-                ),
-                color=0xED4245,
-                fields=[
-                    ("Motivo original", info.get("motivo", "Inatividade")),
-                    ("Cargos que ele(a) tinha (não restaurados)",
-                     ", ".join(str(rid) for rid in info.get("cargos_removidos", [])) or "—"),
-                ],
-            )
+                await self.enviar_log(
+                    title="🔻 Expulsão automática após quarentena",
+                    description=(
+                        f"**{info.get('user_name', uid)}** (`{uid}`) foi expulso(a) automaticamente "
+                        f"por não responder em {DIAS_QUARENTENA} dias."
+                    ),
+                    color=0xED4245,
+                    fields=[
+                        ("Motivo original", info.get("motivo", "Inatividade")),
+                        ("Cargos que ele(a) tinha (não restaurados)",
+                         ", ".join(str(rid) for rid in info.get("cargos_removidos", [])) or "—"),
+                    ],
+                )
+            except Exception as e:
+                # Um registro malformado (ex: 'expira_em' ausente/inválido, dado
+                # legado corrompido) não pode derrubar o loop pra sempre — isso
+                # pararia a expulsão automática de quarentena para TODO MUNDO,
+                # não só para esse registro.
+                print(f"[DEMOTE] ⚠️ Erro ao processar quarentena de {uid}: {e}")
 
         if alterou:
             salvar_dados(dados)

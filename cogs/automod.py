@@ -66,7 +66,7 @@ class Automod(commands.Cog):
 
         if not cfg_auto.get("log_apenas"):
             try:
-                aviso = await message.channel.send(
+                await message.channel.send(
                     f"⚠️ {message.author.mention}, sua mensagem foi removida pelo AutoMod: **{motivo}**.",
                     delete_after=6,
                 )
@@ -143,7 +143,7 @@ class Automod(commands.Cog):
             texto_lower = conteudo.lower()
             for palavra in proibidas:
                 if re.search(rf"\b{re.escape(palavra.lower())}\b", texto_lower):
-                    await self._acao(message, f"Palavra proibida detectada", palavra, cfg)
+                    await self._acao(message, "Palavra proibida detectada", palavra, cfg)
                     return
 
         # ── CAPS excessivo ────────────────────────────────────────────────

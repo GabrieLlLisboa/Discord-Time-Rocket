@@ -23,7 +23,6 @@ from cogs.coach_storage import (
     registrar_canal_voz,
     TicketJaAbertoError,
     TicketNaoEncontradoError,
-    TicketJaFinalizadoError,
     TicketJaAvaliadoError,
     TicketNaoFinalizadoError,
 )

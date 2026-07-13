@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from datetime import timezone
 from cogs.backup import ler, salvar, agora_str
 
 # ─────────────────────────────────────────────

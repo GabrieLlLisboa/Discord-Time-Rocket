@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-import os
 
 from cogs.json_store import ler_json, salvar_json
 

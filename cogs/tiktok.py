@@ -230,49 +230,53 @@ class TikTok(commands.Cog):
     @tasks.loop(minutes=30)
     async def verificar_tiktok(self):
         await self.bot.wait_until_ready()
+        try:
+            canal = self.bot.get_channel(TIKTOK_CHANNEL_ID)
+            if canal is None:
+                print(f"[TIKTOK] ⚠️  Canal {TIKTOK_CHANNEL_ID} não encontrado.")
+                return
 
-        canal = self.bot.get_channel(TIKTOK_CHANNEL_ID)
-        if canal is None:
-            print(f"[TIKTOK] ⚠️  Canal {TIKTOK_CHANNEL_ID} não encontrado.")
-            return
+            video = await buscar_ultimo_video()
 
-        video = await buscar_ultimo_video()
+            if video is None:
+                self.falhas += 1
+                print(f"[TIKTOK] ⚠️  Falha #{self.falhas} ao buscar vídeo.")
+                return
 
-        if video is None:
-            self.falhas += 1
-            print(f"[TIKTOK] ⚠️  Falha #{self.falhas} ao buscar vídeo.")
-            return
+            self.falhas = 0  # reset contador de falhas
 
-        self.falhas = 0  # reset contador de falhas
+            # Primeira execução — só salva
+            if self.ultimo_video is None:
+                self.ultimo_video = video["id"]
+                salvar_ultimo_video(video["id"])
+                print(f"[TIKTOK] ✅ Primeiro vídeo registrado: {video['id']}")
+                return
 
-        # Primeira execução — só salva
-        if self.ultimo_video is None:
-            self.ultimo_video = video["id"]
-            salvar_ultimo_video(video["id"])
-            print(f"[TIKTOK] ✅ Primeiro vídeo registrado: {video['id']}")
-            return
+            # Vídeo novo!
+            if video["id"] != self.ultimo_video:
+                self.ultimo_video = video["id"]
+                salvar_ultimo_video(video["id"])
 
-        # Vídeo novo!
-        if video["id"] != self.ultimo_video:
-            self.ultimo_video = video["id"]
-            salvar_ultimo_video(video["id"])
+                cargo = canal.guild.get_role(VIDEO_NOVO_ROLE_ID)
+                mencao = cargo.mention if cargo else ""
 
-            cargo = canal.guild.get_role(VIDEO_NOVO_ROLE_ID)
-            mencao = cargo.mention if cargo else ""
+                embed = discord.Embed(
+                    title="🎵  A TryHarders RL postou um vídeo novo!",
+                    color=0xD4A843,
+                )
+                embed.add_field(name="📌  Título", value=video["titulo"], inline=False)
+                embed.add_field(name="🔗  Link",   value=video["url"],    inline=False)
+                embed.set_footer(text="TikTok • @tryharders.rl")
+                embed.timestamp = discord.utils.utcnow()
 
-            embed = discord.Embed(
-                title="🎵  A TryHarders RL postou um vídeo novo!",
-                color=0xD4A843,
-            )
-            embed.add_field(name="📌  Título", value=video["titulo"], inline=False)
-            embed.add_field(name="🔗  Link",   value=video["url"],    inline=False)
-            embed.set_footer(text="TikTok • @tryharders.rl")
-            embed.timestamp = discord.utils.utcnow()
-
-            await canal.send(content=mencao if mencao else None, embed=embed)
-            print(f"[TIKTOK] 🎉 Novo vídeo notificado: {video['titulo']}")
-        else:
-            print(f"[TIKTOK] 🔁 Nenhum vídeo novo.")
+                await canal.send(content=mencao if mencao else None, embed=embed)
+                print(f"[TIKTOK] 🎉 Novo vídeo notificado: {video['titulo']}")
+            else:
+                print("[TIKTOK] 🔁 Nenhum vídeo novo.")
+        except Exception as e:
+            # Uma falha de rede/scraping não pode matar essa verificação
+            # periódica pra sempre — só loga e tenta de novo no próximo ciclo.
+            print(f"[TIKTOK] ⚠️ Erro inesperado ao verificar novo vídeo: {e}")
 
     @verificar_tiktok.before_loop
     async def antes_do_loop(self):

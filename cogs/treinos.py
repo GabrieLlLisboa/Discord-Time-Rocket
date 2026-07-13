@@ -2,9 +2,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timezone, timedelta
-import asyncio
-import re
-from cogs.backup import ler, salvar, agora_str
+from cogs.backup import ler, salvar
 
 # ─────────────────────────────────────────────
 #  Cog: Agendamento de Treinos
@@ -142,29 +140,35 @@ class Treinos(commands.Cog):
         alterado = False
 
         for t in treinos:
-            if t["lembrete_enviado"]:
-                continue
-            dt = datetime.fromisoformat(t["timestamp"])
-            diff = (dt - agora).total_seconds()
+            try:
+                if t["lembrete_enviado"]:
+                    continue
+                dt = datetime.fromisoformat(t["timestamp"])
+                diff = (dt - agora).total_seconds()
 
-            # Envia lembrete 30 min antes (janela de 1 min pra não perder)
-            if 0 < diff <= 1860:
-                canal = self.bot.get_channel(t["canal_id"])
-                if canal:
-                    dt_discord = discord.utils.format_dt(dt, style="t")
-                    embed = discord.Embed(
-                        title="⏰  Lembrete de Treino!",
-                        description=f"O treino começa em menos de **30 minutos**!",
-                        color=0xED4245,
-                    )
-                    embed.add_field(name="🕐  Horário", value=dt_discord,      inline=True)
-                    embed.add_field(name="📝  Descrição", value=t["descricao"], inline=True)
-                    embed.set_footer(text="TryHarders RL — Bora treinar! 🚀")
-                    await canal.send(embed=embed)
-                    print(f"[TREINO] ⏰ Lembrete enviado para treino #{t['id']}")
+                # Envia lembrete 30 min antes (janela de 1 min pra não perder)
+                if 0 < diff <= 1860:
+                    canal = self.bot.get_channel(t["canal_id"])
+                    if canal:
+                        dt_discord = discord.utils.format_dt(dt, style="t")
+                        embed = discord.Embed(
+                            title="⏰  Lembrete de Treino!",
+                            description="O treino começa em menos de **30 minutos**!",
+                            color=0xED4245,
+                        )
+                        embed.add_field(name="🕐  Horário", value=dt_discord,      inline=True)
+                        embed.add_field(name="📝  Descrição", value=t["descricao"], inline=True)
+                        embed.set_footer(text="TryHarders RL — Bora treinar! 🚀")
+                        await canal.send(embed=embed)
+                        print(f"[TREINO] ⏰ Lembrete enviado para treino #{t['id']}")
 
-                t["lembrete_enviado"] = True
-                alterado = True
+                    t["lembrete_enviado"] = True
+                    alterado = True
+            except Exception as e:
+                # Um treino com dado malformado (timestamp inválido, chave
+                # ausente etc.) não pode travar o lembrete de todos os outros
+                # treinos pra sempre.
+                print(f"[TREINO] ⚠️ Erro ao processar treino {t.get('id', '?')}: {e}")
 
         if alterado:
             salvar("treinos", treinos)

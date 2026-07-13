@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands, tasks
-import os
 from datetime import datetime, timedelta, timezone
 
 from cogs.players import CARGOS as _CARGOS_JOGADORES
@@ -302,24 +301,30 @@ class Atividade(commands.Cog):
         if agora < FIM_PERIODO:
             return
 
-        # Período encerrado: fecha o tempo de quem ainda estava em call
-        if self.voz_entrada:
-            agora_utc = datetime.now(timezone.utc)
-            for user_id, entrada in list(self.voz_entrada.items()):
-                decorrido = (agora_utc - entrada).total_seconds()
-                registro = self._registro(user_id)
-                registro["voz_segundos"] += max(decorrido, 0)
-                self.voz_entrada.pop(user_id, None)
-            _salvar(self.dados)
+        try:
+            # Período encerrado: fecha o tempo de quem ainda estava em call
+            if self.voz_entrada:
+                agora_utc = datetime.now(timezone.utc)
+                for user_id, entrada in list(self.voz_entrada.items()):
+                    decorrido = (agora_utc - entrada).total_seconds()
+                    registro = self._registro(user_id)
+                    registro["voz_segundos"] += max(decorrido, 0)
+                    self.voz_entrada.pop(user_id, None)
+                _salvar(self.dados)
 
-            for guild in self.bot.guilds:
-                for user_id in list(self.dados.keys()):
-                    membro = guild.get_member(int(user_id))
-                    if membro:
-                        await self._checar_e_anunciar(membro)
+                for guild in self.bot.guilds:
+                    for user_id in list(self.dados.keys()):
+                        membro = guild.get_member(int(user_id))
+                        if membro:
+                            await self._checar_e_anunciar(membro)
 
-        print("[ATIVIDADE] 🏁 Período de verificação de atividade encerrado.")
-        self.verificar_fim_periodo.cancel()
+            print("[ATIVIDADE] 🏁 Período de verificação de atividade encerrado.")
+            self.verificar_fim_periodo.cancel()
+        except Exception as e:
+            # Se algo falhar aqui, NÃO cancela o loop — melhor tentar de novo
+            # no próximo minuto do que deixar o encerramento do período pela
+            # metade (gente com tempo de call não fechado) pra sempre.
+            print(f"[ATIVIDADE] ⚠️ Erro ao encerrar período: {e}")
 
     @verificar_fim_periodo.before_loop
     async def antes_verificar(self):
@@ -498,7 +503,7 @@ class Atividade(commands.Cog):
 
         if not inativos:
             await ctx.send("✅ Ninguém inativo no momento — todo mundo já bateu a meta!")
-            await ctx.send(f"**0** inativos\nIsso representa **0%** dos membros.")
+            await ctx.send("**0** inativos\nIsso representa **0%** dos membros.")
             return
 
         inativos.sort(key=lambda m: m.display_name.lower())

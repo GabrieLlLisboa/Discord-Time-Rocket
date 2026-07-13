@@ -142,6 +142,56 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
 
 
 # ─────────────────────────────────────────────
+#  Modal: perguntas abertas (texto livre)
+# ─────────────────────────────────────────────
+class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
+    motivo_entrada = discord.ui.TextInput(
+        label="Por que você quer entrar no clube?",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=True,
+    )
+    reacao_regras = discord.ui.TextInput(
+        label="Reação a membro quebrando regra/confusão?",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=True,
+    )
+    motivo_aceitar = discord.ui.TextInput(
+        label="Por que deveríamos te aceitar?",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=True,
+    )
+
+    def __init__(self, cog: "Whitelist"):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        membro = interaction.user
+        self.cog.salvar_resposta(membro.id, "motivo_entrada", self.motivo_entrada.value.strip())
+        self.cog.salvar_resposta(membro.id, "reacao_regras", self.reacao_regras.value.strip())
+        self.cog.salvar_resposta(membro.id, "motivo_aceitar", self.motivo_aceitar.value.strip())
+
+        await interaction.response.send_message("✅ Respostas registradas!")
+        await self.cog.enviar_pergunta(interaction.channel, membro, "duvidas")
+
+
+# ─────────────────────────────────────────────
+#  View: botão que abre o modal de perguntas abertas
+# ─────────────────────────────────────────────
+class AbrirPerguntasView(discord.ui.View):
+    def __init__(self, cog: "Whitelist"):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="📝 Responder Perguntas", style=discord.ButtonStyle.primary, custom_id="wl_perguntas_abertas")
+    async def responder(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PerguntasAbertasModal(self.cog))
+
+
+# ─────────────────────────────────────────────
 #  View genérica de seleção (usada em várias perguntas)
 # ─────────────────────────────────────────────
 class EscolhaSelect(discord.ui.Select):
@@ -523,8 +573,22 @@ class Whitelist(commands.Cog):
             await canal.send("🎤 **Você tem microfone pra jogar?**", view=view)
 
         elif step == "ativo":
-            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "duvidas")
+            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "perguntas_abertas")
             await canal.send("📈 **Você pretende ser um membro ativo na equipe?**", view=view)
+
+        elif step == "perguntas_abertas":
+            embed = discord.Embed(
+                title="📝 Últimas perguntas",
+                description=(
+                    "Agora só faltam 3 perguntas rápidas com resposta em texto livre. "
+                    "Clica no botão abaixo pra abrir o formulário:\n\n"
+                    "• Por que você quer entrar no clube?\n"
+                    "• Como você reagiria se visse um membro quebrando as regras ou causando confusão?\n"
+                    "• Por que deveríamos aceitar você no clube?"
+                ),
+                color=0x5865F2,
+            )
+            await canal.send(embed=embed, view=AbrirPerguntasView(self))
 
         elif step == "duvidas":
             embed = discord.Embed(
@@ -580,6 +644,9 @@ class Whitelist(commands.Cog):
         embed_resumo.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
         embed_resumo.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed_resumo.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
+        embed_resumo.add_field(name="Por que quer entrar?", value=r.get("motivo_entrada", "—"), inline=False)
+        embed_resumo.add_field(name="Reação a quebra de regra", value=r.get("reacao_regras", "—"), inline=False)
+        embed_resumo.add_field(name="Por que devemos aceitar?", value=r.get("motivo_aceitar", "—"), inline=False)
         embed_resumo.set_footer(text=f"ID: {membro.id}")
         await interaction.channel.send(embed=embed_resumo)
 

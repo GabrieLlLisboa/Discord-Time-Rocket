@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-import os
 from datetime import datetime, timezone
 
 from cogs.players import CARGOS
@@ -317,7 +316,12 @@ class Campeonato(commands.Cog):
             if info.get("role_id") is None or info.get("guild_id") is None:
                 continue
             for uid_str in info.get("inscritos", {}).keys():
-                await _dar_cargo(self.bot, info, int(uid_str))
+                try:
+                    await _dar_cargo(self.bot, info, int(uid_str))
+                except Exception as e:
+                    # Um inscrito problemático (ex: saiu do servidor, cargo
+                    # deletado) não pode travar a checagem dos demais.
+                    print(f"[CAMPEONATO] ⚠️ Erro ao verificar cargo de {uid_str}: {e}")
 
     @verificar_cargos_torneio.before_loop
     async def antes_verificar_cargos_torneio(self):

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import discord
-from discord import app_commands
 import json
 import os
 import re
-import time
 from datetime import datetime, timezone, timedelta
 
 # ─────────────────────────────────────────────────────────────────────────────

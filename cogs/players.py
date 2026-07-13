@@ -243,7 +243,13 @@ class Players(commands.Cog):
         if channel is None:
             print(f"[PLAYERS] ⚠️  Canal {JOGADORES_CHANNEL_ID} não encontrado.")
             return
-        await self._editar_ou_criar(channel)
+        try:
+            await self._editar_ou_criar(channel)
+        except Exception as e:
+            # Uma falha pontual (ex: mensagem apagada na hora errada, erro de
+            # rede do Discord) não pode derrubar essa atualização periódica
+            # pro resto da vida do processo.
+            print(f"[PLAYERS] ⚠️ Erro ao atualizar lista de jogadores: {e}")
 
     @atualizar_lista.before_loop
     async def antes_do_loop(self):
@@ -255,7 +261,7 @@ class Players(commands.Cog):
             try:
                 msg = await channel.fetch_message(self.message_id)
                 await msg.edit(embed=embed)
-                print(f"[PLAYERS] 🔄 Lista atualizada.")
+                print("[PLAYERS] 🔄 Lista atualizada.")
                 return
             except discord.NotFound:
                 self.message_id = None

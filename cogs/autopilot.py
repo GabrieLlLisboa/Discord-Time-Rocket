@@ -4,7 +4,6 @@ from discord import app_commands
 import os
 import random
 import time
-from datetime import datetime, timezone
 
 from cogs.json_store import ler_json, salvar_json
 import cogs.atividade as atividade_mod
@@ -23,8 +22,8 @@ CANAL_PADRAO_ID = int(os.getenv("AUTOPILOT_CHANNEL_ID", 0))
 
 # Intervalo (minutos) entre uma mensagem e outra — sorteado dentro dessa faixa
 # pra não ficar previsível / robótico.
-INTERVALO_MIN = int(os.getenv("AUTOPILOT_INTERVALO_MIN", 90))
-INTERVALO_MAX = int(os.getenv("AUTOPILOT_INTERVALO_MAX", 180))
+INTERVALO_MIN = int(os.getenv("AUTOPILOT_INTERVALO_MIN", 15))
+INTERVALO_MAX = int(os.getenv("AUTOPILOT_INTERVALO_MAX", 30))
 
 
 def ler_config() -> dict:

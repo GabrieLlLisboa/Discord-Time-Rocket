@@ -274,7 +274,7 @@ async def criar_amistoso(
             f"**🏅 Rank:** {rank_display}\n"
             f"**📅 Data:** {data_hora}\n"
             + (f"**📝 Info:** {info_extra}\n" if info_extra else "") +
-            f"\nSe quiser desistir, clique no botão abaixo."
+            "\nSe quiser desistir, clique no botão abaixo."
         ),
         color=0xD4A843
     )
