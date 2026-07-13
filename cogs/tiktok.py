@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 import httpx
 import json
 import re
@@ -59,6 +60,52 @@ def headers_aleatorios() -> dict:
         "Referer": "https://www.tiktok.com/",
         "sec-fetch-site": "none",
         "sec-fetch-mode": "navigate",
+    }
+
+
+def extrair_video_id(link: str) -> str | None:
+    """Tenta achar o ID numérico do vídeo direto na URL (funciona pra links completos, tipo tiktok.com/@user/video/123...)."""
+    m = re.search(r'/video/(\d+)', link)
+    return m.group(1) if m else None
+
+
+async def buscar_por_link(client: httpx.AsyncClient, link: str) -> dict | None:
+    """
+    Resolve um link de vídeo do TikTok informado manualmente (inclusive
+    links curtos, tipo vm.tiktok.com/xxxx ou vt.tiktok.com/xxxx, que
+    redirecionam pro link completo) e busca o título via oEmbed.
+    """
+    url_final = link.strip()
+
+    video_id = extrair_video_id(url_final)
+    if video_id is None:
+        # Link curto (vm.tiktok.com / vt.tiktok.com) ou sem /video/ na URL —
+        # segue os redirecionamentos até achar o link completo.
+        try:
+            resp = await client.get(url_final, headers=headers_aleatorios(), timeout=15, follow_redirects=True)
+            url_final = str(resp.url)
+            video_id = extrair_video_id(url_final)
+        except Exception as e:
+            print(f"[TIKTOK] ⚠️  Falha ao resolver link curto '{link}': {e}")
+
+    if video_id is None:
+        return None
+
+    url_canonica = f"https://www.tiktok.com/@{TIKTOK_USER}/video/{video_id}"
+    titulo = "Sem título"
+    try:
+        oembed_url = f"https://www.tiktok.com/oembed?url={url_canonica}"
+        oe = await client.get(oembed_url, headers=headers_aleatorios(), timeout=10)
+        if oe.status_code == 200:
+            titulo = oe.json().get("title", "Sem título")
+    except Exception as e:
+        print(f"[TIKTOK] ⚠️  oEmbed falhou pro link manual: {e}")
+
+    return {
+        "id":     video_id,
+        "titulo": titulo,
+        "url":    url_final if "/video/" in url_final else url_canonica,
+        "via":    "link manual",
     }
 
 
@@ -359,6 +406,73 @@ class TikTok(commands.Cog):
     async def atualizar_videos_error(self, ctx: commands.Context, error: commands.CommandError):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("❌ Você precisa de permissão de **Gerenciar Servidor** pra usar esse comando.")
+        else:
+            raise error
+
+    # ── Comando manual: cola o link e o bot posta o anúncio na hora, sem
+    # depender do scraping automático. Serve pra casos como vídeo fixado
+    # atrapalhando a detecção, TikTok bloqueando a raspagem, ou só pra
+    # postar mais rápido sem esperar o loop. Também atualiza a "memória"
+    # de último vídeo, então o loop automático não vai reanunciar esse
+    # mesmo vídeo depois.
+    @app_commands.command(name="video-novo", description="Anuncia manualmente um vídeo do TikTok a partir do link.")
+    @app_commands.describe(link="Link do vídeo no TikTok (completo ou curto, tipo vm.tiktok.com/...)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def video_novo(self, interaction: discord.Interaction, link: str):
+        await interaction.response.defer()
+
+        canal = self.bot.get_channel(TIKTOK_CHANNEL_ID)
+        if canal is None:
+            await interaction.followup.send(f"⚠️ Canal `{TIKTOK_CHANNEL_ID}` não encontrado.")
+            return
+
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                video = await buscar_por_link(client, link)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro ao buscar esse link: {e}")
+            print(f"[TIKTOK] ⚠️ Erro no /video-novo: {e}")
+            return
+
+        if video is None:
+            await interaction.followup.send(
+                "❌ Não consegui identificar o vídeo nesse link. Confere se é um link válido do TikTok "
+                "(completo, tipo `tiktok.com/@usuario/video/123...`, ou curto, tipo `vm.tiktok.com/xxxx`)."
+            )
+            return
+
+        # Já foi esse mesmo vídeo o último anunciado? Avisa em vez de repetir.
+        if video["id"] == self.ultimo_video:
+            await interaction.followup.send(
+                f"🔁 Esse aí já foi anunciado antes: **{video['titulo']}** (id `{video['id']}`)."
+            )
+            return
+
+        self.ultimo_video = video["id"]
+        salvar_ultimo_video(video["id"])
+
+        cargo = canal.guild.get_role(VIDEO_NOVO_ROLE_ID)
+        mencao = cargo.mention if cargo else ""
+
+        embed = discord.Embed(
+            title="🎵  A TryHarders RL postou um vídeo novo!",
+            color=0xD4A843,
+        )
+        embed.add_field(name="📌  Título", value=video["titulo"], inline=False)
+        embed.add_field(name="🔗  Link",   value=video["url"],    inline=False)
+        embed.set_footer(text="TikTok • @tryharders.rl")
+        embed.timestamp = discord.utils.utcnow()
+
+        await canal.send(content=mencao if mencao else None, embed=embed)
+        print(f"[TIKTOK] 🎉 Vídeo anunciado manualmente via /video-novo: {video['titulo']}")
+        await interaction.followup.send(f"✅ Anunciado em {canal.mention}: **{video['titulo']}**")
+
+    @video_novo.error
+    async def video_novo_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "❌ Você precisa de permissão de **Gerenciar Servidor** pra usar esse comando.", ephemeral=True
+            )
         else:
             raise error
 
