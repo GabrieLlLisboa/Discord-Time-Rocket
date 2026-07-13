@@ -85,10 +85,19 @@ async def registrar_views_persistentes():
     Registra todas as Views com botões no bot antes do on_ready.
     Isso faz os botões funcionarem mesmo após reiniciar o bot,
     sem precisar reenviar as mensagens.
+
+    OBS: as views do sistema de amistoso (SairAmistosoView e
+    ConfirmarPresencaView) NÃO são registradas aqui — o cog
+    cogs/friendly.py já cuida disso sozinho, no Friendly.__init__,
+    de um jeito mais correto (por mensagem, com o rank/canal certo de
+    cada amistoso). Registrar de novo aqui rodaria DEPOIS de load_cogs()
+    e SOBRESCREVERIA esse registro com uma versão antiga que juntava
+    todos os amistosos abertos numa view "global" só — quebrando os
+    botões de confirmar presença quando houvesse 2+ amistosos abertos
+    ao mesmo tempo.
     """
     from cogs.tickets import TicketSetupView
     from cogs.notifications import NotificacaoView
-    from cogs.friendly import ConfirmarPresencaView, SairAmistosoView
     from cogs.tracker import TrackerView
     from cogs.welcome import BoasVindasView
     from cogs.whitelist import ComecarWhitelistView, FinalizarWhitelistView
@@ -97,41 +106,11 @@ async def registrar_views_persistentes():
     # Views sem estado (não precisam de argumentos)
     bot.add_view(TicketSetupView())
     bot.add_view(NotificacaoView())
-    bot.add_view(SairAmistosoView())
     bot.add_view(TrackerView())
     bot.add_view(BoasVindasView())
     bot.add_view(ComecarWhitelistView())
     bot.add_view(FinalizarWhitelistView())
     bot.add_view(SetupAtividadeView())
-
-    # ConfirmarPresencaView precisa de rank_alvo, rank_id e canal_id
-    # Recria a partir dos amistosos salvos no JSON
-    try:
-        from cogs.backup import ler
-        amistosos = ler("amistosos")
-        count = 0
-        for a in amistosos:
-            if a.get("resultado") is not None:
-                continue  # amistoso já encerrado, ignora
-
-            from cogs.friendly import RANKS, encontrar_rank
-            rank_nome = a.get("rank", "")
-            rank_id   = RANKS.get(rank_nome)
-            canal_id  = a.get("canal_id")
-
-            if rank_id and canal_id:
-                bot.add_view(
-                    ConfirmarPresencaView(
-                        rank_alvo=rank_nome,
-                        rank_id=rank_id,
-                        canal_amistoso_id=canal_id,
-                    )
-                )
-                count += 1
-        if count:
-            print(f"[VIEWS] ✅ {count} view(s) de amistoso(s) em aberto recarregada(s).")
-    except Exception as e:
-        print(f"[VIEWS] ⚠️  Erro ao recarregar views de amistosos: {e}")
 
     # Views de campeonatos em aberto (o botão "Entrar no Torneio" precisa
     # ser recriado com o custom_id certo pra continuar funcionando)

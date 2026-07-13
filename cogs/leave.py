@@ -100,7 +100,7 @@ class Despedida(commands.Cog):
             embed.add_field(name="👥 Membros restantes", value=f"`{guild.member_count}`", inline=True)
             embed.set_footer(
                 text=f"{guild.name}",
-                icon_url=guild.icon.url if guild.icon else discord.Embed.Empty,
+                icon_url=guild.icon.url if guild.icon else None,
             )
             await channel.send(content=member.mention, embed=embed)
             print(f"[LEAVE] ✅ Mensagem de expulsão enviada para {member} no canal #{channel.name}.")
@@ -124,7 +124,7 @@ class Despedida(commands.Cog):
 
         embed.set_footer(
             text=f"{guild.name}",
-            icon_url=guild.icon.url if guild.icon else discord.Embed.Empty,
+            icon_url=guild.icon.url if guild.icon else None,
         )
 
         # Menciona quem saiu fora do embed também
@@ -151,7 +151,7 @@ class Despedida(commands.Cog):
         embed.add_field(name="👥 Membros restantes", value=f"`{guild.member_count}`", inline=True)
         embed.set_footer(
             text=f"{guild.name}",
-            icon_url=guild.icon.url if guild.icon else discord.Embed.Empty,
+            icon_url=guild.icon.url if guild.icon else None,
         )
 
         await channel.send(content=f"`{user}` (`{user.id}`)", embed=embed)

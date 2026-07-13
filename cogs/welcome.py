@@ -131,7 +131,7 @@ class Welcome(commands.Cog):
 
         embed.set_footer(
             text=f"{guild.name} • Boa sorte nas rankeds! 🏆",
-            icon_url=guild.icon.url if guild.icon else discord.Embed.Empty
+            icon_url=guild.icon.url if guild.icon else None
         )
 
         # Menciona a pessoa que entrou + o cargo de Novo Jogador (fora do embed, pra notificar)
