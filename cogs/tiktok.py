@@ -231,48 +231,7 @@ class TikTok(commands.Cog):
     async def verificar_tiktok(self):
         await self.bot.wait_until_ready()
         try:
-            canal = self.bot.get_channel(TIKTOK_CHANNEL_ID)
-            if canal is None:
-                print(f"[TIKTOK] ⚠️  Canal {TIKTOK_CHANNEL_ID} não encontrado.")
-                return
-
-            video = await buscar_ultimo_video()
-
-            if video is None:
-                self.falhas += 1
-                print(f"[TIKTOK] ⚠️  Falha #{self.falhas} ao buscar vídeo.")
-                return
-
-            self.falhas = 0  # reset contador de falhas
-
-            # Primeira execução — só salva
-            if self.ultimo_video is None:
-                self.ultimo_video = video["id"]
-                salvar_ultimo_video(video["id"])
-                print(f"[TIKTOK] ✅ Primeiro vídeo registrado: {video['id']}")
-                return
-
-            # Vídeo novo!
-            if video["id"] != self.ultimo_video:
-                self.ultimo_video = video["id"]
-                salvar_ultimo_video(video["id"])
-
-                cargo = canal.guild.get_role(VIDEO_NOVO_ROLE_ID)
-                mencao = cargo.mention if cargo else ""
-
-                embed = discord.Embed(
-                    title="🎵  A TryHarders RL postou um vídeo novo!",
-                    color=0xD4A843,
-                )
-                embed.add_field(name="📌  Título", value=video["titulo"], inline=False)
-                embed.add_field(name="🔗  Link",   value=video["url"],    inline=False)
-                embed.set_footer(text="TikTok • @tryharders.rl")
-                embed.timestamp = discord.utils.utcnow()
-
-                await canal.send(content=mencao if mencao else None, embed=embed)
-                print(f"[TIKTOK] 🎉 Novo vídeo notificado: {video['titulo']}")
-            else:
-                print("[TIKTOK] 🔁 Nenhum vídeo novo.")
+            await self._checar_e_notificar()
         except Exception as e:
             # Uma falha de rede/scraping não pode matar essa verificação
             # periódica pra sempre — só loga e tenta de novo no próximo ciclo.
@@ -281,6 +240,82 @@ class TikTok(commands.Cog):
     @verificar_tiktok.before_loop
     async def antes_do_loop(self):
         await self.bot.wait_until_ready()
+
+    # ── Lógica central: busca o vídeo mais recente e só notifica se for
+    # realmente diferente do último já registrado (self.ultimo_video, que
+    # também está salvo em disco em LAST_VIDEO_FILE). Usada tanto pelo loop
+    # automático quanto pelo comando manual !atualizar-videos — assim os
+    # dois SEMPRE compartilham a mesma "memória" de qual foi o último vídeo
+    # postado, e nunca repetem um vídeo já anunciado.
+    async def _checar_e_notificar(self) -> str:
+        """Retorna uma mensagem curta descrevendo o que aconteceu (pra usar na resposta do comando)."""
+        canal = self.bot.get_channel(TIKTOK_CHANNEL_ID)
+        if canal is None:
+            print(f"[TIKTOK] ⚠️  Canal {TIKTOK_CHANNEL_ID} não encontrado.")
+            return f"⚠️ Canal `{TIKTOK_CHANNEL_ID}` não encontrado."
+
+        video = await buscar_ultimo_video()
+
+        if video is None:
+            self.falhas += 1
+            print(f"[TIKTOK] ⚠️  Falha #{self.falhas} ao buscar vídeo.")
+            return "⚠️ Não consegui buscar o vídeo mais recente agora (todas as estratégias falharam). Tenta de novo daqui a pouco."
+
+        self.falhas = 0  # reset contador de falhas
+
+        # Primeira execução — só salva
+        if self.ultimo_video is None:
+            self.ultimo_video = video["id"]
+            salvar_ultimo_video(video["id"])
+            print(f"[TIKTOK] ✅ Primeiro vídeo registrado: {video['id']}")
+            return f"✅ Primeiro vídeo registrado (não notificado, é o ponto de partida): **{video['titulo']}**"
+
+        # Mesmo vídeo de sempre — NÃO reposta, só avisa.
+        if video["id"] == self.ultimo_video:
+            print("[TIKTOK] 🔁 Nenhum vídeo novo.")
+            return f"🔁 Nenhum vídeo novo — o mais recente já foi postado antes: **{video['titulo']}**"
+
+        # Vídeo novo de verdade!
+        self.ultimo_video = video["id"]
+        salvar_ultimo_video(video["id"])
+
+        cargo = canal.guild.get_role(VIDEO_NOVO_ROLE_ID)
+        mencao = cargo.mention if cargo else ""
+
+        embed = discord.Embed(
+            title="🎵  A TryHarders RL postou um vídeo novo!",
+            color=0xD4A843,
+        )
+        embed.add_field(name="📌  Título", value=video["titulo"], inline=False)
+        embed.add_field(name="🔗  Link",   value=video["url"],    inline=False)
+        embed.set_footer(text="TikTok • @tryharders.rl")
+        embed.timestamp = discord.utils.utcnow()
+
+        await canal.send(content=mencao if mencao else None, embed=embed)
+        print(f"[TIKTOK] 🎉 Novo vídeo notificado: {video['titulo']}")
+        return f"🎉 Vídeo novo notificado em {canal.mention}: **{video['titulo']}**"
+
+    # ── Comando manual: força a checagem na hora, sem esperar os 30 min
+    # do loop automático. Usa a mesma lógica de dedupe do loop — se o
+    # vídeo mais recente já foi o último notificado, ele NÃO reposta.
+    @commands.command(name="atualizar-videos")
+    @commands.has_permissions(manage_guild=True)
+    async def atualizar_videos(self, ctx: commands.Context):
+        async with ctx.typing():
+            try:
+                resultado = await self._checar_e_notificar()
+            except Exception as e:
+                await ctx.send(f"❌ Erro ao checar vídeos: {e}")
+                print(f"[TIKTOK] ⚠️ Erro no comando !atualizar-videos: {e}")
+                return
+        await ctx.send(resultado)
+
+    @atualizar_videos.error
+    async def atualizar_videos_error(self, ctx: commands.Context, error: commands.CommandError):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("❌ Você precisa de permissão de **Gerenciar Servidor** pra usar esse comando.")
+        else:
+            raise error
 
 
 async def setup(bot: commands.Bot):
