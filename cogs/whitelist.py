@@ -61,13 +61,22 @@ CARGO_SEM_ACESSO_ID = 1521890714873757707
 
 # Cargos de staff — quem tiver qualquer um desses, recebe automaticamente
 # o cargo de "tag" de staff abaixo (isso é feito em cogs/staff_tag.py).
-STAFF_ROLE_IDS = {c["id"] for c in PLAYER_CARGOS if c["secao"] == "staff"} | {
+#
+# Coach (1513356584946896946) e Editor de vídeo (1513240072139309317) têm
+# "secao": "staff" em PLAYER_CARGOS (players.py), mas foram explicitamente
+# excluídos daqui: quem tem só esses cargos NÃO recebe a tag de staff.
+CARGOS_EXCLUIDOS_DA_TAG_STAFF = {
+    1513240072139309317,  # Editor de vídeo
+    1513356584946896946,  # Coach
+}
+
+STAFF_ROLE_IDS = ({c["id"] for c in PLAYER_CARGOS if c["secao"] == "staff"} | {
     1511894837790769204,  # Sub-Dono
     1523835085475020932,  # Diretor
     1523835045872275566,  # Gerente
     1523835010795176027,  # Moderador
     1523833330175442954,  # Suporte
-}
+}) - CARGOS_EXCLUIDOS_DA_TAG_STAFF
 
 # Cargos que podem ver os canais de whitelist (além do próprio membro).
 # Só estes 3 — os demais cargos de staff (Gerente, Moderador, Suporte etc.)
