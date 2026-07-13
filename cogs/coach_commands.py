@@ -14,18 +14,21 @@ manualmente.
 
 from __future__ import annotations
 
+import asyncio
+
 import discord
 from discord.ext import commands
 
 from cogs.coach_config import COACHES, coach_por_channel_id
 from cogs.coach_storage import (
     obter_ticket,
+    finalizar_ticket,
     TicketNaoEncontradoError,
     TicketJaFinalizadoError,
 )
 from cogs.coach_manager import finalizar_atendimento
 from cogs.coach_stats import garantir_mensagens_existem, reordenar_mensagens_finais
-from cogs.coach_utils import pode_finalizar
+from cogs.coach_utils import pode_finalizar, eh_gerente
 
 
 class Coaches(commands.Cog):
@@ -75,6 +78,49 @@ class Coaches(commands.Cog):
         else:
             await ctx.message.add_reaction("✅")
             print(f"[COACH] ✅ Ticket {canal.id} finalizado por {ctx.author}.")
+
+    # ── Comando de encerramento forçado (staff/adm) ──────────────────────
+    @commands.command(name="acabar-coach")
+    async def acabar_coach(self, ctx: commands.Context):
+        """Uso: staff/adm digita !acabar-coach DENTRO do canal do
+        atendimento. Apaga o canal do ticket e o canal de voz associado,
+        sem esperar o cliente avaliar."""
+        canal = ctx.channel
+        ticket = await obter_ticket(canal.id)
+
+        if ticket is None:
+            await ctx.send("❌ Este comando só pode ser usado dentro de um canal de atendimento de coach.")
+            return
+
+        if not eh_gerente(ctx.author):
+            await ctx.send("❌ Apenas staff/administração pode usar este comando.")
+            return
+
+        # Mantém os dados do ticket consistentes (marca como concluído,
+        # se ainda não estava) antes de apagar os canais
+        try:
+            await finalizar_ticket(canal.id)
+        except (TicketNaoEncontradoError, TicketJaFinalizadoError):
+            pass
+
+        canal_voz_id = ticket.get("canal_voz_id")
+        canal_voz = ctx.guild.get_channel(canal_voz_id) if canal_voz_id else None
+
+        await ctx.send("🗑️ Encerrando o atendimento — este canal e o canal de voz vão ser apagados em alguns segundos.")
+        await asyncio.sleep(5)
+
+        if canal_voz is not None:
+            try:
+                await canal_voz.delete(reason=f"Atendimento encerrado via !acabar-coach por {ctx.author}")
+            except discord.HTTPException as e:
+                print(f"[COACH] ⚠️ Erro ao apagar canal de voz do ticket {canal.id}: {e}")
+
+        print(f"[COACH] 🗑️ Ticket {canal.id} encerrado via !acabar-coach por {ctx.author}.")
+
+        try:
+            await canal.delete(reason=f"Atendimento encerrado via !acabar-coach por {ctx.author}")
+        except discord.HTTPException as e:
+            print(f"[COACH] ⚠️ Erro ao apagar canal do ticket {canal.id}: {e}")
 
     # ── Garante a ordem das mensagens fixas no canal do coach ───────────
     @commands.Cog.listener()
