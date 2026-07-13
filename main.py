@@ -63,6 +63,7 @@ COGS = [
     "cogs.coach_commands",
     "cogs.tradutor",
     "cogs.quiz",
+    "cogs.autopilot",
 
     # ── Sistema de Moderação ──
     "cogs.mod_config",
