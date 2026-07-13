@@ -62,6 +62,7 @@ COGS = [
     "cogs.demote",
     "cogs.coach_commands",
     "cogs.tradutor",
+    "cogs.quiz",
 
     # ── Sistema de Moderação ──
     "cogs.mod_config",
