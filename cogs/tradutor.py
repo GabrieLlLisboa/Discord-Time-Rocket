@@ -357,15 +357,24 @@ def _cache_set(texto: str, destino: str, valor: str) -> None:
     _CACHE[(texto, destino)] = (valor, time.monotonic() + _CACHE_TTL)
 
 
-async def _traduzir(client: httpx.AsyncClient, texto: str, idioma_destino: str) -> str | None:
-    """Traduz `texto` pro idioma `idioma_destino` ('en' ou 'pt').
+async def _traduzir(client: httpx.AsyncClient, texto: str, idioma_origem: str, idioma_destino: str) -> str | None:
+    """Traduz `texto` do idioma `idioma_origem` pro `idioma_destino` ('en' ou 'pt').
     Retorna None se der qualquer erro (rede fora do ar, resposta
     inesperada, etc.) — quem chama trata isso simplesmente não
-    republicando a mensagem."""
+    republicando a mensagem.
+
+    IMPORTANTE: `idioma_origem` é sempre explícito (nunca 'auto'). Frases
+    curtas e ambíguas como 'bom dia' às vezes são detectadas erroneamente
+    como outro idioma pelo Google (ex: 'bom' e 'dia' também existem em
+    indonésio/malaio, com significados bem diferentes — foi assim que
+    'bom dia' virou 'Bomb him' antes dessa correção). Como já sabemos de
+    qual canal a mensagem veio, não faz sentido deixar o Google adivinhar.
+    """
     if not texto or not texto.strip():
         return None
 
-    em_cache = _cache_get(texto, idioma_destino)
+    chave_cache = f"{idioma_origem}->{idioma_destino}"
+    em_cache = _cache_get(texto, chave_cache)
     if em_cache is not None:
         return em_cache
 
@@ -375,7 +384,7 @@ async def _traduzir(client: httpx.AsyncClient, texto: str, idioma_destino: str) 
                 "https://translate.googleapis.com/translate_a/single",
                 params={
                     "client": "gtx",
-                    "sl": "auto",
+                    "sl": idioma_origem,
                     "tl": idioma_destino,
                     "dt": "t",
                     "q": texto,
@@ -386,7 +395,7 @@ async def _traduzir(client: httpx.AsyncClient, texto: str, idioma_destino: str) 
             dados = resp.json()
             # dados[0] é uma lista de segmentos [texto_traduzido, texto_original, ...]
             traduzido = "".join(segmento[0] for segmento in dados[0] if segmento[0])
-            _cache_set(texto, idioma_destino, traduzido)
+            _cache_set(texto, chave_cache, traduzido)
             return traduzido
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
             if tentativa == 0:
@@ -421,15 +430,15 @@ class Tradutor(commands.Cog):
             return
 
         if message.channel.id == CANAL_PT_ID:
-            await self._retransmitir(message, destino_id=CANAL_EN_ID, idioma_destino="en", bandeira="🇬🇧")
+            await self._retransmitir(message, destino_id=CANAL_EN_ID, idioma_origem="pt", idioma_destino="en", bandeira="🇬🇧")
 
         elif message.channel.id == CANAL_EN_ID:
             cargos_do_autor = {r.id for r in getattr(message.author, "roles", [])}
             if CARGO_INGLES_ID not in cargos_do_autor:
                 return  # só quem tem o cargo de Inglês dispara a tradução reversa
-            await self._retransmitir(message, destino_id=CANAL_PT_ID, idioma_destino="pt", bandeira="🇧🇷")
+            await self._retransmitir(message, destino_id=CANAL_PT_ID, idioma_origem="en", idioma_destino="pt", bandeira="🇧🇷")
 
-    async def _retransmitir(self, message: discord.Message, destino_id: int, idioma_destino: str, bandeira: str):
+    async def _retransmitir(self, message: discord.Message, destino_id: int, idioma_origem: str, idioma_destino: str, bandeira: str):
         texto_original = message.content
         if not texto_original or not texto_original.strip():
             return  # mensagem só com imagem/anexo/embed — nada de texto pra traduzir
@@ -451,7 +460,7 @@ class Tradutor(commands.Cog):
         if not _PADRAO_TOKEN.sub("", texto).strip():
             return
 
-        traduzido = await _traduzir(self.client, texto, idioma_destino)
+        traduzido = await _traduzir(self.client, texto, idioma_origem, idioma_destino)
         if not traduzido:
             return
 
