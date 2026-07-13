@@ -283,7 +283,8 @@ class RevisaoWhitelistView(discord.ui.View):
             await interaction.response.send_message("❌ Só administradores podem revisar whitelists.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        await cog.aprovar(interaction, self.membro_id)
+        ephemeral, mensagem = await cog.aprovar_core(interaction.guild, self.membro_id, interaction.user, interaction.channel)
+        await interaction.response.send_message(mensagem, ephemeral=ephemeral)
 
     @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.danger, custom_id="wl_recusar")
     async def recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -291,7 +292,8 @@ class RevisaoWhitelistView(discord.ui.View):
             await interaction.response.send_message("❌ Só administradores podem revisar whitelists.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        await cog.recusar(interaction, self.membro_id)
+        ephemeral, mensagem = await cog.recusar_core(interaction.guild, self.membro_id, interaction.user, interaction.channel)
+        await interaction.response.send_message(mensagem, ephemeral=ephemeral)
 
 
 # ─────────────────────────────────────────────
@@ -623,46 +625,39 @@ class Whitelist(commands.Cog):
         )
 
     # ── Admin aprova ──────────────────────────────────────────────
-    async def aprovar(self, interaction: discord.Interaction, membro_id: int):
-        guild = interaction.guild
+    # Método "core": não depende de Interaction, então pode ser chamado
+    # tanto pelo botão "✅ Aprovar" quanto pelo comando !aprovar-whitelist.
+    # Retorna (ephemeral, mensagem) — `ephemeral` só é usado pelo botão
+    # (Interaction); o comando de texto sempre manda a mensagem normal.
+    async def aprovar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel) -> tuple[bool, str]:
         registro = self.dados.get(str(membro_id))
         if not registro:
-            await interaction.response.send_message("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
-            return
+            return True, "⚠️ Não achei os dados dessa whitelist."
 
         if registro.get("status") in ("aprovada", "recusada"):
             acao = "aprovada" if registro["status"] == "aprovada" else "recusada"
             quem = registro.get("decidido_por_nome", "outro administrador")
-            await interaction.response.send_message(
-                f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela.",
-                ephemeral=True,
-            )
-            return
+            return True, f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela."
 
         visualizado_por_id = registro.get("visualizado_por_id")
-        if visualizado_por_id is not None and visualizado_por_id != interaction.user.id:
+        if visualizado_por_id is not None and visualizado_por_id != autor.id:
             nome = registro.get("visualizado_por_nome", "outro administrador")
-            await interaction.response.send_message(
-                f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar.",
-                ephemeral=True,
-            )
-            return
+            return True, f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar."
 
         # Trava a whitelist JÁ AQUI, antes de qualquer `await`. Como o bot
         # roda tudo num único loop assíncrono, nada mais executa entre uma
         # linha e outra até a primeira pausa (await) — então, se dois
-        # admins clicarem "Aprovar"/"Recusar" quase ao mesmo tempo, só o
-        # primeiro clique passa por essa checagem; o segundo já vai cair
-        # no bloco acima e ser barrado.
+        # admins clicarem/digitarem quase ao mesmo tempo, só o primeiro
+        # passa por essa checagem; o segundo já vai cair no bloco acima.
         registro["status"] = "aprovada"
-        registro["decidido_por_nome"] = str(interaction.user)
+        registro["decidido_por_nome"] = str(autor)
         salvar("whitelist", self.dados)
 
         membro = guild.get_member(membro_id)
         cargo_sem_acesso = guild.get_role(CARGO_SEM_ACESSO_ID)
         if membro and cargo_sem_acesso and cargo_sem_acesso in membro.roles:
             try:
-                await membro.remove_roles(cargo_sem_acesso, reason=f"Whitelist aprovada por {interaction.user}")
+                await membro.remove_roles(cargo_sem_acesso, reason=f"Whitelist aprovada por {autor}")
             except discord.Forbidden:
                 pass
 
@@ -675,8 +670,8 @@ class Whitelist(commands.Cog):
 
         await self.atualizar_status_board(guild, membro_id)
 
-        await interaction.response.send_message(
-            f"✅ **Whitelist aprovada por {interaction.user.mention}!** "
+        mensagem = (
+            f"✅ **Whitelist aprovada por {autor.mention}!** "
             f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🚀{aviso_rank}\n"
             f"*(este canal vai ser apagado automaticamente em 10 minutos)*"
         )
@@ -684,7 +679,7 @@ class Whitelist(commands.Cog):
         # Tira a visão do canal de whitelist pro membro (ele não precisa mais dele)
         if membro:
             try:
-                await interaction.channel.set_permissions(membro, overwrite=None)
+                await canal.set_permissions(membro, overwrite=None)
             except discord.Forbidden:
                 pass
 
@@ -693,67 +688,64 @@ class Whitelist(commands.Cog):
         registro["canal_apagado"] = False
         salvar("whitelist", self.dados)
 
-    # ── Admin recusa -> reinicia a whitelist da pessoa ───────────────
-    async def recusar(self, interaction: discord.Interaction, membro_id: int):
-        guild = interaction.guild
+        return False, mensagem
+
+    # ── Admin recusa -> expulsa o membro automaticamente ─────────────
+    # Sempre que a whitelist é reprovada, o membro é removido do servidor
+    # (banimento não, só kick — ele pode entrar de novo e tentar outra vez
+    # do zero se quiser).
+    async def recusar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel) -> tuple[bool, str]:
         registro = self.dados.get(str(membro_id))
         if not registro:
-            await interaction.response.send_message("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
-            return
+            return True, "⚠️ Não achei os dados dessa whitelist."
 
         if registro.get("status") in ("aprovada", "recusada"):
             acao = "aprovada" if registro["status"] == "aprovada" else "recusada"
             quem = registro.get("decidido_por_nome", "outro administrador")
-            await interaction.response.send_message(
-                f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela.",
-                ephemeral=True,
-            )
-            return
+            return True, f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela."
 
         visualizado_por_id = registro.get("visualizado_por_id")
-        if visualizado_por_id is not None and visualizado_por_id != interaction.user.id:
+        if visualizado_por_id is not None and visualizado_por_id != autor.id:
             nome = registro.get("visualizado_por_nome", "outro administrador")
-            await interaction.response.send_message(
-                f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar.",
-                ephemeral=True,
-            )
-            return
+            return True, f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar."
 
-        # Mesma trava imediata explicada em cima, em aprovar()
+        # Mesma trava imediata explicada em aprovar_core()
         registro["status"] = "recusada"
-        registro["decidido_por_nome"] = str(interaction.user)
+        registro["decidido_por_nome"] = str(autor)
         salvar("whitelist", self.dados)
 
         membro = guild.get_member(membro_id)
 
-        await self.atualizar_status_board(guild, membro_id)
-
-        await interaction.response.send_message(
-            f"❌ **Whitelist recusada por {interaction.user.mention}.** Vamos reiniciar o processo abaixo."
-        )
-
-        # Reabre o canal e reinicia do zero
-        registro["respostas"] = {}
-        registro["status"] = "em_andamento"
-        registro["visualizado_por_id"] = None
-        registro["visualizado_por_nome"] = None
-        salvar("whitelist", self.dados)
-
+        aviso_kick = ""
         if membro:
             try:
-                await interaction.channel.set_permissions(membro, view_channel=True, send_messages=True, read_message_history=True)
+                await membro.kick(reason=f"Whitelist recusada por {autor}")
             except discord.Forbidden:
-                pass
+                aviso_kick = "\n⚠️ Não consegui expulsar o membro (falta permissão/hierarquia de cargo) — remova manualmente."
+        else:
+            aviso_kick = "\n⚠️ O membro não está mais no servidor."
 
-        embed = discord.Embed(
-            title="🔁 Vamos tentar de novo!",
-            description=(
-                f"{membro.mention if membro else ''} sua whitelist foi recusada, mas sem problemas — "
-                f"clica no botão abaixo e vamos refazer as perguntas. 👇"
-            ),
-            color=0x57F287,
+        await self.atualizar_status_board(guild, membro_id)
+
+        # Agenda a exclusão do canal em 10 minutos, igual à aprovação —
+        # como o membro foi expulso, não faz sentido reabrir o processo.
+        registro["deletar_em"] = time.time() + 600
+        registro["canal_apagado"] = False
+        salvar("whitelist", self.dados)
+
+        mensagem = (
+            f"❌ **Whitelist recusada por {autor.mention}.** "
+            f"{membro.mention if membro else 'O membro'} foi removido do servidor automaticamente.{aviso_kick}\n"
+            f"*(este canal vai ser apagado automaticamente em 10 minutos)*"
         )
-        await interaction.channel.send(embed=embed, view=ComecarWhitelistView())
+        return False, mensagem
+
+    # ── Acha de qual membro é o canal de whitelist atual (pelos comandos) ──
+    def _membro_id_do_canal(self, canal_id: int) -> int | None:
+        for membro_id_str, registro in self.dados.items():
+            if registro.get("canal_id") == canal_id:
+                return int(membro_id_str)
+        return None
 
     # ── Comando manual pra staff criar/recriar o canal de alguém ────
     @commands.command(name="whitelist")
@@ -769,6 +761,40 @@ class Whitelist(commands.Cog):
             await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
         elif isinstance(error, commands.MemberNotFound):
             await ctx.send("❌ Não achei esse membro.", delete_after=5)
+
+    # ── Comandos de texto: aprovar/reprovar a whitelist do canal atual ──
+    # Uso: dentro do canal "whitelist-<nick>" da pessoa, digitar
+    # !aprovar-whitelist ou !reprovar-whitelist. Fazem exatamente a mesma
+    # coisa que os botões "✅ Aprovar" / "❌ Recusar" no board de revisão.
+    @commands.command(name="aprovar-whitelist")
+    @commands.has_permissions(administrator=True)
+    async def aprovar_whitelist_cmd(self, ctx: commands.Context):
+        membro_id = self._membro_id_do_canal(ctx.channel.id)
+        if membro_id is None:
+            await ctx.send("⚠️ Esse comando só funciona dentro do canal de whitelist de um membro.", delete_after=8)
+            return
+        _, mensagem = await self.aprovar_core(ctx.guild, membro_id, ctx.author, ctx.channel)
+        await ctx.send(mensagem)
+
+    @aprovar_whitelist_cmd.error
+    async def aprovar_whitelist_cmd_error(self, ctx, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
+
+    @commands.command(name="reprovar-whitelist")
+    @commands.has_permissions(administrator=True)
+    async def reprovar_whitelist_cmd(self, ctx: commands.Context):
+        membro_id = self._membro_id_do_canal(ctx.channel.id)
+        if membro_id is None:
+            await ctx.send("⚠️ Esse comando só funciona dentro do canal de whitelist de um membro.", delete_after=8)
+            return
+        _, mensagem = await self.recusar_core(ctx.guild, membro_id, ctx.author, ctx.channel)
+        await ctx.send(mensagem)
+
+    @reprovar_whitelist_cmd.error
+    async def reprovar_whitelist_cmd_error(self, ctx, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
 
 
 async def setup(bot: commands.Bot):
