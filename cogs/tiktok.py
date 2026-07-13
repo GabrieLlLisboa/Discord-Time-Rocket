@@ -153,10 +153,21 @@ async def via_proxitok(client: httpx.AsyncClient) -> dict | None:
                 continue
             xml = resp.text
 
-            # Extrai o primeiro item do RSS
-            titulo_match = re.search(r'<title><!\[CDATA\[(.*?)\]\]></title>', xml)
-            link_match   = re.search(r'<link>(https://www\.tiktok\.com/[^<]+)</link>', xml)
-            id_match     = re.search(r'/video/(\d+)', xml)
+            # IMPORTANTE: um RSS tem um <title>/<link> no nível do <channel>
+            # (ex: "@tryharders.rl - TikTok", a própria página do perfil) E
+            # um <title>/<link> dentro de CADA <item> (cada vídeo). Um
+            # re.search direto no XML inteiro pega sempre o PRIMEIRO
+            # <title>/<link> do documento, que é o do <channel> — nunca o do
+            # vídeo mais recente. Por isso isolamos primeiro o conteúdo do
+            # primeiro <item>...</item> e só então buscamos dentro dele.
+            item_match = re.search(r'<item>(.*?)</item>', xml, re.DOTALL)
+            if not item_match:
+                continue
+            item_xml = item_match.group(1)
+
+            titulo_match = re.search(r'<title><!\[CDATA\[(.*?)\]\]></title>', item_xml)
+            link_match   = re.search(r'<link>(https://www\.tiktok\.com/[^<]+)</link>', item_xml)
+            id_match     = re.search(r'/video/(\d+)', item_xml)
 
             if id_match:
                 video_id = id_match.group(1)
@@ -185,9 +196,16 @@ async def via_rssbridge(client: httpx.AsyncClient) -> dict | None:
             resp = await client.get(url, headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=15)
             if resp.status_code != 200:
                 continue
-            xml      = resp.text
-            id_match = re.search(r'/video/(\d+)', xml)
-            t_match  = re.search(r'<title[^>]*>(.*?)</title>', xml, re.DOTALL)
+            xml = resp.text
+
+            # Mesmo cuidado do Proxitok: isola o primeiro <entry> (formato
+            # Atom) antes de extrair título/id, pra não pegar o título do
+            # feed inteiro.
+            entry_match = re.search(r'<entry>(.*?)</entry>', xml, re.DOTALL)
+            entry_xml = entry_match.group(1) if entry_match else xml
+
+            id_match = re.search(r'/video/(\d+)', entry_xml)
+            t_match  = re.search(r'<title[^>]*>(.*?)</title>', entry_xml, re.DOTALL)
             if id_match:
                 video_id = id_match.group(1)
                 titulo   = re.sub(r'<[^>]+>', '', t_match.group(1)).strip() if t_match else "Sem título"
@@ -246,8 +264,9 @@ class TikTok(commands.Cog):
     # também está salvo em disco em LAST_VIDEO_FILE). Usada tanto pelo loop
     # automático quanto pelo comando manual !atualizar-videos — assim os
     # dois SEMPRE compartilham a mesma "memória" de qual foi o último vídeo
-    # postado, e nunca repetem um vídeo já anunciado.
-    async def _checar_e_notificar(self) -> str:
+    # postado, e nunca repetem um vídeo já anunciado (a menos que `forcar`
+    # seja usado de propósito).
+    async def _checar_e_notificar(self, forcar: bool = False) -> str:
         """Retorna uma mensagem curta descrevendo o que aconteceu (pra usar na resposta do comando)."""
         canal = self.bot.get_channel(TIKTOK_CHANNEL_ID)
         if canal is None:
@@ -262,20 +281,25 @@ class TikTok(commands.Cog):
             return "⚠️ Não consegui buscar o vídeo mais recente agora (todas as estratégias falharam). Tenta de novo daqui a pouco."
 
         self.falhas = 0  # reset contador de falhas
+        detalhe = f"(via {video['via']}, id `{video['id']}`)"
 
         # Primeira execução — só salva
-        if self.ultimo_video is None:
+        if self.ultimo_video is None and not forcar:
             self.ultimo_video = video["id"]
             salvar_ultimo_video(video["id"])
             print(f"[TIKTOK] ✅ Primeiro vídeo registrado: {video['id']}")
-            return f"✅ Primeiro vídeo registrado (não notificado, é o ponto de partida): **{video['titulo']}**"
+            return f"✅ Primeiro vídeo registrado (não notificado, é o ponto de partida): **{video['titulo']}** {detalhe}"
 
-        # Mesmo vídeo de sempre — NÃO reposta, só avisa.
-        if video["id"] == self.ultimo_video:
+        # Mesmo vídeo de sempre — NÃO reposta, só avisa (a menos que forçado).
+        if video["id"] == self.ultimo_video and not forcar:
             print("[TIKTOK] 🔁 Nenhum vídeo novo.")
-            return f"🔁 Nenhum vídeo novo — o mais recente já foi postado antes: **{video['titulo']}**"
+            return (
+                f"🔁 Nenhum vídeo novo — o mais recente já foi postado antes: **{video['titulo']}** {detalhe}\n"
+                f"-# Se você acha que tem vídeo novo mesmo assim (o site pode ter mudado ou bloqueado a "
+                f"busca), usa `!atualizar-videos forcar` pra reenviar esse vídeo na marra."
+            )
 
-        # Vídeo novo de verdade!
+        # Vídeo novo de verdade (ou forçado)!
         self.ultimo_video = video["id"]
         salvar_ultimo_video(video["id"])
 
@@ -293,17 +317,19 @@ class TikTok(commands.Cog):
 
         await canal.send(content=mencao if mencao else None, embed=embed)
         print(f"[TIKTOK] 🎉 Novo vídeo notificado: {video['titulo']}")
-        return f"🎉 Vídeo novo notificado em {canal.mention}: **{video['titulo']}**"
+        return f"🎉 Vídeo notificado em {canal.mention}: **{video['titulo']}** {detalhe}"
 
     # ── Comando manual: força a checagem na hora, sem esperar os 30 min
     # do loop automático. Usa a mesma lógica de dedupe do loop — se o
-    # vídeo mais recente já foi o último notificado, ele NÃO reposta.
+    # vídeo mais recente já foi o último notificado, ele NÃO reposta,
+    # a menos que você use "!atualizar-videos forcar".
     @commands.command(name="atualizar-videos")
     @commands.has_permissions(manage_guild=True)
-    async def atualizar_videos(self, ctx: commands.Context):
+    async def atualizar_videos(self, ctx: commands.Context, opcao: str = None):
+        forcar = (opcao or "").lower() in ("forcar", "força", "forçar", "force")
         async with ctx.typing():
             try:
-                resultado = await self._checar_e_notificar()
+                resultado = await self._checar_e_notificar(forcar=forcar)
             except Exception as e:
                 await ctx.send(f"❌ Erro ao checar vídeos: {e}")
                 print(f"[TIKTOK] ⚠️ Erro no comando !atualizar-videos: {e}")
