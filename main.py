@@ -64,6 +64,7 @@ COGS = [
     "cogs.tradutor",
     "cogs.quiz",
     "cogs.autopilot",
+    "cogs.conversar",
 
     # ── Sistema de Moderação ──
     "cogs.mod_config",
