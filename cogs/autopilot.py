@@ -66,6 +66,22 @@ CURIOSIDADES = [
     "📚 Você sabia? O RLCS (Rocket League Championship Series) é a principal liga profissional do jogo desde 2016.",
     "📚 Curiosidade: existem mais de 15 mapas diferentes no modo competitivo padrão ao longo da história do jogo.",
     "📚 Você sabia? Um 'ceiling shot' usa o teto do mapa pra pegar impulso antes de finalizar — é uma das mecânicas mais avançadas.",
+    # ── Curiosidade especial do servidor ──
+    "🚀 Você sabia que o criador do flip reset está no nosso servidor? É o **fyshokid**! 👀",
+    # ── Recordes e histórico de RLCS ──
+    "🏆 Curiosidade RLCS: alguns jogadores acumulam anos de campeonato sem nunca terem levantado um troféu mundial — a pressão no cenário competitivo é gigante.",
+    "🥇 Curiosidade RLCS: os times europeus dominam boa parte dos títulos mundiais da história da competição.",
+    "📈 Você sabia? Vários jogadores profissionais de RLCS começaram a competir ainda na adolescência, alguns com menos de 16 anos.",
+    "🌟 Curiosidade: o cenário competitivo de Rocket League tem verdadeiros prodígios que já jogavam em nível profissional antes mesmo de terem carteira de motorista.",
+    # ── Perguntas engraçadas / interação ──
+    "😂 Pergunta séria: quantos controles você já quebrou de raiva jogando RL? Sê sincero.",
+    "🤡 Enquete do caos: o que é pior, tomar gol no último segundo ou perder de whiff feio na frente do gol vazio?",
+    "😆 Curiosidade duvidosa: tem gente que jura que o ping influencia mais que o próprio aim. Vocês concordam?",
+    # ── Assuntos atuais / aleatórios ──
+    "🗞️ Bora comentar: o que vocês acham das mudanças recentes no cenário competitivo de RL?",
+    "🎲 Aleatório do dia: se Rocket League ganhasse um mapa novo amanhã, que tema vocês queriam? Espaço, deserto, praia?",
+    "🎲 Pergunta sem nexo: se você pudesse trocar seu carro por qualquer carro do jogo, qual escolheria e por quê?",
+    "🎲 Curiosidade aleatória: sabia que dá pra jogar Rocket League com o carro andando de ré o jogo inteiro? Ninguém faz isso, mas dá.",
 ]
 
 CATEGORIAS = {

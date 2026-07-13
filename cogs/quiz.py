@@ -184,6 +184,7 @@ class QuizView(discord.ui.View):
         super().__init__(timeout=TEMPO_RESPOSTA)
         self.pergunta = pergunta
         self.respondidos: dict[int, int] = {}  # user_id -> índice escolhido
+        self.nomes: dict[int, str] = {}  # user_id -> nome de exibição (ordem de resposta)
         self.message: discord.Message | None = None
 
         for i, opcao in enumerate(pergunta["opcoes"]):
@@ -199,6 +200,7 @@ class QuizView(discord.ui.View):
             return
 
         self.respondidos[user_id] = indice
+        self.nomes[user_id] = interaction.user.display_name
         acertou = indice == self.pergunta["correta"]
         registrar_resposta(user_id, interaction.user.display_name, acertou)
 
@@ -219,22 +221,47 @@ class QuizView(discord.ui.View):
 
         correta_texto = self.pergunta["opcoes"][self.pergunta["correta"]]
 
+        embed = self.message.embeds[0]
+        embed.color = discord.Color.blurple()
+
         if self.respondidos:
             acertaram = [
                 uid for uid, idx in self.respondidos.items()
                 if idx == self.pergunta["correta"]
             ]
             resumo = f"✅ **{len(acertaram)}** de **{len(self.respondidos)}** responderam corretamente."
-        else:
-            resumo = "😴 Ninguém respondeu a tempo."
 
-        embed = self.message.embeds[0]
-        embed.color = discord.Color.blurple()
-        embed.add_field(
-            name="⏰ Tempo esgotado!",
-            value=f"A resposta certa era: **{correta_texto}**\n{resumo}",
-            inline=False,
-        )
+            linhas = []
+            for uid, idx in self.respondidos.items():
+                nome = self.nomes.get(uid, "Desconhecido")
+                if idx == self.pergunta["correta"]:
+                    linhas.append(f"✅ **{nome}** — Acertou")
+                else:
+                    linhas.append(f"❌ **{nome}** — Errou")
+
+            # Discord limita cada campo de embed a 1024 caracteres — se
+            # muita gente responder, mostra só os primeiros e resume o resto.
+            LIMITE_EXIBIDO = 20
+            if len(linhas) > LIMITE_EXIBIDO:
+                restantes = len(linhas) - LIMITE_EXIBIDO
+                linhas = linhas[:LIMITE_EXIBIDO] + [f"*...e mais {restantes} pessoa(s).*"]
+
+            embed.add_field(
+                name="⏰ Tempo esgotado!",
+                value=f"A resposta certa era: **{correta_texto}**\n{resumo}",
+                inline=False,
+            )
+            embed.add_field(
+                name="📋 Lista de quem respondeu",
+                value="\n".join(linhas),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="⏰ Tempo esgotado!",
+                value=f"A resposta certa era: **{correta_texto}**\n😴 Ninguém respondeu a tempo.",
+                inline=False,
+            )
 
         try:
             await self.message.edit(embed=embed, view=self)
