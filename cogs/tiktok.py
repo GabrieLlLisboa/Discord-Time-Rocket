@@ -78,7 +78,11 @@ async def via_oembed(client: httpx.AsyncClient) -> dict | None:
         if not ids:
             return None
 
-        video_id = ids[0]
+        # Os IDs de vídeo do TikTok são crescentes com o tempo (tipo
+        # snowflake) — pegar o MAIOR valor numérico é mais confiável do que
+        # o primeiro da lista, que pode ser um vídeo fixado (pinned) e não
+        # o mais recente de verdade.
+        video_id = max(ids, key=int)
         # Valida com oEmbed
         oembed_url = f"https://www.tiktok.com/oembed?url=https://www.tiktok.com/@{TIKTOK_USER}/video/{video_id}"
         oe = await client.get(oembed_url, headers=headers_aleatorios(), timeout=10)
@@ -115,7 +119,13 @@ async def via_scraping_direto(client: httpx.AsyncClient) -> dict | None:
                 if "user" in key.lower():
                     videos = scope[key].get("itemList", [])
                     if videos:
-                        v = videos[0]
+                        # IMPORTANTE: videos[0] NÃO é garantidamente o vídeo
+                        # mais recente — se o perfil tiver um vídeo fixado
+                        # (pinned), ele vem primeiro na lista mesmo sendo
+                        # mais antigo. Por isso escolhemos explicitamente o
+                        # item com o maior "createTime" (data de criação),
+                        # ignorando a posição na lista.
+                        v = max(videos, key=lambda item: int(item.get("createTime", 0) or 0))
                         vid_id = v.get("id", "")
                         titulo = v.get("desc", "Sem título")
                         return {
@@ -125,20 +135,24 @@ async def via_scraping_direto(client: httpx.AsyncClient) -> dict | None:
                             "via":    "scraping-json",
                         }
 
-        # Fallback: regex direta no HTML
+        # Fallback: regex direta no HTML (aqui não temos createTime
+        # disponível por item, então usamos o maior ID numérico como proxy
+        # de recência — os IDs do TikTok crescem com o tempo).
         ids = re.findall(r'/@' + re.escape(TIKTOK_USER) + r'/video/(\d+)', html)
         descs = re.findall(r'"desc"\s*:\s*"(.*?)"', html)
         if ids:
+            video_id_mais_recente = max(ids, key=int)
             titulo = descs[0].encode().decode("unicode_escape") if descs and "\\u" in descs[0] else (descs[0] if descs else "Sem título")
             return {
-                "id":     ids[0],
+                "id":     video_id_mais_recente,
                 "titulo": titulo,
-                "url":    f"https://www.tiktok.com/@{TIKTOK_USER}/video/{ids[0]}",
+                "url":    f"https://www.tiktok.com/@{TIKTOK_USER}/video/{video_id_mais_recente}",
                 "via":    "scraping-regex",
             }
     except Exception as e:
         print(f"[TIKTOK] ⚠️  Scraping direto falhou: {e}")
     return None
+
 
 
 # ── Estratégia 3: Proxitok RSS ────────────────────────────────────────────────
@@ -153,32 +167,31 @@ async def via_proxitok(client: httpx.AsyncClient) -> dict | None:
                 continue
             xml = resp.text
 
-            # IMPORTANTE: um RSS tem um <title>/<link> no nível do <channel>
-            # (ex: "@tryharders.rl - TikTok", a própria página do perfil) E
-            # um <title>/<link> dentro de CADA <item> (cada vídeo). Um
-            # re.search direto no XML inteiro pega sempre o PRIMEIRO
-            # <title>/<link> do documento, que é o do <channel> — nunca o do
-            # vídeo mais recente. Por isso isolamos primeiro o conteúdo do
-            # primeiro <item>...</item> e só então buscamos dentro dele.
-            item_match = re.search(r'<item>(.*?)</item>', xml, re.DOTALL)
-            if not item_match:
+            # Escaneia TODOS os <item> do feed (não só o primeiro) e escolhe
+            # o de maior ID numérico — mais confiável do que confiar na
+            # ordem do feed, que pode trazer um vídeo fixado primeiro.
+            itens_xml = re.findall(r'<item>(.*?)</item>', xml, re.DOTALL)
+            if not itens_xml:
                 continue
-            item_xml = item_match.group(1)
 
-            titulo_match = re.search(r'<title><!\[CDATA\[(.*?)\]\]></title>', item_xml)
-            link_match   = re.search(r'<link>(https://www\.tiktok\.com/[^<]+)</link>', item_xml)
-            id_match     = re.search(r'/video/(\d+)', item_xml)
+            melhor = None
+            for item_xml in itens_xml:
+                id_match = re.search(r'/video/(\d+)', item_xml)
+                if not id_match:
+                    continue
+                vid_id = id_match.group(1)
+                if melhor is None or int(vid_id) > int(melhor["id"]):
+                    titulo_match = re.search(r'<title><!\[CDATA\[(.*?)\]\]></title>', item_xml)
+                    link_match   = re.search(r'<link>(https://www\.tiktok\.com/[^<]+)</link>', item_xml)
+                    melhor = {
+                        "id":     vid_id,
+                        "titulo": titulo_match.group(1) if titulo_match else "Sem título",
+                        "url":    link_match.group(1) if link_match else f"https://www.tiktok.com/@{TIKTOK_USER}/video/{vid_id}",
+                        "via":    f"proxitok ({instancia})",
+                    }
 
-            if id_match:
-                video_id = id_match.group(1)
-                titulo   = titulo_match.group(1) if titulo_match else "Sem título"
-                link     = link_match.group(1)   if link_match   else f"https://www.tiktok.com/@{TIKTOK_USER}/video/{video_id}"
-                return {
-                    "id":     video_id,
-                    "titulo": titulo,
-                    "url":    link,
-                    "via":    f"proxitok ({instancia})",
-                }
+            if melhor:
+                return melhor
         except Exception as e:
             print(f"[TIKTOK] ⚠️  Proxitok {instancia} falhou: {e}")
             continue
@@ -198,23 +211,29 @@ async def via_rssbridge(client: httpx.AsyncClient) -> dict | None:
                 continue
             xml = resp.text
 
-            # Mesmo cuidado do Proxitok: isola o primeiro <entry> (formato
-            # Atom) antes de extrair título/id, pra não pegar o título do
-            # feed inteiro.
-            entry_match = re.search(r'<entry>(.*?)</entry>', xml, re.DOTALL)
-            entry_xml = entry_match.group(1) if entry_match else xml
+            # Mesmo cuidado do Proxitok: escaneia todas as <entry> (formato
+            # Atom) e escolhe a de maior ID numérico, em vez de confiar que
+            # a primeira é sempre a mais recente.
+            entradas_xml = re.findall(r'<entry>(.*?)</entry>', xml, re.DOTALL)
+            candidatos = entradas_xml or [xml]
 
-            id_match = re.search(r'/video/(\d+)', entry_xml)
-            t_match  = re.search(r'<title[^>]*>(.*?)</title>', entry_xml, re.DOTALL)
-            if id_match:
-                video_id = id_match.group(1)
-                titulo   = re.sub(r'<[^>]+>', '', t_match.group(1)).strip() if t_match else "Sem título"
-                return {
-                    "id":     video_id,
-                    "titulo": titulo,
-                    "url":    f"https://www.tiktok.com/@{TIKTOK_USER}/video/{video_id}",
-                    "via":    "rssbridge",
-                }
+            melhor = None
+            for entry_xml in candidatos:
+                id_match = re.search(r'/video/(\d+)', entry_xml)
+                if not id_match:
+                    continue
+                vid_id = id_match.group(1)
+                if melhor is None or int(vid_id) > int(melhor["id"]):
+                    t_match = re.search(r'<title[^>]*>(.*?)</title>', entry_xml, re.DOTALL)
+                    melhor = {
+                        "id":     vid_id,
+                        "titulo": re.sub(r'<[^>]+>', '', t_match.group(1)).strip() if t_match else "Sem título",
+                        "url":    f"https://www.tiktok.com/@{TIKTOK_USER}/video/{vid_id}",
+                        "via":    "rssbridge",
+                    }
+
+            if melhor:
+                return melhor
         except Exception as e:
             print(f"[TIKTOK] ⚠️  RSSBridge falhou: {e}")
             continue
