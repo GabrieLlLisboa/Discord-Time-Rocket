@@ -6,6 +6,7 @@ import random
 from datetime import datetime, timezone
 
 from cogs.json_store import ler_json, salvar_json
+import cogs.atividade as atividade_mod
 
 # ─────────────────────────────────────────────
 #  Cog: Autopilot
@@ -90,6 +91,61 @@ CATEGORIAS = {
     "curiosidade": CURIOSIDADES,
 }
 
+# ── Incentivo direcionado a membros inativos ────────────────────────────────
+# 70% das vezes (CHANCE_INCENTIVO_INATIVO), em vez de uma mensagem genérica,
+# o bot chama por nome/menção algum membro inativo — com prioridade pra quem
+# NUNCA mandou nenhuma mensagem — incentivando a pessoa a participar.
+CHANCE_INCENTIVO_INATIVO = 0.7
+
+INCENTIVO_DIRECIONADO = [
+    "Ei {mention}, ainda não te vimos por aqui no chat! Bora dar um alô? 👋",
+    "{mention} cadê você? O servidor tá esperando sua estreia no chat! 🚀",
+    "Psst, {mention}... já pensou em soltar o verbo aqui no chat hoje? Bora! 💬",
+    "{mention} tá guardando as palavras pra quê? Vem interagir com a galera! 😄",
+    "E aí {mention}, que tal quebrar o silêncio e mandar sua primeira mensagem hoje? 🎮",
+    "{mention}, o servidor sente sua falta no chat! Aparece aí! 🙌",
+    "Alguém viu o(a) {mention}? Ainda tá devendo aquele 'oi' pro servidor! 👀",
+    "{mention}, bora contar pra gente qual seu rank atual? Vem interagir! 🏆",
+]
+
+
+def _membro_ja_falou(dados_atividade: dict, membro: discord.Member) -> bool:
+    registro = dados_atividade.get(str(membro.id))
+    return bool(registro and registro.get("mensagens", 0) > 0)
+
+
+def _membro_ja_foi_anunciado(dados_atividade: dict, membro: discord.Member) -> bool:
+    registro = dados_atividade.get(str(membro.id))
+    return bool(registro and registro.get("anunciado", False))
+
+
+def _escolher_membro_inativo(guild: discord.Guild) -> discord.Member | None:
+    """Escolhe um membro inativo pra incentivar, priorizando quem NUNCA
+    mandou mensagem nenhuma. Ignora bots e quem entrou depois que o período
+    de avaliação de atividade já tinha começado."""
+    dados_atividade = ler_json(atividade_mod.DATA_PATH, {})
+
+    nunca_falaram = []
+    inativos_geral = []
+
+    for membro in guild.members:
+        if membro.bot:
+            continue
+        if atividade_mod.entrou_durante_periodo(membro):
+            continue
+        if _membro_ja_foi_anunciado(dados_atividade, membro):
+            continue  # já bateu a meta de atividade, não precisa de incentivo
+
+        inativos_geral.append(membro)
+        if not _membro_ja_falou(dados_atividade, membro):
+            nunca_falaram.append(membro)
+
+    if nunca_falaram:
+        return random.choice(nunca_falaram)
+    if inativos_geral:
+        return random.choice(inativos_geral)
+    return None
+
 
 def escolher_mensagem(ultima_categoria: str | None) -> tuple[str, str]:
     """Escolhe uma categoria diferente da última (pra não repetir o mesmo tipo
@@ -151,6 +207,18 @@ class Autopilot(commands.Cog):
         if canal is None:
             print(f"[AUTOPILOT] ⚠️ Canal {canal_id} não encontrado.")
             return
+
+        # 70% de chance de chamar especificamente algum membro inativo
+        # (com prioridade pra quem nunca mandou mensagem nenhuma). Se não
+        # tiver ninguém inativo pra incentivar, cai pro conteúdo normal.
+        if random.random() < CHANCE_INCENTIVO_INATIVO:
+            membro = _escolher_membro_inativo(canal.guild)
+            if membro is not None:
+                mensagem = random.choice(INCENTIVO_DIRECIONADO).format(mention=membro.mention)
+                config["ultima_categoria"] = "incentivo_direcionado"
+                salvar_config(config)
+                await canal.send(mensagem)
+                return
 
         categoria, mensagem = escolher_mensagem(config.get("ultima_categoria"))
         config["ultima_categoria"] = categoria
