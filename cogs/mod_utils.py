@@ -28,6 +28,7 @@ ARQUIVOS = {
     "punicoes":       f"{DATA_DIR}/mod_punicoes.json",    # {guild_id: [ {...}, ... ]}
     "automod":        f"{DATA_DIR}/mod_automod.json",     # {guild_id: {...config...}}
     "antiraid":       f"{DATA_DIR}/mod_antiraid.json",    # {guild_id: {...config...}}
+    "antinuke":       f"{DATA_DIR}/mod_antinuke.json",    # {guild_id: {...config...}}
 }
 
 # ── Cores padrão (Discord brand colors, mesmo padrão usado em cogs/logs.py) ──
@@ -173,6 +174,45 @@ def atualizar_antiraid(guild_id: int, **kwargs) -> dict:
     cfg = get_antiraid(guild_id)
     cfg.update(kwargs)
     salvar_antiraid(guild_id, cfg)
+    return cfg
+
+
+# ── Anti-Nuke: configuração por servidor ─────────────────────────────────────
+# Protege o servidor contra staff comprometido/mal-intencionado que sai
+# deletando canais, cargos ou banindo membros em massa. Quando detecta,
+# remove imediatamente os cargos perigosos de quem estiver fazendo isso
+# (kick/ban do bot não bastam se a conta ainda tem cargo de admin).
+ANTINUKE_PADRAO = {
+    "ativo": True,
+    "janela_segundos": 20,          # janela de tempo pra contar ações
+    "limite_canais": 3,             # nº de canais criados/deletados na janela pra acionar
+    "limite_cargos": 3,             # nº de cargos criados/deletados na janela pra acionar
+    "limite_banimentos": 4,         # nº de banimentos na janela pra acionar
+    "limite_expulsoes": 5,          # nº de expulsões (kicks) na janela pra acionar
+    "acao": "remover_cargos",       # remover_cargos | quarentena | ban
+    "cargo_quarentena": None,
+    "whitelist_ids": [],            # IDs de usuários/bots confiáveis, imunes ao anti-nuke
+    "punir_bots_nao_whitelistados": True,
+}
+
+
+def get_antinuke(guild_id: int) -> dict:
+    dados = _ler_raw("antinuke")
+    cfg = dict(ANTINUKE_PADRAO)
+    cfg.update(dados.get(str(guild_id), {}))
+    return cfg
+
+
+def salvar_antinuke(guild_id: int, cfg: dict):
+    dados = _ler_raw("antinuke")
+    dados[str(guild_id)] = cfg
+    _salvar_raw("antinuke", dados)
+
+
+def atualizar_antinuke(guild_id: int, **kwargs) -> dict:
+    cfg = get_antinuke(guild_id)
+    cfg.update(kwargs)
+    salvar_antinuke(guild_id, cfg)
     return cfg
 
 
@@ -346,6 +386,23 @@ async def enviar_log_automod(bot: discord.Client, guild: discord.Guild, embed: d
 
 
 async def enviar_log_antiraid(bot: discord.Client, guild: discord.Guild, embed: discord.Embed):
+    cfg = get_config(guild.id)
+    canal_id = cfg.get("canal_logs_antiraid") or cfg.get("canal_logs_mod")
+    if not canal_id:
+        return
+    canal = guild.get_channel(canal_id)
+    if canal is None:
+        try:
+            canal = await guild.fetch_channel(canal_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return
+    try:
+        await canal.send(embed=embed)
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+
+
+async def enviar_log_antinuke(bot: discord.Client, guild: discord.Guild, embed: discord.Embed):
     cfg = get_config(guild.id)
     canal_id = cfg.get("canal_logs_antiraid") or cfg.get("canal_logs_mod")
     if not canal_id:

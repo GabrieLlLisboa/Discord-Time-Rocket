@@ -65,6 +65,7 @@ COGS = [
     "cogs.quiz",
     "cogs.autopilot",
     "cogs.conversar",
+    "cogs.aleatory",
 
     # ── Sistema de Moderação ──
     "cogs.mod_config",
@@ -72,6 +73,7 @@ COGS = [
     "cogs.moderation",
     "cogs.automod",
     "cogs.antiraid",
+    "cogs.antinuke",
     "cogs.clear",
 ]
 
