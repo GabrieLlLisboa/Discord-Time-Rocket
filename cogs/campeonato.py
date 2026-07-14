@@ -78,6 +78,22 @@ def construir_embed_info(info: dict) -> discord.Embed:
     return embed
 
 
+def construir_embed_resposta(info: dict, canal: discord.abc.GuildChannel) -> discord.Embed:
+    """Embed enviada como resposta (reply) a uma mensagem, quando `link_mensagem` é informado —
+    mesma ideia usada em /resultado (cogs/resultados.py)."""
+    embed = discord.Embed(
+        title=f"🏆 Novo campeonato: {info['nome']}",
+        description=f"As inscrições já estão abertas em {canal.mention}!",
+        color=0xD4A843,
+    )
+    embed.add_field(name="🎮 Rank exigido", value=_rank_display(info["rank"]), inline=True)
+    embed.add_field(name="⚔️ Formato", value=info["formato"], inline=True)
+    embed.add_field(name="🌍 Tipo", value=info["tipo"], inline=True)
+    embed.set_footer(text=f"Organizado por {info['organizador']}")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
+
 def construir_embed_lista(info: dict) -> discord.Embed:
     """Mensagem 2: lista de inscritos (atualizada toda vez que alguém entra/sai)."""
     inscritos = info.get("inscritos", {})
@@ -335,6 +351,7 @@ class Campeonato(commands.Cog):
         formato="Formato das partidas",
         tipo="O campeonato é interno ou externo?",
         organizador="Quem está organizando",
+        link_mensagem="(Opcional) Link de uma mensagem pra responder anunciando o campeonato",
     )
     @app_commands.choices(rank=RANK_CHOICES, formato=FORMATO_CHOICES, tipo=TIPO_CHOICES)
     @app_commands.checks.has_permissions(administrator=True)
@@ -346,6 +363,7 @@ class Campeonato(commands.Cog):
         formato: app_commands.Choice[str],
         tipo: app_commands.Choice[str],
         organizador: str,
+        link_mensagem: str = None,
     ):
         chave = _chave(nome)
         dados = ler_campeonatos()
@@ -395,6 +413,26 @@ class Campeonato(commands.Cog):
         info["lista_message_id"] = msg_lista.id
         dados[chave] = info
         salvar_campeonatos(dados)
+
+        # ── Responde a mensagem informada (opcional), igual ao /resultado ──────
+        if link_mensagem:
+            msg_alvo = None
+            # Extrai IDs do link: .../channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID
+            try:
+                partes = link_mensagem.strip().split("/")
+                msg_id = int(partes[-1])
+                ch_id  = int(partes[-2])
+                canal_link = self.bot.get_channel(ch_id)
+                if canal_link:
+                    msg_alvo = await canal_link.fetch_message(msg_id)
+            except Exception as e:
+                print(f"[CAMPEONATO] ⚠️ Não foi possível buscar a mensagem pelo link: {e}")
+
+            embed_resp = construir_embed_resposta(info, canal)
+            if msg_alvo:
+                await msg_alvo.reply(embed=embed_resp)
+            else:
+                await canal.send(embed=embed_resp)
 
     @criar_campeonato.error
     async def criar_campeonato_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):

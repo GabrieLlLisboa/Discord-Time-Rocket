@@ -76,6 +76,7 @@ STAFF_ROLE_IDS = ({c["id"] for c in PLAYER_CARGOS if c["secao"] == "staff"} | {
     1523835045872275566,  # Gerente
     1523835010795176027,  # Moderador
     1523833330175442954,  # Suporte
+    1523843469016043600,  # Tag de Staff
 }) - CARGOS_EXCLUIDOS_DA_TAG_STAFF
 
 # Cargos que podem ver os canais de whitelist (além do próprio membro).

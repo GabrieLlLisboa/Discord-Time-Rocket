@@ -22,6 +22,7 @@ AMISTOSOS_CHANNEL_ID = 1514778555970621531
 ADMIN_ROLE_IDS = {
     1511895253777649704,
     1511894837790769204,
+    1523843469016043600,
 }
 
 # Diretório dedicado (dentro de data/) pra transcrições temporárias.

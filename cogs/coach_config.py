@@ -31,6 +31,7 @@ COACHES: dict[str, dict] = {
 MANAGER_ROLE_IDS: set[int] = {
     1511895253777649704,
     1511894837790769204,
+    1523843469016043600,
 }
 
 # Categoria onde o canal de voz de cada atendimento é criado.
