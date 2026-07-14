@@ -4,6 +4,7 @@ from discord import app_commands
 import os
 import random
 import time
+from datetime import datetime, timezone, timedelta
 
 from cogs.json_store import ler_json, salvar_json
 import cogs.atividade as atividade_mod
@@ -110,6 +111,21 @@ CATEGORIAS = {
     "curiosidade_geral": CURIOSIDADES_GERAIS,
 }
 
+# ── Madrugada: nada de incentivo, só curiosidade/brincadeira ────────────────
+# Entre 00h e 06h (horário de Brasília, UTC-3) o bot não manda mensagens de
+# incentivo (nem a categoria "incentivo" nem o incentivo direcionado a membro
+# inativo) — nesse horário só rola curiosidade/curiosidade_geral/brincadeira.
+FUSO_BRASILIA = timezone(timedelta(hours=-3))
+MADRUGADA_INICIO = 0   # 00:00
+MADRUGADA_FIM = 6      # 06:00 (intervalo [0h, 6h))
+
+CATEGORIAS_BLOQUEADAS_MADRUGADA = {"incentivo"}
+
+
+def em_madrugada() -> bool:
+    hora_atual = datetime.now(FUSO_BRASILIA).hour
+    return MADRUGADA_INICIO <= hora_atual < MADRUGADA_FIM
+
 # ── Incentivo direcionado a membros inativos ────────────────────────────────
 # 70% das vezes (CHANCE_INCENTIVO_INATIVO), em vez de uma mensagem genérica,
 # o bot chama por nome/menção algum membro inativo — com prioridade pra quem
@@ -168,13 +184,19 @@ def _escolher_membro_inativo(guild: discord.Guild) -> discord.Member | None:
 
 def escolher_mensagem(ultima_categoria: str | None) -> tuple[str, str]:
     """Escolhe uma categoria diferente da última (pra não repetir o mesmo tipo
-    de mensagem duas vezes seguidas) e sorteia uma mensagem dela."""
-    categorias_disponiveis = [c for c in CATEGORIAS if c != ultima_categoria]
+    de mensagem duas vezes seguidas) e sorteia uma mensagem dela.
+    Durante a madrugada (0h-6h, horário de Brasília), incentivo fica fora —
+    só curiosidade/curiosidade_geral/brincadeira."""
+    categorias_base = CATEGORIAS
+    if em_madrugada():
+        categorias_base = {c: msgs for c, msgs in CATEGORIAS.items() if c not in CATEGORIAS_BLOQUEADAS_MADRUGADA}
+
+    categorias_disponiveis = [c for c in categorias_base if c != ultima_categoria]
     if not categorias_disponiveis:
-        categorias_disponiveis = list(CATEGORIAS)
+        categorias_disponiveis = list(categorias_base)
 
     categoria = random.choice(categorias_disponiveis)
-    mensagem = random.choice(CATEGORIAS[categoria])
+    mensagem = random.choice(categorias_base[categoria])
     return categoria, mensagem
 
 
@@ -249,7 +271,8 @@ class Autopilot(commands.Cog):
         # 70% de chance de chamar especificamente algum membro inativo
         # (com prioridade pra quem nunca mandou mensagem nenhuma). Se não
         # tiver ninguém inativo pra incentivar, cai pro conteúdo normal.
-        if random.random() < CHANCE_INCENTIVO_INATIVO:
+        # Não roda de madrugada — nesse horário é só curiosidade/brincadeira.
+        if not em_madrugada() and random.random() < CHANCE_INCENTIVO_INATIVO:
             membro = _escolher_membro_inativo(canal.guild)
             if membro is not None:
                 mensagem = random.choice(INCENTIVO_DIRECIONADO).format(mention=membro.mention)

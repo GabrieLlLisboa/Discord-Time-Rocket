@@ -437,6 +437,16 @@ class Whitelist(commands.Cog):
 
         embed = discord.Embed(description=f"{nome} — **{label}**", color=cor)
 
+        if status in ("aprovada", "recusada"):
+            decidido_por_id = registro.get("decidido_por_id")
+            decidido_por_nome = registro.get("decidido_por_nome")
+            if decidido_por_id:
+                verbo = "Aprovado" if status == "aprovada" else "Recusado"
+                embed.add_field(name="Responsável", value=f"{verbo} por <@{decidido_por_id}>", inline=False)
+            elif decidido_por_nome:
+                verbo = "Aprovado" if status == "aprovada" else "Recusado"
+                embed.add_field(name="Responsável", value=f"{verbo} por **{decidido_por_nome}**", inline=False)
+
         msg_id = registro.get("status_msg_id")
         if msg_id:
             try:
@@ -718,6 +728,7 @@ class Whitelist(commands.Cog):
         # passa por essa checagem; o segundo já vai cair no bloco acima.
         registro["status"] = "aprovada"
         registro["decidido_por_nome"] = str(autor)
+        registro["decidido_por_id"] = autor.id
         salvar("whitelist", self.dados)
 
         membro = guild.get_member(membro_id)
@@ -779,6 +790,7 @@ class Whitelist(commands.Cog):
         # Mesma trava imediata explicada em aprovar_core()
         registro["status"] = "recusada"
         registro["decidido_por_nome"] = str(autor)
+        registro["decidido_por_id"] = autor.id
         salvar("whitelist", self.dados)
 
         membro = guild.get_member(membro_id)
