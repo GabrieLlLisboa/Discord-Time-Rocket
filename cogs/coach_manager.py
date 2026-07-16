@@ -18,12 +18,15 @@ from cogs.coach_config import coach_por_chave, MANAGER_ROLE_IDS, CATEGORIA_VOZ_I
 from cogs.coach_storage import (
     criar_ticket,
     finalizar_ticket,
+    cancelar_ticket,
     marcar_avaliado,
     registrar_mensagem_avaliacao,
     registrar_canal_voz,
     TicketJaAbertoError,
     TicketNaoEncontradoError,
     TicketJaAvaliadoError,
+    TicketJaFinalizadoError,
+    TicketJaCanceladoError,
     TicketNaoFinalizadoError,
 )
 from cogs.coach_utils import montar_embed_ticket, montar_embed_avaliacao
@@ -118,12 +121,14 @@ async def criar_ticket_atendimento(interaction: discord.Interaction, coach_key: 
     else:
         print(f"[COACH] ⚠️ Categoria de voz ({CATEGORIA_VOZ_ID}) não encontrada — canal de voz não criado.")
 
+    from cogs.coach_views import CancelarCoachView
+
     embed = montar_embed_ticket(coach["nome"], cliente, "Em andamento")
     conteudo = f"{cliente.mention} " + (coach_membro.mention if coach_membro else "")
     if canal_voz is not None:
         conteudo += f"\n🔊 Canal de voz do atendimento: {canal_voz.mention}"
     try:
-        await canal_ticket.send(content=conteudo, embed=embed)
+        await canal_ticket.send(content=conteudo, embed=embed, view=CancelarCoachView(canal_ticket.id))
     except discord.HTTPException as e:
         print(f"[COACH] ⚠️ Erro ao enviar mensagem inicial do ticket {canal_ticket.id}: {e}")
 
@@ -172,6 +177,35 @@ async def finalizar_atendimento(channel: discord.TextChannel) -> dict:
         )
     except discord.HTTPException as e:
         print(f"[COACH] ⚠️ Erro ao enviar aviso de finalização no ticket {channel.id}: {e}")
+
+    return ticket
+
+
+# ── Cancelamento (botão "🚫 Cancelar Atendimento") ───────────────────────────
+async def cancelar_atendimento(channel: discord.TextChannel) -> dict:
+    """
+    Marca o ticket do canal informado como Cancelado e apaga o canal de voz
+    associado (o canal do ticket em si é apagado por quem chama, depois de
+    avisar no chat — ver CancelarCoachView em coach_views.py). Levanta as
+    exceções de coach_storage (TicketNaoEncontradoError / TicketJaFinalizadoError
+    / TicketJaCanceladoError) que devem ser tratadas por quem chama.
+    """
+    from cogs.coach_storage import obter_ticket
+
+    ticket_antes = await obter_ticket(channel.id)
+    if ticket_antes is None:
+        raise TicketNaoEncontradoError()
+
+    ticket = await cancelar_ticket(channel.id)  # levanta TicketJaFinalizadoError/TicketJaCanceladoError se preciso
+
+    canal_voz_id = ticket.get("canal_voz_id")
+    if canal_voz_id:
+        canal_voz = channel.guild.get_channel(canal_voz_id)
+        if canal_voz is not None:
+            try:
+                await canal_voz.delete(reason=f"Atendimento cancelado — ticket {channel.id}")
+            except discord.HTTPException as e:
+                print(f"[COACH] ⚠️ Erro ao apagar canal de voz do ticket {channel.id}: {e}")
 
     return ticket
 

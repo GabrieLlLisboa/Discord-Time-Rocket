@@ -82,7 +82,10 @@ def montar_embed_ticket(coach_nome: str, cliente: discord.abc.User, status: str)
     embed.add_field(name="Status", value=status, inline=True)
     embed.add_field(
         name="\u200b",
-        value="Quando finalizar o atendimento utilize `!finalizar-coach`",
+        value=(
+            "Quando finalizar o atendimento utilize `!finalizar-coach`\n"
+            "Pra cancelar, use o botão **🚫 Cancelar Atendimento** abaixo."
+        ),
         inline=False,
     )
     return embed

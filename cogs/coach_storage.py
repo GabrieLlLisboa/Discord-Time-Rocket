@@ -83,6 +83,10 @@ class TicketJaAvaliadoError(Exception):
     pass
 
 
+class TicketJaCanceladoError(Exception):
+    pass
+
+
 class TicketNaoFinalizadoError(Exception):
     """Tentativa de avaliar um ticket que ainda não foi finalizado."""
 
@@ -113,6 +117,14 @@ async def listar_tickets_para_reavaliacao() -> list[dict]:
 async def listar_todos_tickets() -> list[dict]:
     async with _lock:
         return list(_ler()["tickets"].values())
+
+
+async def listar_tickets_em_andamento() -> list[dict]:
+    """Tickets ainda 'Em andamento' — usados para recriar a View persistente
+    do botão '🚫 Cancelar Atendimento' após um restart."""
+    async with _lock:
+        dados = _ler()
+        return [t for t in dados["tickets"].values() if t.get("status") == "Em andamento"]
 
 
 # ── Operações atômicas de escrita ───────────────────────────────────────────
@@ -166,6 +178,27 @@ async def finalizar_ticket(canal_ticket_id: int) -> dict:
             raise TicketJaFinalizadoError()
 
         ticket["status"] = "Concluído"
+        ticket["finalizado_em"] = _agora()
+        _salvar(dados)
+        return dict(ticket)
+
+
+async def cancelar_ticket(canal_ticket_id: int) -> dict:
+    """Marca o ticket como 'Cancelado' — usado pelo botão '🚫 Cancelar
+    Atendimento', que tanto o cliente quanto o coach responsável podem
+    apertar enquanto o atendimento ainda estiver 'Em andamento'."""
+    async with _lock:
+        dados = _ler()
+        chave = str(canal_ticket_id)
+        ticket = dados["tickets"].get(chave)
+        if ticket is None:
+            raise TicketNaoEncontradoError()
+        if ticket["status"] == "Concluído":
+            raise TicketJaFinalizadoError()
+        if ticket["status"] == "Cancelado":
+            raise TicketJaCanceladoError()
+
+        ticket["status"] = "Cancelado"
         ticket["finalizado_em"] = _agora()
         _salvar(dados)
         return dict(ticket)

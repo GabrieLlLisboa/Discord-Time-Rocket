@@ -137,8 +137,8 @@ async def registrar_views_persistentes():
     # avaliação (senão o botão pararia de funcionar após um restart).
     try:
         from cogs.coach_config import COACHES
-        from cogs.coach_views import ComprarAtendimentoView, AvaliarCoachView
-        from cogs.coach_storage import listar_tickets_para_reavaliacao
+        from cogs.coach_views import ComprarAtendimentoView, AvaliarCoachView, CancelarCoachView
+        from cogs.coach_storage import listar_tickets_para_reavaliacao, listar_tickets_em_andamento
 
         for coach_key in COACHES:
             bot.add_view(ComprarAtendimentoView(coach_key))
@@ -147,8 +147,13 @@ async def registrar_views_persistentes():
         for ticket in tickets_pendentes:
             bot.add_view(AvaliarCoachView(ticket["canal_ticket_id"]))
 
+        tickets_em_andamento = await listar_tickets_em_andamento()
+        for ticket in tickets_em_andamento:
+            bot.add_view(CancelarCoachView(ticket["canal_ticket_id"]))
+
         print(
-            f"[VIEWS] ✅ {len(COACHES)} view(s) de coach(es) e "
+            f"[VIEWS] ✅ {len(COACHES)} view(s) de coach(es), "
+            f"{len(tickets_em_andamento)} view(s) de cancelamento pendente(s) e "
             f"{len(tickets_pendentes)} view(s) de avaliação pendente(s) recarregada(s)."
         )
     except Exception as e:
