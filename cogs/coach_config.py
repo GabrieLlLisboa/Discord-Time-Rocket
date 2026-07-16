@@ -24,6 +24,11 @@ COACHES: dict[str, dict] = {
         "channel_id": 1525158888393932860,
         "nome": "Whei",
     },
+    "borelli": {
+        "user_id": 1454478828910022742,
+        "channel_id": 1526771115538649128,
+        "nome": "Borelli",
+    },
 }
 
 # ── Cargos autorizados a gerenciar/finalizar tudo relacionado a coaches ──────
