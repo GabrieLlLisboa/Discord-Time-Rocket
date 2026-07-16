@@ -2,14 +2,19 @@
 Módulo: Configuração do Sistema de Coaches
 Arquivo: cogs/coach_config.py
 
-Único lugar que precisa ser editado para adicionar/remover um coach ou
-alterar os cargos de gerenciamento. Nenhuma lógica dos demais módulos
-(coach_storage, coach_manager, coach_views, coach_commands...) precisa
-ser tocada ao adicionar um novo coach — basta um novo item no dicionário
-COACHES abaixo.
+Os coaches "de fábrica" ficam fixos no dicionário COACHES abaixo. Coaches
+adicionados depois, via `/adicionar-coach`, são gravados em
+data/coaches_extra.json e recarregados automaticamente aqui sempre que o
+bot reinicia — não precisa editar este arquivo à mão pra isso.
 """
 
 from __future__ import annotations
+
+import re
+
+from cogs.json_store import ler_json, salvar_json
+
+EXTRA_COACHES_FILE = "data/coaches_extra.json"
 
 # ── Coaches ──────────────────────────────────────────────────────────────────
 # chave interna -> { user_id do coach, channel_id do canal dele, nome de exibição }
@@ -30,6 +35,10 @@ COACHES: dict[str, dict] = {
         "nome": "Borelli",
     },
 }
+
+# Carrega os coaches adicionados via /adicionar-coach (persistidos em disco)
+# e junta com os de fábrica acima.
+COACHES.update(ler_json(EXTRA_COACHES_FILE, dict))
 
 # ── Cargos autorizados a gerenciar/finalizar tudo relacionado a coaches ──────
 # (mesmos cargos usados para gerenciar/finalizar amistosos)
@@ -61,3 +70,43 @@ def coach_por_user_id(user_id: int) -> tuple[str, dict] | None:
         if dados["user_id"] == user_id:
             return chave, dados
     return None
+
+
+def _gerar_chave(nome: str) -> str:
+    """Transforma o nome de exibição numa chave interna simples (sem
+    acentos/espaços), ex: 'Borelli 2' -> 'borelli_2'."""
+    chave = nome.strip().lower()
+    chave = re.sub(r"\s+", "_", chave)
+    chave = re.sub(r"[^a-z0-9_]", "", chave)
+    return chave or "coach"
+
+
+class CoachJaExisteError(Exception):
+    """Já existe um coach com essa chave, user_id ou channel_id."""
+
+
+def adicionar_coach(user_id: int, channel_id: int, nome: str) -> str:
+    """
+    Adiciona um novo coach: gera a chave a partir do nome, valida que não
+    haja conflito (mesma chave, mesmo usuário ou mesmo canal já
+    cadastrados), atualiza o dicionário COACHES em memória e persiste em
+    data/coaches_extra.json — assim o coach sobrevive a um restart do bot
+    sem precisar editar este arquivo na mão. Devolve a chave gerada.
+    """
+    chave = _gerar_chave(nome)
+
+    if chave in COACHES:
+        raise CoachJaExisteError(f"já existe um coach com a chave '{chave}' (nome parecido demais).")
+    if coach_por_user_id(user_id) is not None:
+        raise CoachJaExisteError("esse usuário já é coach.")
+    if coach_por_channel_id(channel_id) is not None:
+        raise CoachJaExisteError("esse canal já está associado a outro coach.")
+
+    dados = {"user_id": user_id, "channel_id": channel_id, "nome": nome}
+    COACHES[chave] = dados
+
+    extras = ler_json(EXTRA_COACHES_FILE, dict)
+    extras[chave] = dados
+    salvar_json(EXTRA_COACHES_FILE, extras)
+
+    return chave

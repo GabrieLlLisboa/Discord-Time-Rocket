@@ -3,6 +3,9 @@ Módulo: Cog principal do Sistema de Coaches
 Arquivo: cogs/coach_commands.py
 
 Comandos:
+  /adicionar-coach  — slash command, só administradores. Cadastra um novo
+                       coach (usuário + canal + nome), persistindo em
+                       data/coaches_extra.json.
   !finalizar-coach  — usado DENTRO do canal do ticket, por: coach
                        responsável ou staff/gerência.
 
@@ -17,9 +20,10 @@ from __future__ import annotations
 import asyncio
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
-from cogs.coach_config import COACHES, coach_por_channel_id
+from cogs.coach_config import COACHES, coach_por_channel_id, adicionar_coach, CoachJaExisteError
 from cogs.coach_storage import (
     obter_ticket,
     finalizar_ticket,
@@ -54,6 +58,54 @@ class Coaches(commands.Cog):
                 await garantir_mensagens_existem(self.bot, coach_key)
             except Exception as e:
                 print(f"[COACH] ⚠️ Erro ao garantir mensagens do coach '{coach_key}': {e}")
+
+    # ── Comando de cadastro de novo coach (staff/adm) ─────────────────────
+    @app_commands.command(name="adicionar-coach", description="Cadastra um novo coach no sistema de atendimentos.")
+    @app_commands.describe(
+        coach="O usuário que vai ser o coach",
+        canal="Canal onde ficam as mensagens de estatísticas/comprar atendimento desse coach",
+        nome="Nome de exibição do coach",
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def adicionar_coach_cmd(
+        self,
+        interaction: discord.Interaction,
+        coach: discord.Member,
+        canal: discord.TextChannel,
+        nome: str,
+    ):
+        try:
+            chave = adicionar_coach(coach.id, canal.id, nome)
+        except CoachJaExisteError as e:
+            await interaction.response.send_message(f"❌ Não deu pra cadastrar: {e}", ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            f"✅ Coach **{nome}** cadastrado! Canal: {canal.mention} • Coach: {coach.mention}\n"
+            f"As mensagens de estatísticas e o botão de comprar atendimento já vão aparecer lá.",
+            ephemeral=True,
+        )
+
+        # Cria as mensagens fixas (📊 Estatísticas / 🛒 Comprar Atendimento)
+        # no canal do coach novo, e registra a view do botão como
+        # persistente (senão ele para de funcionar após um restart).
+        try:
+            await garantir_mensagens_existem(self.bot, chave)
+        except Exception as e:
+            print(f"[COACH] ⚠️ Erro ao criar mensagens iniciais do coach '{chave}': {e}")
+
+        from cogs.coach_views import ComprarAtendimentoView
+
+        self.bot.add_view(ComprarAtendimentoView(chave))
+
+        print(f"[COACH] ✅ Coach '{chave}' ({nome}) cadastrado por {interaction.user} — canal {canal.id}.")
+
+    @adicionar_coach_cmd.error
+    async def adicionar_coach_cmd_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ Só **Administradores** podem cadastrar coaches.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Erro ao cadastrar coach: {error}", ephemeral=True)
 
     # ── Comando de finalização ───────────────────────────────────────────
     @commands.command(name="finalizar-coach")
