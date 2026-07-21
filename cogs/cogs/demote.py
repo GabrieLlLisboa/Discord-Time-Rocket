@@ -47,13 +47,13 @@ MENSAGEM_QUARENTENA = (
     "Durante nosso período de avaliação, não identificamos atividade suficiente da sua "
     "parte. Para manter o clube ativo, jogadores inativos passam por esta etapa antes de "
     "uma remoção definitiva.\n\n"
-    "Caso deseje continuar fazendo parte da **TryHarders RL**, basta responder neste canal "
+    "Caso deseje continuar fazendo parte da **Ignition RL**, basta responder neste canal "
     "dentro de **7 dias**.\n\n"
     "Se não houver nenhuma resposta nesse período, você será removido automaticamente do clube."
 )  # legado — não é mais usada pelo !demotar, só fica aqui pra não quebrar quarentenas antigas
 
 MENSAGEM_REMOCAO_FINAL = (
-    "Olá! Você foi removido da **TryHarders RL** porque não houve nenhuma interação "
+    "Olá! Você foi removido da **Ignition RL** porque não houve nenhuma interação "
     "durante o período de quarentena de 7 dias.\n\n"
     "Caso queira receber uma nova oportunidade para voltar ao clube, entre em contato com "
     "**ravokes** pelo Discord. Após a análise da Staff, você poderá receber uma nova chance "
@@ -124,7 +124,7 @@ class Demote(commands.Cog):
             description=MENSAGEM_EXPULSAO_DIRETA,
             color=0xED4245,
         )
-        embed.set_footer(text="TryHarders RL")
+        embed.set_footer(text="Ignition RL")
         try:
             await membro.send(embed=embed)
             return True
@@ -290,7 +290,7 @@ class Demote(commands.Cog):
             try:
                 await membro.send(
                     "✅ Sua quarentena foi encerrada e você continua fazendo parte da "
-                    "**TryHarders RL**. Bem-vindo(a) de volta à atividade!"
+                    "**Ignition RL**. Bem-vindo(a) de volta à atividade!"
                 )
             except discord.Forbidden:
                 pass
@@ -357,7 +357,7 @@ class Demote(commands.Cog):
         try:
             await membro.send(
                 "✅ Sua quarentena foi encerrada e você continua fazendo parte da "
-                "**TryHarders RL**. Bem-vindo(a) de volta à atividade!"
+                "**Ignition RL**. Bem-vindo(a) de volta à atividade!"
             )
         except discord.Forbidden:
             pass
@@ -441,7 +441,7 @@ class Demote(commands.Cog):
         try:
             await membro.send(
                 "✅ Você foi marcado(a) como ativo(a) e sua quarentena foi encerrada. "
-                "Bem-vindo(a) de volta à atividade na **TryHarders RL**!"
+                "Bem-vindo(a) de volta à atividade na **Ignition RL**!"
             )
         except discord.Forbidden:
             pass
@@ -586,7 +586,7 @@ class Demote(commands.Cog):
                         description=MENSAGEM_REMOCAO_FINAL,
                         color=0xED4245,
                     )
-                    embed.set_footer(text="TryHarders RL")
+                    embed.set_footer(text="Ignition RL")
                     await membro.send(embed=embed)
                 except discord.Forbidden:
                     pass

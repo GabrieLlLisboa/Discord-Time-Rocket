@@ -81,7 +81,7 @@ class Stats(commands.Cog):
         embed.add_field(name="✅  Vitórias",   value=f"`{vitorias}`",  inline=True)
         embed.add_field(name="❌  Derrotas",   value=f"`{derrotas}`",  inline=True)
         embed.add_field(name="📊  Winrate",    value=f"`{winrate}`",   inline=True)
-        embed.set_footer(text=f"TryHarders RL • {agora_str()}")
+        embed.set_footer(text=f"Ignition RL • {agora_str()}")
 
         await interaction.response.send_message(embed=embed)
 
@@ -109,7 +109,7 @@ class Stats(commands.Cog):
                 f"{resultado}{' — ' + placar if placar else ''}"
             )
             embed.add_field(
-                name=f"🆚  TryHarders vs {a['adversario']}",
+                name=f"🆚  Ignition vs {a['adversario']}",
                 value=valor,
                 inline=False,
             )

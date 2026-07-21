@@ -18,7 +18,7 @@ import random
 # ─────────────────────────────────────────────
 
 TIKTOK_CHANNEL_ID = 1515151647641178193
-TIKTOK_USER          = "tryharders.rl"
+TIKTOK_USER          = "ignition.rl"
 VIDEO_NOVO_ROLE_ID   = 1515158913555894443
 LAST_VIDEO_FILE   = "last_tiktok.txt"
 
@@ -261,12 +261,12 @@ class TikTok(commands.Cog):
             mencao = cargo.mention if cargo else ""
 
             embed = discord.Embed(
-                title="🎵  A TryHarders RL postou um vídeo novo!",
+                title="🎵  A Ignition RL postou um vídeo novo!",
                 color=0xD4A843,
             )
             embed.add_field(name="📌  Título", value=video["titulo"], inline=False)
             embed.add_field(name="🔗  Link",   value=video["url"],    inline=False)
-            embed.set_footer(text="TikTok • @tryharders.rl")
+            embed.set_footer(text="TikTok • @ignition.rl")
             embed.timestamp = discord.utils.utcnow()
 
             await canal.send(content=mencao if mencao else None, embed=embed)

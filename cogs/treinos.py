@@ -158,7 +158,7 @@ class Treinos(commands.Cog):
                         )
                         embed.add_field(name="🕐  Horário", value=dt_discord,      inline=True)
                         embed.add_field(name="📝  Descrição", value=t["descricao"], inline=True)
-                        embed.set_footer(text="TryHarders RL — Bora treinar! 🚀")
+                        embed.set_footer(text="Ignition RL — Bora treinar! 🚀")
                         await canal.send(embed=embed)
                         print(f"[TREINO] ⏰ Lembrete enviado para treino #{t['id']}")
 

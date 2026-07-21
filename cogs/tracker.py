@@ -70,7 +70,7 @@ async def buscar_rank_rl(nick: str, plataforma: str = "epic") -> dict:
     url = f"{TRN_BASE_URL}/{plataforma}/{nick}"
     headers = {
         "TRN-Api-Key": TRN_API_KEY,
-        "User-Agent": "Mozilla/5.0 (compatible; TryHardersRLBot/1.0; +https://discord.com)",
+        "User-Agent": "Mozilla/5.0 (compatible; IgnitionRLBot/1.0; +https://discord.com)",
         "Accept": "application/json",
     }
 
@@ -177,7 +177,7 @@ class TrackerModal(discord.ui.Modal, title="🔎 Buscar Rank — Rocket League")
                 embed.add_field(name=f"{emoji}  {label}", value=valor, inline=False)
 
         embed.add_field(name="🗓️  Tempo de conta", value=resultado["tempo_conta"], inline=False)
-        embed.set_footer(text="TryHarders RL • Dados via Tracker Network")
+        embed.set_footer(text="Ignition RL • Dados via Tracker Network")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
         print(f"[TRACKER] ✅ Rank de '{nick}' consultado por {interaction.user}.")

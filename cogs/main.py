@@ -221,10 +221,7 @@ async def on_ready():
 
     try:
         await bot.change_presence(
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name="TryHarders RL"
-            )
+            activity=discord.Game(name="Rocket League")
         )
     except discord.HTTPException:
         pass
