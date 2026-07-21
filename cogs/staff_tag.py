@@ -13,7 +13,7 @@ from cogs.whitelist import STAFF_ROLE_IDS
 #  Se a pessoa perde todos os cargos de staff, a tag é removida também.
 # ─────────────────────────────────────────────
 
-CARGO_TAG_STAFF_ID = 1523843469016043600
+CARGO_TAG_STAFF_ID = 1529241192183627947
 
 
 class StaffTag(commands.Cog):

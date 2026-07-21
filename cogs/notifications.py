@@ -22,7 +22,7 @@ CARGOS_NOTIFICACAO = {
         "desc":  "Receba os anúncios do servidor.",
     },
     "novo_jogador": {
-        "id":    1514788887300538531,
+        "id":    1529241383930695700,
         "label": "Notificação Novo Jogador",
         "emoji": "🆕",
         "desc":  "Saiba quando um novo jogador entrar.",
@@ -34,7 +34,7 @@ CARGOS_NOTIFICACAO = {
         "desc":  "Comemore cada vitória do time!",
     },
     "video_novo": {
-        "id":    1515158913555894443,
+        "id":    1529241281023180930,
         "label": "Notificação Vídeo Novo",
         "emoji": "🎵",
         "desc":  "Seja avisado quando sair vídeo novo no TikTok.",

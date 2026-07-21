@@ -45,7 +45,7 @@ STATUS_LABELS = {
 
 # Cargo "membro da equipe" — NÃO é dado automaticamente no fim da whitelist
 # (deixado aqui só de referência, caso você use em outro lugar).
-CARGO_MEMBRO_ID = 1523830313141272586
+CARGO_MEMBRO_ID = 1529152916362104943
 
 # Cargo dado automaticamente (na hora, sem precisar de aprovação) pra quem
 # escolhe "Inglês" na pergunta de idioma da whitelist.
@@ -62,21 +62,17 @@ CARGO_SEM_ACESSO_ID = 1521890714873757707
 # Cargos de staff — quem tiver qualquer um desses, recebe automaticamente
 # o cargo de "tag" de staff abaixo (isso é feito em cogs/staff_tag.py).
 #
-# Coach (1513356584946896946) e Editor de vídeo (1513240072139309317) têm
+# Coach (1529160458769006804) e Editor de vídeo (1513240072139309317) têm
 # "secao": "staff" em PLAYER_CARGOS (players.py), mas foram explicitamente
 # excluídos daqui: quem tem só esses cargos NÃO recebe a tag de staff.
 CARGOS_EXCLUIDOS_DA_TAG_STAFF = {
     1513240072139309317,  # Editor de vídeo
-    1513356584946896946,  # Coach
+    1529160458769006804,  # Coach
 }
 
 STAFF_ROLE_IDS = ({c["id"] for c in PLAYER_CARGOS if c["secao"] == "staff"} | {
-    1511894837790769204,  # Sub-Dono
-    1523835085475020932,  # Diretor
-    1523835045872275566,  # Gerente
-    1523835010795176027,  # Moderador
-    1523833330175442954,  # Suporte
-    1523843469016043600,  # Tag de Staff
+    1529150684296122438,  # Admin (antes: Sub-Dono, Diretor, Gerente, Moderador, Suporte — unificados)
+    1529241192183627947,  # Tag de Staff
 }) - CARGOS_EXCLUIDOS_DA_TAG_STAFF
 
 # Cargos que podem ver os canais de whitelist (além do próprio membro).
@@ -84,8 +80,7 @@ STAFF_ROLE_IDS = ({c["id"] for c in PLAYER_CARGOS if c["secao"] == "staff"} | {
 # não têm acesso aos canais de whitelist.
 CARGOS_QUE_VEEM_WHITELIST = {
     1511895253777649704,  # Dono do Clube
-    1511894837790769204,  # Sub-Dono
-    1523835085475020932,  # Diretor
+    1529150684296122438,  # Admin (antes: Sub-Dono, Diretor — unificados)
 }
 
 RANK_IDS = set(CARGO_RANKS.values())

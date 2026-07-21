@@ -10,16 +10,15 @@ AMISTOSOS_CHANNEL_ID = 1514778555970621531
 # um ADMIN_ROLE_ID; agora são dois cargos, e qualquer um dos dois basta.
 ADMIN_ROLE_IDS = {
     1511895253777649704,
-    1511894837790769204,
+    1529150684296122438,
 }
 
 RANKS = {
-    "Super Sonic Legend": 1514772134327488642,
-    "Grand Champion":     1513343857125752992,
-    "Champion":           1512304793534861313,
-    "Diamante":           1512305401075466320,
-    "Platina":            1512305547544625273,
-    "Ouro":               1512571913849933956,
+    "Super Sonic Legend": 1529152122942390366,
+    "Grand Champion":     1529152259630305402,
+    "Champion":           1529152654629142679,
+    "Diamante":           1529153925486215350,
+    "Platina":            1529154068314849450,
 }
 
 RANK_EMOJIS = {
@@ -28,7 +27,6 @@ RANK_EMOJIS = {
     "Champion":           "🏅",
     "Diamante":           "💎",
     "Platina":            "🪙",
-    "Ouro":               "🥇",
 }
 
 

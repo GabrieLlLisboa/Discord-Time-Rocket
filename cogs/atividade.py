@@ -23,7 +23,7 @@ CANAL_ANUNCIO_ID = 1521708231620034600
 BR_TZ = timezone(timedelta(hours=-3))
 
 # Único usuário que pode rodar o !ativar (marcar alguém como ativo manualmente)
-IDS_AUTORIZADOS = {1487452210605588592, 1421693641184772147}
+IDS_AUTORIZADOS = {1487452210605588592}
 
 DATA_PATH = "data/atividade.json"
 CONFIG_PATH = "data/atividade_config.json"

@@ -25,7 +25,7 @@ INTERVALO_CHECAGEM_SEGUNDOS = 10
 LOG_CHANNEL_ID = 1521897698419019907
 
 # Único usuário que pode rodar o !checarupdate manualmente
-IDS_AUTORIZADOS = {1487452210605588592, 1421693641184772147}
+IDS_AUTORIZADOS = {1487452210605588592}
 
 
 def _git_sync(*args, timeout: int = 30) -> subprocess.CompletedProcess:

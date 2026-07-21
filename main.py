@@ -61,7 +61,6 @@ COGS = [
     "cogs.auto_update",
     "cogs.demote",
     "cogs.coach_commands",
-    "cogs.tradutor",
     "cogs.quiz",
     "cogs.autopilot",
     "cogs.conversar",

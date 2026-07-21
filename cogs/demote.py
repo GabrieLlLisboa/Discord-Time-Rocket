@@ -24,8 +24,8 @@ from cogs.json_store import ler_json, salvar_json
 # ───────────────── CONFIGURAÇÕES (preencha os IDs do seu servidor) ─────────────────
 STAFF_ROLE_IDS = [
     1511895253777649704,   # Dono do Clube
-    1511894837790769204,   # Sub-Dono
-    1523843469016043600,   # Tag de Staff
+    1529150684296122438,   # Sub-Dono
+    1529241192183627947,   # Tag de Staff
 ]                                             # cargos que enxergam os canais de quarentena
 
 MEMBRO_ROLE_ID = 0                           # não há cargo de "Membro" no servidor — deixado em 0,

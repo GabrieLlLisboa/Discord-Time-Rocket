@@ -7,7 +7,7 @@ from cogs.players import CARGOS
 
 load_dotenv()
 WELCOME_CHANNEL_ID   = int(os.getenv("WELCOME_CHANNEL_ID", 0))
-NOVO_JOGADOR_ROLE_ID = 1514788887300538531
+NOVO_JOGADOR_ROLE_ID = 1529241383930695700
 
 # ─────────────────────────────────────────────
 #  Cog: Boas-vindas

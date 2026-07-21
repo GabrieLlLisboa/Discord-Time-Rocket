@@ -10,7 +10,7 @@ from cogs.backup import ler, salvar
 #  /treino — agenda e lembra 30 min antes
 # ─────────────────────────────────────────────
 
-ADMIN_ROLE_ID = 1511894837790769204
+ADMIN_ROLE_ID = 1529150684296122438
 
 
 def parse_data(data_str: str, hora_str: str) -> datetime | None:

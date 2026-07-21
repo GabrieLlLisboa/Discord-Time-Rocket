@@ -10,18 +10,14 @@ JOGADORES_CHANNEL_ID = 1514775408124367149
 
 CARGOS = [
     {"nome": "Dono do Clube",      "id": 1511895253777649704, "emoji": "👑", "secao": "staff"},
-    {"nome": "Sub-Dono",           "id": 1511894837790769204, "emoji": "🥈", "secao": "staff"},
-    {"nome": "Diretor",            "id": 1523835085475020932, "emoji": "🎖️", "secao": "staff"},
-    {"nome": "Gerente",            "id": 1523835045872275566, "emoji": "🗂️", "secao": "staff"},
-    {"nome": "Moderador",          "id": 1523835010795176027, "emoji": "🔨", "secao": "staff"},
-    {"nome": "Suporte",            "id": 1523833330175442954, "emoji": "🎧", "secao": "staff"},
-    {"nome": "Coach",              "id": 1513356584946896946, "emoji": "📋", "secao": "staff"},
+    {"nome": "Admin",              "id": 1529150684296122438, "emoji": "🥈", "secao": "staff"},
+    {"nome": "Coach",              "id": 1529160458769006804, "emoji": "📋", "secao": "staff"},
     {"nome": "Editor de vídeo",    "id": 1513240072139309317, "emoji": "🎬", "secao": "staff"},
-    {"nome": "Super Sonic Legend", "id": 1514772134327488642, "emoji": "🌌", "secao": "rank"},
-    {"nome": "Grand Champion",     "id": 1513343857125752992, "emoji": "👑", "secao": "rank"},
-    {"nome": "Champion",           "id": 1512304793534861313, "emoji": "🏅", "secao": "rank"},
-    {"nome": "Diamante",           "id": 1512305401075466320, "emoji": "💎", "secao": "rank"},
-    {"nome": "Platina",            "id": 1512305547544625273, "emoji": "🪙", "secao": "rank"},
+    {"nome": "Super Sonic Legend", "id": 1529152122942390366, "emoji": "🌌", "secao": "rank"},
+    {"nome": "Grand Champion",     "id": 1529152259630305402, "emoji": "👑", "secao": "rank"},
+    {"nome": "Champion",           "id": 1529152654629142679, "emoji": "🏅", "secao": "rank"},
+    {"nome": "Diamante",           "id": 1529153925486215350, "emoji": "💎", "secao": "rank"},
+    {"nome": "Platina",            "id": 1529154068314849450, "emoji": "🪙", "secao": "rank"},
 ]
 
 IDS_MONITORADOS  = {c["id"] for c in CARGOS}
@@ -30,20 +26,12 @@ RANK_IDS         = {c["id"] for c in CARGOS if c["secao"] == "rank"}
 STAFF_IDS        = {c["id"] for c in CARGOS if c["secao"] == "staff"}
 CARGOS_RANK      = [c for c in CARGOS if c["secao"] == "rank"]  # usados no painel !setup-rank
 
-# Quem tiver qualquer um desses cargos não aparece na lista de jogadores
-IDS_OCULTOS = {1521890714873757707, 1514782308031533116}
-
-
-def _esta_oculto(membro: discord.Member) -> bool:
-    return bool(IDS_OCULTOS & {r.id for r in membro.roles})
-
-
 def _membros_do_cargo(guild: discord.Guild, cargo_id: int) -> list:
-    """Membros de um cargo, já filtrando bots e membros ocultos."""
+    """Membros de um cargo, já filtrando bots."""
     cargo = guild.get_role(cargo_id)
     if cargo is None:
         return []
-    return [m for m in cargo.members if not m.bot and not _esta_oculto(m)]
+    return [m for m in cargo.members if not m.bot]
 
 
 def build_embed(guild: discord.Guild) -> discord.Embed:
@@ -69,7 +57,7 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
             inline=False,
         )
 
-    total_membros = sum(1 for m in guild.members if not m.bot and not _esta_oculto(m))
+    total_membros = sum(1 for m in guild.members if not m.bot)
     embed.set_footer(text=f"🔥 {total_membros} membros na squad  •  Atualiza a cada 5 min")
     embed.timestamp = discord.utils.utcnow()
     return embed

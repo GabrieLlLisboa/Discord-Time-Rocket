@@ -19,21 +19,9 @@ EXTRA_COACHES_FILE = "data/coaches_extra.json"
 # ── Coaches ──────────────────────────────────────────────────────────────────
 # chave interna -> { user_id do coach, channel_id do canal dele, nome de exibição }
 COACHES: dict[str, dict] = {
-    "isaque": {
-        "user_id": 1421693641184772147,
-        "channel_id": 1525158865426059274,
-        "nome": "Isaque",
-    },
-    "whei": {
-        "user_id": 1190705463310942208,
-        "channel_id": 1525158888393932860,
-        "nome": "Whei",
-    },
-    "borelli": {
-        "user_id": 1454478828910022742,
-        "channel_id": 1526771115538649128,
-        "nome": "Borelli",
-    },
+    # Coaches de fábrica removidos (eram do servidor antigo).
+    # Adicione novos coaches com o comando /adicionar-coach — eles ficam
+    # salvos em data/coaches_extra.json e recarregados automaticamente aqui.
 }
 
 # Carrega os coaches adicionados via /adicionar-coach (persistidos em disco)
@@ -44,8 +32,8 @@ COACHES.update(ler_json(EXTRA_COACHES_FILE, dict))
 # (mesmos cargos usados para gerenciar/finalizar amistosos)
 MANAGER_ROLE_IDS: set[int] = {
     1511895253777649704,
-    1511894837790769204,
-    1523843469016043600,
+    1529150684296122438,
+    1529241192183627947,
 }
 
 # Categoria onde o canal de voz de cada atendimento é criado.

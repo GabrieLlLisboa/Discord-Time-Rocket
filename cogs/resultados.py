@@ -21,8 +21,8 @@ AMISTOSOS_CHANNEL_ID = 1514778555970621531
 # pelo sistema de coaches — ver cogs/coach_config.py).
 ADMIN_ROLE_IDS = {
     1511895253777649704,
-    1511894837790769204,
-    1523843469016043600,
+    1529150684296122438,
+    1529241192183627947,
 }
 
 # Diretório dedicado (dentro de data/) pra transcrições temporárias.
