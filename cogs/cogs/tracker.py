@@ -153,9 +153,9 @@ class TrackerModal(discord.ui.Modal, title="🔎 Buscar Rank — Rocket League")
             return
 
         embed = discord.Embed(
-            title=f"🚀  Rank de {resultado['nick']}",
+            title=f"🔥  Rank de {resultado['nick']}",
             description=f"Plataforma: `{resultado['plataforma']}`",
-            color=0xD4A843,
+            color=0xFF5A1F,
         )
 
         ranks = resultado["ranks"]
@@ -208,7 +208,7 @@ class Tracker(commands.Cog):
         await ctx.message.delete()
 
         embed = discord.Embed(
-            title="🚀  Consulta de Rank — Rocket League",
+            title="🔥  Consulta de Rank — Rocket League",
             description=(
                 "Clique no botão abaixo e informe o **nick** do jogador.\n"
                 "Você vai receber, em privado, o rank dele nos modos:\n\n"

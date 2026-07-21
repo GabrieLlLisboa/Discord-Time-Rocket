@@ -43,7 +43,7 @@ def salvar_config(dados: dict) -> None:
 # ── Conteúdo ─────────────────────────────────────────────────────────────────
 INCENTIVO = [
     "💪 Bora treinar hoje? Todo Grand Champion um dia já foi Bronze também.",
-    "🚀 Lembrete do dia: aim ruim se treina, rotação ruim se treina, atitude ruim... também dá pra treinar 😏",
+    "🔥 Lembrete do dia: aim ruim se treina, rotação ruim se treina, atitude ruim... também dá pra treinar 😏",
     "🔥 Depois de um dia difícil de rank, lembra: até o Squishy já teve dia ruim de mira.",
     "🏆 Cada partida é uma chance de aprender algo novo. Bora pra treinos hoje?",
     "⚡ Se você perdeu uma partida hoje, isso não te define. Levanta e chama o próximo amistoso!",
@@ -70,7 +70,7 @@ CURIOSIDADES = [
     "📚 Curiosidade: existem mais de 15 mapas diferentes no modo competitivo padrão ao longo da história do jogo.",
     "📚 Você sabia? Um 'ceiling shot' usa o teto do mapa pra pegar impulso antes de finalizar — é uma das mecânicas mais avançadas.",
     # ── Curiosidade especial do servidor ──
-    "🚀 Você sabia que o criador do flip reset está no nosso servidor? É o **fyshokid**! 👀",
+    "🔥 Você sabia que o criador do flip reset está no nosso servidor? É o **fyshokid**! 👀",
     # ── Recordes e histórico de RLCS ──
     "🏆 Curiosidade RLCS: alguns jogadores acumulam anos de campeonato sem nunca terem levantado um troféu mundial — a pressão no cenário competitivo é gigante.",
     "🥇 Curiosidade RLCS: os times europeus dominam boa parte dos títulos mundiais da história da competição.",
@@ -134,7 +134,7 @@ CHANCE_INCENTIVO_INATIVO = 0.7
 
 INCENTIVO_DIRECIONADO = [
     "Ei {mention}, ainda não te vimos por aqui no chat! Bora dar um alô? 👋",
-    "{mention} cadê você? O servidor tá esperando sua estreia no chat! 🚀",
+    "{mention} cadê você? O servidor tá esperando sua estreia no chat! 🔥",
     "Psst, {mention}... já pensou em soltar o verbo aqui no chat hoje? Bora! 💬",
     "{mention} tá guardando as palavras pra quê? Vem interagir com a galera! 😄",
     "E aí {mention}, que tal quebrar o silêncio e mandar sua primeira mensagem hoje? 🎮",

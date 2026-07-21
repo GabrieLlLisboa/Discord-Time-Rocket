@@ -1,13 +1,13 @@
-# 🤖 Arvenor Bot
+# 🤖 Ignition Bot
 
-Bot do Discord da rede Arvenor, feito em Python com `discord.py`.
+Bot do Discord da rede Ignition, feito em Python com `discord.py`.
 
 ---
 
 ## 📁 Estrutura
 
 ```
-arvenor-bot/
+ignition-bot/
 ├── main.py              ← Arquivo principal (inicia o bot)
 ├── .env                 ← Token e configurações (NÃO suba no GitHub)
 ├── requirements.txt     ← Dependências Python

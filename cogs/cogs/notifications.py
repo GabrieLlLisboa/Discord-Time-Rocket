@@ -12,7 +12,7 @@ CARGOS_NOTIFICACAO = {
     "amistosos": {
         "id":    1514788829695971378,
         "label": "Notificação Amistosos",
-        "emoji": "⚽",
+        "emoji": "🚗",
         "desc":  "Seja avisado sobre amistosos.",
     },
     "anuncios": {
@@ -118,7 +118,7 @@ class Notifications(commands.Cog):
             description=(
                 "Selecione abaixo quais notificações deseja receber.\n"
                 "Clique novamente em uma opção já ativa para **remover**.\n\n"
-                "⚽ **Amistosos** — Avisos de partidas amistosas\n"
+                "🚗 **Amistosos** — Avisos de partidas amistosas\n"
                 "📢 **Anúncios** — Novidades e comunicados\n"
                 "🆕 **Novo Jogador** — Entrada de novos membros\n"
                 "🏆 **Vitória** — Comemorações de vitória\n"

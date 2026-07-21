@@ -69,14 +69,14 @@ class Stats(commands.Cog):
 
         embed = discord.Embed(
             title=f"👤  {membro.display_name}",
-            color=0xD4A843,
+            color=0xFF5A1F,
         )
         embed.set_thumbnail(url=membro.display_avatar.url)
         embed.add_field(name="\u200b", value="```╔══════════  📋  PERFIL  ══════════╗```", inline=False)
         embed.add_field(name="🏷️  Cargo",          value=rank,         inline=True)
         embed.add_field(name="📅  Entrou em",       value=entrou_em,    inline=True)
         embed.add_field(name="🗓️  Conta criada",    value=conta_criada, inline=True)
-        embed.add_field(name="\u200b", value="```╔══════════  ⚽  AMISTOSOS  ══════════╗```", inline=False)
+        embed.add_field(name="\u200b", value="```╔══════════  🚗  AMISTOSOS  ══════════╗```", inline=False)
         embed.add_field(name="🎮  Disputados", value=f"`{amistosos}`", inline=True)
         embed.add_field(name="✅  Vitórias",   value=f"`{vitorias}`",  inline=True)
         embed.add_field(name="❌  Derrotas",   value=f"`{derrotas}`",  inline=True)
@@ -98,7 +98,7 @@ class Stats(commands.Cog):
 
         embed = discord.Embed(
             title="📋  Histórico de Amistosos",
-            color=0xD4A843,
+            color=0xFF5A1F,
         )
 
         for a in amistosos[-10:][::-1]:  # últimos 10, mais recente primeiro

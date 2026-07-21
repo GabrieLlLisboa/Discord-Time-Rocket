@@ -154,7 +154,7 @@ class GraficoJogadores(commands.Cog):
                 f"**{total}** jogador(es) entraram nos últimos 7 dias.\n"
                 f"**{ativos}** já são considerados ativos — **{pct:.0f}%** dos novatos."
             ),
-            color=0xD4A843,
+            color=0xFF5A1F,
         )
         embed.set_image(url="attachment://grafico_jogadores.png")
         embed.set_footer(text="Atualiza a cada 15 min")

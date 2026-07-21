@@ -68,7 +68,7 @@ def _rank_display(rank_nome: str) -> str:
 
 def construir_embed_info(info: dict) -> discord.Embed:
     """Mensagem 1: informações do campeonato (não muda depois de criada)."""
-    embed = discord.Embed(title=f"🏆 Campeonato: {info['nome']}", color=0xD4A843)
+    embed = discord.Embed(title=f"🏆 Campeonato: {info['nome']}", color=0xFF5A1F)
     embed.add_field(name="🎮 Rank exigido", value=_rank_display(info["rank"]), inline=True)
     embed.add_field(name="⚔️ Formato", value=info["formato"], inline=True)
     embed.add_field(name="🌍 Tipo", value=info["tipo"], inline=True)
@@ -84,7 +84,7 @@ def construir_embed_resposta(info: dict, canal: discord.abc.GuildChannel) -> dis
     embed = discord.Embed(
         title=f"🏆 Novo campeonato: {info['nome']}",
         description=f"As inscrições já estão abertas em {canal.mention}!",
-        color=0xD4A843,
+        color=0xFF5A1F,
     )
     embed.add_field(name="🎮 Rank exigido", value=_rank_display(info["rank"]), inline=True)
     embed.add_field(name="⚔️ Formato", value=info["formato"], inline=True)
@@ -100,7 +100,7 @@ def construir_embed_lista(info: dict) -> discord.Embed:
     embed = discord.Embed(
         title=f"📋 Lista de inscritos — {info['nome']}",
         description="\n".join(f"▸ <@{uid}>" for uid in inscritos.keys()) if inscritos else "*— ninguém inscrito ainda —*",
-        color=0xD4A843,
+        color=0xFF5A1F,
     )
     embed.set_footer(text=f"{len(inscritos)} inscrito(s)")
     embed.timestamp = datetime.now(timezone.utc)

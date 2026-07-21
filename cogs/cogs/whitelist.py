@@ -224,7 +224,7 @@ class ComecarWhitelistView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🚀 Começar Whitelist", style=discord.ButtonStyle.success, custom_id="wl_comecar")
+    @discord.ui.button(label="🔥 Começar Whitelist", style=discord.ButtonStyle.success, custom_id="wl_comecar")
     async def comecar(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog: Whitelist = interaction.client.get_cog("Whitelist")
         if interaction.channel.name != f"whitelist-{_slug(interaction.user.name)}" and \
@@ -450,7 +450,7 @@ class Whitelist(commands.Cog):
         salvar("whitelist", self.dados)
 
         embed = discord.Embed(
-            title="🚀 Bem-vindo(a)! Vamos fazer sua Whitelist",
+            title="🔥 Bem-vindo(a)! Vamos fazer sua Whitelist",
             description=(
                 f"Olá, {member.mention}! Antes de liberar o servidor pra você, "
                 f"precisamos te fazer algumas perguntinhas rápidas.\n\n"
@@ -672,7 +672,7 @@ class Whitelist(commands.Cog):
 
         mensagem = (
             f"✅ **Whitelist aprovada por {autor.mention}!** "
-            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🚀{aviso_rank}\n"
+            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🔥{aviso_rank}\n"
             f"*(este canal vai ser apagado automaticamente em 10 minutos)*"
         )
 

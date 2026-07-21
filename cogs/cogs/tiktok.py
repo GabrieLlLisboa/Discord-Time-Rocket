@@ -261,8 +261,8 @@ class TikTok(commands.Cog):
             mencao = cargo.mention if cargo else ""
 
             embed = discord.Embed(
-                title="🎵  A Ignition RL postou um vídeo novo!",
-                color=0xD4A843,
+                title="🔥  A Ignition RL soltou um vídeo novo!",
+                color=0xFF5A1F,
             )
             embed.add_field(name="📌  Título", value=video["titulo"], inline=False)
             embed.add_field(name="🔗  Link",   value=video["url"],    inline=False)

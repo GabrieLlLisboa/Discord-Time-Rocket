@@ -50,7 +50,7 @@ class Welcome(commands.Cog):
                 f"Olá, {member.mention}! Fico feliz em te ver aqui.\n\n"
                 f"Leia as regras e aproveite sua estadia. ⚔️"
             ),
-            color=0xD4A843   # dourado Arvenor
+            color=0xFF5A1F   # laranja Ignition
         )
 
         # Thumbnail = avatar do membro

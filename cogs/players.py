@@ -48,8 +48,8 @@ def _membros_do_cargo(guild: discord.Guild, cargo_id: int) -> list:
 
 def build_embed(guild: discord.Guild) -> discord.Embed:
     embed = discord.Embed(
-        title="🚀  Ignition RL — Time de Rocket League",
-        color=0xD4A843,
+        title="🔥  Ignition RL — Esquadrão de Rocket League",
+        color=0xFF5A1F,
     )
 
     for cargo_info in CARGOS:
@@ -70,7 +70,7 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
         )
 
     total_membros = sum(1 for m in guild.members if not m.bot and not _esta_oculto(m))
-    embed.set_footer(text=f"⚡ {total_membros} membros no clube  •  Atualiza a cada 5 min")
+    embed.set_footer(text=f"🔥 {total_membros} membros na squad  •  Atualiza a cada 5 min")
     embed.timestamp = discord.utils.utcnow()
     return embed
 
@@ -295,7 +295,7 @@ class Players(commands.Cog):
                 "e manda a mensagem certinha no canal de jogadores — sem depender de adivinhar "
                 "a troca de cargo sozinho."
             ),
-            color=0xD4A843,
+            color=0xFF5A1F,
         )
         await ctx.send(embed=embed, view=PainelRankView())
         try:

@@ -15,7 +15,7 @@ NOVO_JOGADOR_ROLE_ID = 1514788887300538531
 #  Evento: on_member_join
 # ─────────────────────────────────────────────
 
-COR_BOAS_VINDAS = 0xFFD700  # dourado vibrante — bem diferente do tom da despedida
+COR_BOAS_VINDAS = 0xFF7A00  # laranja vibrante — bem diferente do tom da despedida
 
 RANKS = [c for c in CARGOS if c["secao"] == "rank"]
 RANK_IDS = {c["id"] for c in RANKS}
@@ -112,9 +112,9 @@ class Welcome(commands.Cog):
 
         # ── Embed principal ──────────────────────────────
         embed = discord.Embed(
-            title="🎉 Chegou gente nova!",
+            title="🔥 Chegou sangue novo!",
             description=(
-                f"Sejam bem-vindos, {member.mention}! 🚀\n\n"
+                f"Bem-vindo(a) à squad, {member.mention}! 🔥\n\n"
                 f"A **{guild.name}** tá mais completa com você aqui. "
                 f"Dá uma olhada nos botões abaixo pra já sair andando! ⚔️"
             ),
@@ -130,7 +130,7 @@ class Welcome(commands.Cog):
         embed.add_field(name="🎊 Você é o membro",  value=f"`#{member_count}`", inline=True)
 
         embed.set_footer(
-            text=f"{guild.name} • Boa sorte nas rankeds! 🏆",
+            text=f"{guild.name} • Boa sorte nas rankeds! 🔥",
             icon_url=guild.icon.url if guild.icon else None
         )
 

@@ -171,7 +171,7 @@ class ConfirmarPresencaView(discord.ui.View):
             await canal_amistoso.send(f"✅ {membro.mention} confirmou presença!")
 
         await interaction.response.send_message(
-            f"✅ Presença confirmada! Você agora tem acesso a {canal_amistoso.mention if canal_amistoso else 'o canal do amistoso'}. 🚀",
+            f"✅ Presença confirmada! Você agora tem acesso a {canal_amistoso.mention if canal_amistoso else 'o canal do amistoso'}. 🔥",
             ephemeral=True
         )
         print(f"[AMISTOSO] ✅ {membro} confirmou presença.")
@@ -229,7 +229,7 @@ async def criar_amistoso(
         reason=f"Amistoso vs {adversario} criado por {interaction.user}"
     )
 
-    embed = discord.Embed(title="⚽  AMISTOSO ANUNCIADO", color=0xD4A843)
+    embed = discord.Embed(title="🚗  RACHA ANUNCIADO", color=0xFF5A1F)
     embed.add_field(name="\u200b", value="```╔══════════  📋  DETALHES  ══════════╗```", inline=False)
     embed.add_field(name="🆚  Adversário",  value=f"**{adversario}**", inline=True)
     embed.add_field(name="📅  Data / Hora", value=f"**{data_hora}**",  inline=True)
@@ -268,7 +268,7 @@ async def criar_amistoso(
     salvar("amistosos", amistosos)
 
     embed_canal = discord.Embed(
-        title=f"⚽ Amistoso vs {adversario}",
+        title=f"🚗 Amistoso vs {adversario}",
         description=(
             f"Bem-vindos ao canal do amistoso!\n\n"
             f"**🏅 Rank:** {rank_display}\n"
@@ -276,7 +276,7 @@ async def criar_amistoso(
             + (f"**📝 Info:** {info_extra}\n" if info_extra else "") +
             f"\nSe quiser desistir, clique no botão abaixo."
         ),
-        color=0xD4A843
+        color=0xFF5A1F
     )
     await canal_amistoso.send(embed=embed_canal, view=SairAmistosoView())
     await interaction.response.send_message(f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}", ephemeral=True)
