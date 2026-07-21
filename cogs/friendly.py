@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 
-AMISTOSOS_CHANNEL_ID = 1514778555970621531
+AMISTOSOS_CHANNEL_ID = 1529233878617817220
 
 # Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
 # pelo sistema de coaches — ver cogs/coach_config.py). Antes havia apenas

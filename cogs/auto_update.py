@@ -22,7 +22,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INTERVALO_CHECAGEM_SEGUNDOS = 10
 
 # Canal onde o bot avisa antes de reiniciar (deixe None pra desativar o aviso)
-LOG_CHANNEL_ID = 1521897698419019907
+LOG_CHANNEL_ID = 1529234118557306971
 
 # Único usuário que pode rodar o !checarupdate manualmente
 IDS_AUTORIZADOS = {1487452210605588592}

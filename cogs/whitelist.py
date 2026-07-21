@@ -28,7 +28,7 @@ NOME_CATEGORIA_WHITELIST = "🔒 Whitelist"
 
 # Canal onde fica o log de cada whitelist concluída (nick, rank, plataforma, etc).
 # 0 = desativado. Me passa o ID que eu preencho aqui.
-CANAL_LOG_WHITELIST_ID = 1521897698419019907
+CANAL_LOG_WHITELIST_ID = 1529234118557306971
 
 # Canal onde fica o "quadro" de status de cada whitelist (pendente,
 # em análise, aprovada, recusada). Deixe 0 que o bot cria/usa um canal

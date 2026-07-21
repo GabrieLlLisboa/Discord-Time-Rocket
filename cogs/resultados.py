@@ -15,7 +15,7 @@ import uuid
 #  /ranking   — placar geral acumulado
 # ─────────────────────────────────────────────
 
-AMISTOSOS_CHANNEL_ID = 1514778555970621531
+AMISTOSOS_CHANNEL_ID = 1529233878617817220
 
 # Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
 # pelo sistema de coaches — ver cogs/coach_config.py).

@@ -16,7 +16,7 @@ from cogs.json_store import ler_json, salvar_json
 #  conseguir ler os convites do servidor (guild.invites()).
 # ─────────────────────────────────────────────
 
-CANAL_CONVITES_ID = 1523750525210984661
+CANAL_CONVITES_ID = 1529233360143257680
 
 DATA_PATH = "data/convites.json"
 

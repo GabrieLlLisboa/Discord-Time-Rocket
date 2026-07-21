@@ -39,7 +39,7 @@ QUARENTENA_CATEGORY_NAME = "🔒 Quarentena"
 DIAS_QUARENTENA = 7
 INTERVALO_VERIFICACAO_MINUTOS = 30           # de quanto em quanto tempo o bot checa expiração
 
-LOG_CHANNEL_ID = 1521897698419019907         # canal onde o bot manda o log de tudo que faz aqui
+LOG_CHANNEL_ID = 1529234118557306971         # canal onde o bot manda o log de tudo que faz aqui
 
 DATA_FILE = "data/quarentena.json"
 

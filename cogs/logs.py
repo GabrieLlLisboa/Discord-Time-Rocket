@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 #  uma janela curta de tempo) com o alvo do evento.
 # ─────────────────────────────────────────────
 
-LOG_CHANNEL_ID = 1521897698419019907
+LOG_CHANNEL_ID = 1529234118557306971
 
 # ── Cores por categoria de evento ────────────────────────────────────────────
 COR_ENTRADA   = 0x57F287  # verde

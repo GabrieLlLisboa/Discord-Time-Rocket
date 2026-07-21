@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 #  Evento: on_member_remove / on_member_ban
 # ─────────────────────────────────────────────
 
-LEAVE_CHANNEL_ID = 1522984476450361364
+LEAVE_CHANNEL_ID = 1529155446034661526
 
 COR_DESPEDIDA = 0x992D22  # vermelho escuro — saída normal (a pessoa que decidiu ir embora)
 COR_EXPULSO   = 0xE67E22  # laranja — expulso (kick)

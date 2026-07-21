@@ -6,7 +6,7 @@ from discord.ext import commands, tasks
 #  Arquivo: cogs/players.py
 # ─────────────────────────────────────────────
 
-JOGADORES_CHANNEL_ID = 1514775408124367149
+JOGADORES_CHANNEL_ID = 1529233959744049172
 
 CARGOS = [
     {"nome": "Dono do Clube",      "id": 1511895253777649704, "emoji": "👑", "secao": "staff"},
