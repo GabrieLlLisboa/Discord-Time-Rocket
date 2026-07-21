@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import discord
 
-from cogs.coach_config import MANAGER_ROLE_IDS, coach_por_chave
+from cogs.coach_config import MANAGER_ROLE_IDS, DONO_CLUBE_USER_ID, coach_por_chave
 
 ESTRELAS_CHEIA = "⭐"
 ESTRELAS_LABEL = ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]
 
 
 def eh_gerente(member: discord.Member) -> bool:
-    """Staff/gerência: possui um dos cargos autorizados OU é administrador."""
+    """Staff/gerência: é o Dono do Clube, possui um dos cargos autorizados, OU é administrador."""
+    if member.id == DONO_CLUBE_USER_ID:
+        return True
     if member.guild_permissions.administrator:
         return True
     cargos_ids = {role.id for role in member.roles}

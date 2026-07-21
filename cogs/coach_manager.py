@@ -14,7 +14,7 @@ import asyncio
 
 import discord
 
-from cogs.coach_config import coach_por_chave, MANAGER_ROLE_IDS, CATEGORIA_VOZ_ID
+from cogs.coach_config import coach_por_chave, MANAGER_ROLE_IDS, DONO_CLUBE_USER_ID, CATEGORIA_VOZ_ID
 from cogs.coach_storage import (
     criar_ticket,
     finalizar_ticket,
@@ -54,6 +54,9 @@ async def criar_ticket_atendimento(interaction: discord.Interaction, coach_key: 
     }
     if coach_membro is not None:
         overwrites[coach_membro] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+    dono = guild.get_member(DONO_CLUBE_USER_ID)
+    if dono:
+        overwrites[dono] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
     for role_id in MANAGER_ROLE_IDS:
         role = guild.get_role(role_id)
         if role is not None:

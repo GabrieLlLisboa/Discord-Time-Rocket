@@ -76,12 +76,16 @@ STAFF_ROLE_IDS = ({c["id"] for c in PLAYER_CARGOS if c["secao"] == "staff"} | {
 }) - CARGOS_EXCLUIDOS_DA_TAG_STAFF
 
 # Cargos que podem ver os canais de whitelist (além do próprio membro).
-# Só estes 3 — os demais cargos de staff (Gerente, Moderador, Suporte etc.)
-# não têm acesso aos canais de whitelist.
+# O Dono do Clube não é mais um cargo — é tratado à parte, por ID de
+# usuário (DONO_CLUBE_USER_ID), nos pontos onde essa lista é usada.
 CARGOS_QUE_VEEM_WHITELIST = {
-    1511895253777649704,  # Dono do Clube
     1529150684296122438,  # Admin (antes: Sub-Dono, Diretor — unificados)
 }
+
+# Dono do Clube — pessoa específica (mesmo ID usado em cogs/players.py,
+# cogs/friendly.py, cogs/resultados.py, cogs/conversar.py, cogs/atividade.py
+# e cogs/auto_update.py), não é mais um cargo do Discord.
+DONO_CLUBE_USER_ID = 1487452210605588592
 
 RANK_IDS = set(CARGO_RANKS.values())
 
@@ -282,7 +286,8 @@ class ComecarWhitelistView(discord.ui.View):
     @discord.ui.button(label="🗑️ Cancelar/Fechar (staff)", style=discord.ButtonStyle.danger, custom_id="wl_cancelar")
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
         cargos = {r.id for r in interaction.user.roles}
-        if not (interaction.user.guild_permissions.administrator or cargos & CARGOS_QUE_VEEM_WHITELIST):
+        eh_dono = interaction.user.id == DONO_CLUBE_USER_ID
+        if not (eh_dono or interaction.user.guild_permissions.administrator or cargos & CARGOS_QUE_VEEM_WHITELIST):
             await interaction.response.send_message("❌ Apenas staff pode fechar.", ephemeral=True)
             return
         await interaction.response.send_message("🔒 Fechando canal em 3 segundos...")
@@ -491,6 +496,9 @@ class Whitelist(commands.Cog):
             role = guild.get_role(role_id)
             if role:
                 overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        dono = guild.get_member(DONO_CLUBE_USER_ID)
+        if dono:
+            overwrites[dono] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         for role in guild.roles:
             if role.permissions.administrator:
                 overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)

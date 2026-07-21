@@ -17,13 +17,24 @@ import uuid
 
 AMISTOSOS_CHANNEL_ID = 1529233878617817220
 
+# Dono do Clube não é mais um cargo — é uma pessoa específica (mesmo ID usado
+# em cogs/players.py, cogs/friendly.py, cogs/conversar.py, cogs/atividade.py
+# e cogs/auto_update.py).
+DONO_CLUBE_USER_ID = 1487452210605588592
+
 # Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
 # pelo sistema de coaches — ver cogs/coach_config.py).
 ADMIN_ROLE_IDS = {
-    1511895253777649704,
     1529150684296122438,
     1529241192183627947,
 }
+
+
+def _pode_gerenciar_amistoso(user: discord.Member) -> bool:
+    """Dono do Clube (por ID) ou qualquer um dos cargos em ADMIN_ROLE_IDS."""
+    if user.id == DONO_CLUBE_USER_ID:
+        return True
+    return any(role.id in ADMIN_ROLE_IDS for role in getattr(user, "roles", []))
 
 # Diretório dedicado (dentro de data/) pra transcrições temporárias.
 TRANSCRICOES_DIR = "data/transcricoes"
@@ -101,7 +112,7 @@ class Resultados(commands.Cog):
 
     # ── /resultado ────────────────────────────────────────────────────────────
     @app_commands.command(name="resultado", description="Registra o resultado de um amistoso.")
-    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    @app_commands.check(lambda interaction: _pode_gerenciar_amistoso(interaction.user))
     @app_commands.describe(
         adversario="Nome do adversário",
         resultado="Resultado do amistoso",
@@ -333,7 +344,7 @@ class Resultados(commands.Cog):
 
     @resultado.error
     async def resultado_error(self, interaction: discord.Interaction, error):
-        if isinstance(error, app_commands.MissingRole):
+        if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message(
                 "❌ Apenas **Administradores** podem registrar resultados.", ephemeral=True
             )
@@ -401,7 +412,7 @@ class Resultados(commands.Cog):
 
     # ── /cancelar_amistoso ───────────────────────────────────────────────────
     @app_commands.command(name="cancelar_amistoso", description="Cancela um amistoso e notifica os jogadores.")
-    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    @app_commands.check(lambda interaction: _pode_gerenciar_amistoso(interaction.user))
     @app_commands.describe(
         adversario="Nome do adversário (como foi anunciado)",
         link_mensagem="Link da mensagem do anúncio do amistoso",
@@ -501,7 +512,7 @@ class Resultados(commands.Cog):
 
     @cancelar_amistoso.error
     async def cancelar_amistoso_error(self, interaction: discord.Interaction, error):
-        if isinstance(error, app_commands.MissingRole):
+        if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message(
                 "❌ Apenas **Administradores** podem cancelar amistosos.", ephemeral=True
             )
@@ -509,7 +520,7 @@ class Resultados(commands.Cog):
 
     # ── /listar_resultados ───────────────────────────────────────────────────
     @app_commands.command(name="listar_resultados", description="Lista todos os resultados com número para deletar.")
-    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    @app_commands.check(lambda interaction: _pode_gerenciar_amistoso(interaction.user))
     async def listar_resultados(self, interaction: discord.Interaction):
         resultados = ler("resultados")
         if not isinstance(resultados, list) or not resultados:
@@ -538,12 +549,12 @@ class Resultados(commands.Cog):
 
     @listar_resultados.error
     async def listar_resultados_error(self, interaction: discord.Interaction, error):
-        if isinstance(error, app_commands.MissingRole):
+        if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message("❌ Apenas **Administradores** podem usar este comando.", ephemeral=True)
 
     # ── /deletar_resultado ────────────────────────────────────────────────────
     @app_commands.command(name="deletar_resultado", description="Deleta um resultado pelo número (use /listar_resultados primeiro).")
-    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    @app_commands.check(lambda interaction: _pode_gerenciar_amistoso(interaction.user))
     @app_commands.describe(numero="Número do resultado (veja com /listar_resultados)")
     async def deletar_resultado(self, interaction: discord.Interaction, numero: int):
         resultados = ler("resultados")
@@ -572,7 +583,7 @@ class Resultados(commands.Cog):
 
     @deletar_resultado.error
     async def deletar_resultado_error(self, interaction: discord.Interaction, error):
-        if isinstance(error, app_commands.MissingRole):
+        if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message("❌ Apenas **Administradores** podem usar este comando.", ephemeral=True)
 
 

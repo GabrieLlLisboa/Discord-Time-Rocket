@@ -23,10 +23,13 @@ from cogs.json_store import ler_json, salvar_json
 
 # ───────────────── CONFIGURAÇÕES (preencha os IDs do seu servidor) ─────────────────
 STAFF_ROLE_IDS = [
-    1511895253777649704,   # Dono do Clube
     1529150684296122438,   # Sub-Dono
     1529241192183627947,   # Tag de Staff
 ]                                             # cargos que enxergam os canais de quarentena
+
+# Dono do Clube não é mais um cargo — é uma pessoa específica, então é
+# mencionada separadamente (por ID de usuário) junto com os cargos acima.
+DONO_CLUBE_USER_ID = 1487452210605588592
 
 MEMBRO_ROLE_ID = 0                           # não há cargo de "Membro" no servidor — deixado em 0,
                                               # então essa etapa é simplesmente pulada.
@@ -487,6 +490,9 @@ class Demote(commands.Cog):
             role.mention for rid in STAFF_ROLE_IDS
             if (role := message.guild.get_role(rid)) is not None
         ]
+        dono = message.guild.get_member(DONO_CLUBE_USER_ID)
+        if dono:
+            mencoes.append(dono.mention)
         mencao = " ".join(mencoes) if mencoes else "Staff"
 
         nomes_cargos = ", ".join(r.name for r in cargos_restaurados) if cargos_restaurados else "Nenhum cargo para restaurar"

@@ -8,8 +8,12 @@ from discord.ext import commands, tasks
 
 JOGADORES_CHANNEL_ID = 1529233959744049172
 
+# Dono do Clube não é mais um cargo do Discord — é uma pessoa específica,
+# identificada pelo ID de usuário abaixo (mesmo ID usado como autorizado
+# em cogs/conversar.py, cogs/atividade.py e cogs/auto_update.py).
+DONO_CLUBE_USER_ID = 1487452210605588592
+
 CARGOS = [
-    {"nome": "Dono do Clube",      "id": 1511895253777649704, "emoji": "👑", "secao": "staff"},
     {"nome": "Admin",              "id": 1529150684296122438, "emoji": "🥈", "secao": "staff"},
     {"nome": "Coach",              "id": 1529160458769006804, "emoji": "📋", "secao": "staff"},
     {"nome": "Editor de vídeo",    "id": 1513240072139309317, "emoji": "🎬", "secao": "staff"},
@@ -38,6 +42,13 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
     embed = discord.Embed(
         title="🔥  Ignition RL — Esquadrão de Rocket League",
         color=0xFF5A1F,
+    )
+
+    dono = guild.get_member(DONO_CLUBE_USER_ID)
+    embed.add_field(
+        name="👑  **Dono do Clube**  `(1)`" if dono else "👑  **Dono do Clube**  `(0)`",
+        value=f"  ▸  {dono.display_name}\n\u200b" if dono else "  *— não encontrado no servidor —*\n\u200b",
+        inline=False,
     )
 
     for cargo_info in CARGOS:

@@ -31,10 +31,14 @@ COACHES.update(ler_json(EXTRA_COACHES_FILE, dict))
 # ── Cargos autorizados a gerenciar/finalizar tudo relacionado a coaches ──────
 # (mesmos cargos usados para gerenciar/finalizar amistosos)
 MANAGER_ROLE_IDS: set[int] = {
-    1511895253777649704,
     1529150684296122438,
     1529241192183627947,
 }
+
+# Dono do Clube não é mais um cargo — é uma pessoa específica (mesmo ID usado
+# em cogs/players.py, cogs/friendly.py, cogs/resultados.py, cogs/conversar.py,
+# cogs/atividade.py e cogs/auto_update.py).
+DONO_CLUBE_USER_ID = 1487452210605588592
 
 # Categoria onde o canal de voz de cada atendimento é criado.
 CATEGORIA_VOZ_ID: int = 1525158787894218884

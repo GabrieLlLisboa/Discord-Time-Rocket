@@ -5,13 +5,22 @@ from cogs.backup import ler, salvar, agora_str
 
 AMISTOSOS_CHANNEL_ID = 1529233878617817220
 
+# Dono do Clube não é mais um cargo — é uma pessoa específica (mesmo ID usado
+# em cogs/players.py, cogs/conversar.py, cogs/atividade.py e cogs/auto_update.py).
+DONO_CLUBE_USER_ID = 1487452210605588592
+
 # Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
-# pelo sistema de coaches — ver cogs/coach_config.py). Antes havia apenas
-# um ADMIN_ROLE_ID; agora são dois cargos, e qualquer um dos dois basta.
+# pelo sistema de coaches — ver cogs/coach_config.py).
 ADMIN_ROLE_IDS = {
-    1511895253777649704,
     1529150684296122438,
 }
+
+
+def _pode_gerenciar_amistoso(user: discord.Member) -> bool:
+    """Dono do Clube (por ID) ou qualquer um dos cargos em ADMIN_ROLE_IDS."""
+    if user.id == DONO_CLUBE_USER_ID:
+        return True
+    return any(role.id in ADMIN_ROLE_IDS for role in getattr(user, "roles", []))
 
 RANKS = {
     "Super Sonic Legend": 1529152122942390366,
@@ -215,6 +224,9 @@ async def criar_amistoso(
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         guild.me:           discord.PermissionOverwrite(view_channel=True, send_messages=True),
     }
+    dono = guild.get_member(DONO_CLUBE_USER_ID)
+    if dono:
+        overwrites[dono] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
     for admin_role_id in ADMIN_ROLE_IDS:
         admin_role = guild.get_role(admin_role_id)
         if admin_role:
@@ -333,7 +345,7 @@ class Friendly(commands.Cog):
             print(f"[AMISTOSO] 🗑️ Canal {canal.name} deletado junto com o anúncio.")
 
     @app_commands.command(name="amistoso", description="Anuncia um amistoso no canal de amistosos.")
-    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    @app_commands.check(lambda interaction: _pode_gerenciar_amistoso(interaction.user))
     @app_commands.describe(
         adversario="Nome do time adversário",
         data_hora="Data e horário (ex: 15/06 às 20h00)",
@@ -354,8 +366,8 @@ class Friendly(commands.Cog):
 
     @amistoso.error
     async def amistoso_error(self, interaction: discord.Interaction, error):
-        if isinstance(error, app_commands.MissingRole):
-            await interaction.response.send_message("❌ Apenas **Administradores** podem anunciar amistosos.", ephemeral=True)
+        if isinstance(error, app_commands.CheckFailure):
+            await interaction.response.send_message("❌ Apenas o **Dono do Clube** ou **Administradores** podem anunciar amistosos.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
