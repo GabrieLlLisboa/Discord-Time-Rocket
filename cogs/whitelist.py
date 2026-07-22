@@ -138,7 +138,7 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
             f"✅ Nick registrado: **{nick_valor}**{aviso_nick}",
         )
         await asyncio.sleep(5)
-        await self.cog.enviar_pergunta(interaction.channel, membro, "idioma")
+        await self.cog.enviar_pergunta(interaction.channel, membro, "rank")
 
 
 # ─────────────────────────────────────────────
@@ -587,7 +587,7 @@ class Whitelist(commands.Cog):
             await canal.send("🎤 **Você tem microfone pra jogar?**", view=view)
 
         elif step == "ativo":
-            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "perguntas_abertas")
+            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "duvidas")
             await canal.send("📈 **Você pretende ser um membro ativo na equipe?**", view=view)
 
         elif step == "perguntas_abertas":
@@ -650,7 +650,6 @@ class Whitelist(commands.Cog):
             color=0x5865F2,
         )
         embed_resumo.set_thumbnail(url=membro.display_avatar.url)
-        embed_resumo.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
         embed_resumo.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
         embed_resumo.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
         embed_resumo.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
@@ -658,9 +657,6 @@ class Whitelist(commands.Cog):
         embed_resumo.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
         embed_resumo.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed_resumo.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
-        embed_resumo.add_field(name="Por que quer entrar?", value=r.get("motivo_entrada", "—"), inline=False)
-        embed_resumo.add_field(name="Reação a quebra de regra", value=r.get("reacao_regras", "—"), inline=False)
-        embed_resumo.add_field(name="Por que devemos aceitar?", value=r.get("motivo_aceitar", "—"), inline=False)
         embed_resumo.set_footer(text=f"ID: {membro.id}")
         await interaction.channel.send(embed=embed_resumo)
 
@@ -678,7 +674,6 @@ class Whitelist(commands.Cog):
             if canal_log:
                 embed = discord.Embed(title=f"📋 Whitelist enviada para análise — {membro}", color=0xFEE75C)
                 embed.set_thumbnail(url=membro.display_avatar.url)
-                embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
                 embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
                 embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
                 embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)

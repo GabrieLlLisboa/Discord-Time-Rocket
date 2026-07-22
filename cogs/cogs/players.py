@@ -17,11 +17,11 @@ CARGOS = [
     {"nome": "Suporte",            "id": 1523833330175442954, "emoji": "🎧", "secao": "staff"},
     {"nome": "Coach",              "id": 1513356584946896946, "emoji": "📋", "secao": "staff"},
     {"nome": "Editor de vídeo",    "id": 1513240072139309317, "emoji": "🎬", "secao": "staff"},
-    {"nome": "Super Sonic Legend", "id": 1529152122942390366, "emoji": "🌌", "secao": "rank"},
-    {"nome": "Grand Champion",     "id": 1529152259630305402, "emoji": "👑", "secao": "rank"},
-    {"nome": "Champion",           "id": 1529152654629142679, "emoji": "🏅", "secao": "rank"},
-    {"nome": "Diamante",           "id": 1529153925486215350, "emoji": "💎", "secao": "rank"},
-    {"nome": "Platina",            "id": 1529154068314849450, "emoji": "🪙", "secao": "rank"},
+    {"nome": "Super Sonic Legend", "id": 1514772134327488642, "emoji": "🌌", "secao": "rank"},
+    {"nome": "Grand Champion",     "id": 1513343857125752992, "emoji": "👑", "secao": "rank"},
+    {"nome": "Champion",           "id": 1512304793534861313, "emoji": "🏅", "secao": "rank"},
+    {"nome": "Diamante",           "id": 1512305401075466320, "emoji": "💎", "secao": "rank"},
+    {"nome": "Platina",            "id": 1512305547544625273, "emoji": "🪙", "secao": "rank"},
 ]
 
 IDS_MONITORADOS  = {c["id"] for c in CARGOS}
