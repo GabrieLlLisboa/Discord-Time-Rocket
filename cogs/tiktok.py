@@ -18,7 +18,7 @@ import random
 #    5. RSS via TikTok RSS Bridge
 # ─────────────────────────────────────────────
 
-TIKTOK_CHANNEL_ID = 1529267718291722361
+TIKTOK_CHANNEL_ID = 1515151647641178193
 TIKTOK_USER          = "ignition.rl"
 VIDEO_NOVO_ROLE_ID   = 1529241281023180930
 LAST_VIDEO_FILE   = "last_tiktok.txt"

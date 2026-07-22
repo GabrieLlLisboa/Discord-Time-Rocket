@@ -57,7 +57,7 @@ IDIOMA_EMOJIS = {"Português": "🇧🇷", "Inglês": "🇬🇧"}
 # Cargo que a pessoa recebe assim que entra no servidor — é ele que bloqueia
 # a visão de todos os canais (configurado nas permissões dos canais como
 # "negar" pra esse cargo). É removido automaticamente quando termina a whitelist.
-CARGO_SEM_ACESSO_ID = 1521890714873757707
+CARGO_SEM_ACESSO_ID = 1529288481870975016
 
 # Cargos de staff — quem tiver qualquer um desses, recebe automaticamente
 # o cargo de "tag" de staff abaixo (isso é feito em cogs/staff_tag.py).
