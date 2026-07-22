@@ -34,7 +34,9 @@ DONO_CLUBE_USER_ID = 1487452210605588592
 MEMBRO_ROLE_ID = 0                           # não há cargo de "Membro" no servidor — deixado em 0,
                                               # então essa etapa é simplesmente pulada.
 
-QUARENTENA_ROLE_ID = 1529288481870975016     # cargo de Quarentena do servidor novo
+QUARENTENA_ROLE_ID = 0                       # deixado em 0 -> o bot procura um cargo chamado
+                                              # "Quarentena" e, se não existir, cria um
+                                              # automaticamente (sem nenhuma permissão).
 
 QUARENTENA_CATEGORY_NAME = "🔒 Quarentena"
 DIAS_QUARENTENA = 7

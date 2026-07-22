@@ -57,7 +57,7 @@ IDIOMA_EMOJIS = {"Português": "🇧🇷", "Inglês": "🇬🇧"}
 # Cargo que a pessoa recebe assim que entra no servidor — é ele que bloqueia
 # a visão de todos os canais (configurado nas permissões dos canais como
 # "negar" pra esse cargo). É removido automaticamente quando termina a whitelist.
-CARGO_SEM_ACESSO_ID = 1529288481870975016
+CARGO_SEM_ACESSO_ID = 1521890714873757707
 
 # Cargos de staff — quem tiver qualquer um desses, recebe automaticamente
 # o cargo de "tag" de staff abaixo (isso é feito em cogs/staff_tag.py).
@@ -138,7 +138,7 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
             f"✅ Nick registrado: **{nick_valor}**{aviso_nick}",
         )
         await asyncio.sleep(5)
-        await self.cog.enviar_pergunta(interaction.channel, membro, "rank")
+        await self.cog.enviar_pergunta(interaction.channel, membro, "idioma")
 
 
 # ─────────────────────────────────────────────
@@ -176,6 +176,32 @@ class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
 
         await interaction.response.send_message("✅ Respostas registradas!")
         await self.cog.enviar_pergunta(interaction.channel, membro, "duvidas")
+
+
+# ─────────────────────────────────────────────
+#  Modal: motivo da recusa (pedido ao admin antes de reprovar)
+# ─────────────────────────────────────────────
+class RecusaModal(discord.ui.Modal, title="Recusar whitelist"):
+    motivo = discord.ui.TextInput(
+        label="Motivo da recusa",
+        style=discord.TextStyle.paragraph,
+        max_length=300,
+        required=True,
+        placeholder="Explique por que essa whitelist está sendo recusada",
+    )
+
+    def __init__(self, cog: "Whitelist", membro_id: int, canal: discord.TextChannel):
+        super().__init__()
+        self.cog = cog
+        self.membro_id = membro_id
+        self.canal = canal
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ephemeral, mensagem = await self.cog.recusar_core(
+            interaction.guild, self.membro_id, interaction.user, self.canal,
+            motivo=self.motivo.value.strip(),
+        )
+        await interaction.response.send_message(mensagem, ephemeral=ephemeral)
 
 
 # ─────────────────────────────────────────────
@@ -343,8 +369,7 @@ class RevisaoWhitelistView(discord.ui.View):
             await interaction.response.send_message("❌ Só administradores podem revisar whitelists.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        ephemeral, mensagem = await cog.recusar_core(interaction.guild, self.membro_id, interaction.user, interaction.channel)
-        await interaction.response.send_message(mensagem, ephemeral=ephemeral)
+        await interaction.response.send_modal(RecusaModal(cog, self.membro_id, interaction.channel))
 
 
 # ─────────────────────────────────────────────
@@ -447,6 +472,9 @@ class Whitelist(commands.Cog):
             elif decidido_por_nome:
                 verbo = "Aprovado" if status == "aprovada" else "Recusado"
                 embed.add_field(name="Responsável", value=f"{verbo} por **{decidido_por_nome}**", inline=False)
+
+            if status == "recusada":
+                embed.add_field(name="Motivo", value=registro.get("motivo_recusa", "Não informado"), inline=False)
 
         msg_id = registro.get("status_msg_id")
         if msg_id:
@@ -587,7 +615,7 @@ class Whitelist(commands.Cog):
             await canal.send("🎤 **Você tem microfone pra jogar?**", view=view)
 
         elif step == "ativo":
-            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "duvidas")
+            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "perguntas_abertas")
             await canal.send("📈 **Você pretende ser um membro ativo na equipe?**", view=view)
 
         elif step == "perguntas_abertas":
@@ -650,6 +678,7 @@ class Whitelist(commands.Cog):
             color=0x5865F2,
         )
         embed_resumo.set_thumbnail(url=membro.display_avatar.url)
+        embed_resumo.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
         embed_resumo.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
         embed_resumo.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
         embed_resumo.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
@@ -657,6 +686,9 @@ class Whitelist(commands.Cog):
         embed_resumo.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
         embed_resumo.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed_resumo.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
+        embed_resumo.add_field(name="Por que quer entrar?", value=r.get("motivo_entrada", "—"), inline=False)
+        embed_resumo.add_field(name="Reação a quebra de regra", value=r.get("reacao_regras", "—"), inline=False)
+        embed_resumo.add_field(name="Por que devemos aceitar?", value=r.get("motivo_aceitar", "—"), inline=False)
         embed_resumo.set_footer(text=f"ID: {membro.id}")
         await interaction.channel.send(embed=embed_resumo)
 
@@ -674,6 +706,7 @@ class Whitelist(commands.Cog):
             if canal_log:
                 embed = discord.Embed(title=f"📋 Whitelist enviada para análise — {membro}", color=0xFEE75C)
                 embed.set_thumbnail(url=membro.display_avatar.url)
+                embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
                 embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
                 embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
                 embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
@@ -771,7 +804,7 @@ class Whitelist(commands.Cog):
     # Sempre que a whitelist é reprovada, o membro é removido do servidor
     # (banimento não, só kick — ele pode entrar de novo e tentar outra vez
     # do zero se quiser).
-    async def recusar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel) -> tuple[bool, str]:
+    async def recusar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel, motivo: str | None = None) -> tuple[bool, str]:
         registro = self.dados.get(str(membro_id))
         if not registro:
             return True, "⚠️ Não achei os dados dessa whitelist."
@@ -790,9 +823,19 @@ class Whitelist(commands.Cog):
         registro["status"] = "recusada"
         registro["decidido_por_nome"] = str(autor)
         registro["decidido_por_id"] = autor.id
+        registro["motivo_recusa"] = motivo or "Não informado"
         salvar("whitelist", self.dados)
 
         membro = guild.get_member(membro_id)
+
+        if membro:
+            try:
+                await membro.send(
+                    f"❌ Sua whitelist em **{guild.name}** foi reprovada.\n"
+                    f"**Motivo:** {registro['motivo_recusa']}"
+                )
+            except discord.Forbidden:
+                pass
 
         aviso_kick = ""
         if membro:
@@ -812,7 +855,8 @@ class Whitelist(commands.Cog):
         salvar("whitelist", self.dados)
 
         mensagem = (
-            f"❌ **Whitelist recusada por {autor.mention}.** "
+            f"❌ **Whitelist recusada por {autor.mention}.**\n"
+            f"**Motivo:** {registro['motivo_recusa']}\n"
             f"{membro.mention if membro else 'O membro'} foi removido do servidor automaticamente.{aviso_kick}\n"
             f"*(este canal vai ser apagado automaticamente em 10 minutos)*"
         )
@@ -861,12 +905,15 @@ class Whitelist(commands.Cog):
 
     @commands.command(name="reprovar-whitelist")
     @commands.has_permissions(administrator=True)
-    async def reprovar_whitelist_cmd(self, ctx: commands.Context):
+    async def reprovar_whitelist_cmd(self, ctx: commands.Context, *, motivo: str = None):
         membro_id = self._membro_id_do_canal(ctx.channel.id)
         if membro_id is None:
             await ctx.send("⚠️ Esse comando só funciona dentro do canal de whitelist de um membro.", delete_after=8)
             return
-        _, mensagem = await self.recusar_core(ctx.guild, membro_id, ctx.author, ctx.channel)
+        if not motivo:
+            await ctx.send("⚠️ Informe o motivo: `!reprovar-whitelist <motivo>`", delete_after=8)
+            return
+        _, mensagem = await self.recusar_core(ctx.guild, membro_id, ctx.author, ctx.channel, motivo=motivo)
         await ctx.send(mensagem)
 
     @reprovar_whitelist_cmd.error
