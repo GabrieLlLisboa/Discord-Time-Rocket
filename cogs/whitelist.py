@@ -138,44 +138,7 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
             f"✅ Nick registrado: **{nick_valor}**{aviso_nick}",
         )
         await asyncio.sleep(5)
-        await self.cog.enviar_pergunta(interaction.channel, membro, "idioma")
-
-
-# ─────────────────────────────────────────────
-#  Modal: perguntas abertas (texto livre)
-# ─────────────────────────────────────────────
-class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
-    motivo_entrada = discord.ui.TextInput(
-        label="Por que você quer entrar no clube?",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=True,
-    )
-    reacao_regras = discord.ui.TextInput(
-        label="Reação a membro quebrando regra/confusão?",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=True,
-    )
-    motivo_aceitar = discord.ui.TextInput(
-        label="Por que deveríamos te aceitar?",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=True,
-    )
-
-    def __init__(self, cog: "Whitelist"):
-        super().__init__()
-        self.cog = cog
-
-    async def on_submit(self, interaction: discord.Interaction):
-        membro = interaction.user
-        self.cog.salvar_resposta(membro.id, "motivo_entrada", self.motivo_entrada.value.strip())
-        self.cog.salvar_resposta(membro.id, "reacao_regras", self.reacao_regras.value.strip())
-        self.cog.salvar_resposta(membro.id, "motivo_aceitar", self.motivo_aceitar.value.strip())
-
-        await interaction.response.send_message("✅ Respostas registradas!")
-        await self.cog.enviar_pergunta(interaction.channel, membro, "duvidas")
+        await self.cog.enviar_pergunta(interaction.channel, membro, "rank")
 
 
 # ─────────────────────────────────────────────
@@ -205,19 +168,6 @@ class RecusaModal(discord.ui.Modal, title="Recusar whitelist"):
 
 
 # ─────────────────────────────────────────────
-#  View: botão que abre o modal de perguntas abertas
-# ─────────────────────────────────────────────
-class AbrirPerguntasView(discord.ui.View):
-    def __init__(self, cog: "Whitelist"):
-        super().__init__(timeout=None)
-        self.cog = cog
-
-    @discord.ui.button(label="📝 Responder Perguntas", style=discord.ButtonStyle.primary, custom_id="wl_perguntas_abertas")
-    async def responder(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(PerguntasAbertasModal(self.cog))
-
-
-# ─────────────────────────────────────────────
 #  View genérica de seleção (usada em várias perguntas)
 # ─────────────────────────────────────────────
 class EscolhaSelect(discord.ui.Select):
@@ -236,41 +186,7 @@ class EscolhaSelect(discord.ui.Select):
         valor = self.values[0]
         self.cog.salvar_resposta(membro.id, self.step, valor)
 
-        if self.step == "idioma":
-            guild = interaction.guild
-            cargo_ingles = guild.get_role(CARGO_IDIOMA_INGLES_ID)
-
-            # Conta com base nos membros reais do servidor (não só em quem já
-            # respondeu a whitelist): quem tem o cargo de Inglês é falante de
-            # Inglês, todo o resto (menos bots e o próprio membro) é considerado
-            # falante de Português, já que é o idioma padrão do servidor.
-            falantes_ingles = sum(
-                1 for m in (cargo_ingles.members if cargo_ingles else [])
-                if not m.bot and m.id != membro.id
-            )
-            total_humanos = sum(1 for m in guild.members if not m.bot and m.id != membro.id)
-
-            if valor == "Inglês":
-                contagem = falantes_ingles
-            else:
-                contagem = total_humanos - falantes_ingles
-
-            cargo_msg = ""
-            if valor == "Inglês":
-                if cargo_ingles:
-                    try:
-                        await membro.add_roles(cargo_ingles, reason="Whitelist — idioma Inglês selecionado")
-                        cargo_msg = f"\n🏷️ Cargo {cargo_ingles.mention} atribuído!"
-                    except discord.Forbidden:
-                        cargo_msg = "\n⚠️ Não consegui atribuir o cargo de idioma (permissão)."
-                else:
-                    cargo_msg = "\n⚠️ Cargo de idioma configurado não foi encontrado no servidor."
-
-            await interaction.response.send_message(
-                f"✅ Idioma registrado: **{valor}**.\n"
-                f"🌐 Mais **{contagem}** pessoa(s) falam o mesmo idioma que você.{cargo_msg}"
-            )
-        elif self.step == "rank":
+        if self.step == "rank":
             await interaction.response.send_message(
                 f"✅ Rank registrado: **{valor}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
             )
@@ -586,11 +502,7 @@ class Whitelist(commands.Cog):
 
     # ── Envia a pergunta correspondente ao passo ────────────────────
     async def enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str):
-        if step == "idioma":
-            view = EscolhaView(self, "idioma", IDIOMAS, "Escolha seu idioma...", "rank", emojis=IDIOMA_EMOJIS)
-            await canal.send("🌐 **Qual é a sua linguagem?**\n(Português ou Inglês — só pode escolher uma)", view=view)
-
-        elif step == "rank":
+        if step == "rank":
             view = EscolhaView(self, "rank", list(CARGO_RANKS.keys()), "Escolha seu rank atual...", "plataforma")
             await canal.send("🎮 **Qual o seu rank atual no Rocket League?**", view=view)
 
@@ -615,22 +527,8 @@ class Whitelist(commands.Cog):
             await canal.send("🎤 **Você tem microfone pra jogar?**", view=view)
 
         elif step == "ativo":
-            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "perguntas_abertas")
+            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "duvidas")
             await canal.send("📈 **Você pretende ser um membro ativo na equipe?**", view=view)
-
-        elif step == "perguntas_abertas":
-            embed = discord.Embed(
-                title="📝 Últimas perguntas",
-                description=(
-                    "Agora só faltam 3 perguntas rápidas com resposta em texto livre. "
-                    "Clica no botão abaixo pra abrir o formulário:\n\n"
-                    "• Por que você quer entrar no clube?\n"
-                    "• Como você reagiria se visse um membro quebrando as regras ou causando confusão?\n"
-                    "• Por que deveríamos aceitar você no clube?"
-                ),
-                color=0x5865F2,
-            )
-            await canal.send(embed=embed, view=AbrirPerguntasView(self))
 
         elif step == "duvidas":
             embed = discord.Embed(
@@ -678,7 +576,6 @@ class Whitelist(commands.Cog):
             color=0x5865F2,
         )
         embed_resumo.set_thumbnail(url=membro.display_avatar.url)
-        embed_resumo.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
         embed_resumo.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
         embed_resumo.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
         embed_resumo.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
@@ -686,9 +583,6 @@ class Whitelist(commands.Cog):
         embed_resumo.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
         embed_resumo.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed_resumo.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
-        embed_resumo.add_field(name="Por que quer entrar?", value=r.get("motivo_entrada", "—"), inline=False)
-        embed_resumo.add_field(name="Reação a quebra de regra", value=r.get("reacao_regras", "—"), inline=False)
-        embed_resumo.add_field(name="Por que devemos aceitar?", value=r.get("motivo_aceitar", "—"), inline=False)
         embed_resumo.set_footer(text=f"ID: {membro.id}")
         await interaction.channel.send(embed=embed_resumo)
 
@@ -706,7 +600,6 @@ class Whitelist(commands.Cog):
             if canal_log:
                 embed = discord.Embed(title=f"📋 Whitelist enviada para análise — {membro}", color=0xFEE75C)
                 embed.set_thumbnail(url=membro.display_avatar.url)
-                embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
                 embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
                 embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
                 embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
