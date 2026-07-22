@@ -43,8 +43,8 @@ STATUS_LABELS = {
     "recusada":    ("❌ Recusada",   0xED4245),
 }
 
-# Cargo "membro da equipe" — NÃO é dado automaticamente no fim da whitelist
-# (deixado aqui só de referência, caso você use em outro lugar).
+# Cargo "membro da equipe" — dado automaticamente quando a whitelist é
+# aprovada, junto com o cargo de rank.
 CARGO_MEMBRO_ID = 1529152916362104943
 
 # Cargo dado automaticamente (na hora, sem precisar de aprovação) pra quem
@@ -57,7 +57,7 @@ IDIOMA_EMOJIS = {"Português": "🇧🇷", "Inglês": "🇬🇧"}
 # Cargo que a pessoa recebe assim que entra no servidor — é ele que bloqueia
 # a visão de todos os canais (configurado nas permissões dos canais como
 # "negar" pra esse cargo). É removido automaticamente quando termina a whitelist.
-CARGO_SEM_ACESSO_ID = 1521890714873757707
+CARGO_SEM_ACESSO_ID = 1529288481870975016
 
 # Cargos de staff — quem tiver qualquer um desses, recebe automaticamente
 # o cargo de "tag" de staff abaixo (isso é feito em cogs/staff_tag.py).
@@ -670,6 +670,14 @@ class Whitelist(commands.Cog):
             erro = await self.dar_cargo_rank(guild, membro, rank_nome)
             if erro:
                 aviso_rank = f"\n{erro}"
+
+        if membro:
+            cargo_membro = guild.get_role(CARGO_MEMBRO_ID)
+            if cargo_membro and cargo_membro not in membro.roles:
+                try:
+                    await membro.add_roles(cargo_membro, reason=f"Whitelist aprovada por {autor}")
+                except discord.Forbidden:
+                    aviso_rank += "\n⚠️ Não consegui atribuir o cargo de membro (permissão)."
 
         await self.atualizar_status_board(guild, membro_id)
 
