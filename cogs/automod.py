@@ -9,6 +9,16 @@ from collections import defaultdict, deque
 from datetime import timedelta
 
 from cogs import mod_utils as mu
+from cogs.json_store import ler_json
+
+# Mesmo arquivo usado por cogs/players.py pra guardar em quais canais o
+# painel !setup-rank foi enviado.
+_CANAIS_PAINEL_RANK_PATH = "data/canais_painel_rank.json"
+
+
+def _canais_ignorados_pelo_automod() -> set[int]:
+    return set(ler_json(_CANAIS_PAINEL_RANK_PATH, []))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Cog: AutoMod
@@ -104,6 +114,13 @@ class Automod(commands.Cog):
         if message.guild is None or message.author.bot:
             return
         if not isinstance(message.author, discord.Member):
+            return
+
+        # Canal do painel !setup-rank (cogs/players.py): lá as mensagens já
+        # são controladas por outro fluxo (comprovação de rank) — o AutoMod
+        # não deve mexer nelas, senão apaga o print/link antes do bot
+        # conseguir coletar e mandar a pendência pra staff.
+        if message.channel.id in _canais_ignorados_pelo_automod():
             return
 
         cfg_mod = mu.get_config(message.guild.id)

@@ -184,6 +184,16 @@ class SolicitarRankModal(discord.ui.Modal):
                 pass
             return
 
+        # Baixa os anexos JÁ, antes de qualquer outra coisa — quanto mais
+        # cedo, menor a chance de outro processo (automod, a própria pessoa
+        # apagando, etc.) apagar a mensagem antes do bot conseguir ler o
+        # arquivo. Se mesmo assim falhar, a pendência ainda é mandada só
+        # com o link/texto, em vez de sumir tudo em silêncio.
+        try:
+            arquivos = [await a.to_file() for a in msg_comprovacao.attachments]
+        except (discord.NotFound, discord.HTTPException):
+            arquivos = []
+
         atual_info = _rank_atual(membro)
         pedido_id = uuid.uuid4().hex[:10]
 
@@ -202,18 +212,19 @@ class SolicitarRankModal(discord.ui.Modal):
         )
         embed.add_field(name="Novo rank solicitado", value=f"{novo_info['emoji']} {novo_info['nome']}", inline=True)
         embed.add_field(name="Comprovação", value=texto if texto else "*(ver anexo abaixo)*", inline=False)
-        if anexos:
+        if anexos and not arquivos:
+            # Não conseguiu baixar o anexo original — pelo menos deixa o
+            # link registrado, pra staff não ficar sem nada.
+            embed.add_field(name="Anexo(s) (link original)", value="\n".join(anexos), inline=False)
+        elif anexos:
             # Se for imagem, já mostra ela direto na embed; se não for
-            # (vídeo, etc), o link ainda vai junto mandado como anexo real.
+            # (vídeo, etc.), o arquivo ainda vai anexado de verdade na mensagem.
             primeiro = anexos[0].lower()
             if primeiro.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
-                embed.set_image(url=anexos[0])
-            if len(anexos) > 1 or not primeiro.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
-                embed.add_field(name="Anexo(s)", value="\n".join(anexos), inline=False)
+                embed.set_image(url=f"attachment://{arquivos[0].filename}")
         embed.set_footer(text=f"ID do jogador: {membro.id} • Pedido {pedido_id}")
 
         view = PendenciaRankView(pedido_id)
-        arquivos = [await a.to_file() for a in msg_comprovacao.attachments]
         msg = await canal_staff.send(
             content=f"📋 Novo pedido de rank — {membro.mention}",
             embed=embed,
