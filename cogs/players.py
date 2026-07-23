@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+import asyncio
 import uuid
 
 from cogs.backup import ler, salvar
@@ -108,13 +109,6 @@ class SolicitarRankModal(discord.ui.Modal):
         max_length=40,
         required=True,
     )
-    comprovacao = discord.ui.TextInput(
-        label="Comprovação (link do print/vídeo)",
-        style=discord.TextStyle.paragraph,
-        placeholder="Cole aqui o link do print, clipe ou vídeo comprovando o rank",
-        max_length=300,
-        required=True,
-    )
 
     def __init__(self, tipo: str):
         titulo = "⬆️ Solicitar subida de rank" if tipo == "subir" else "⬇️ Solicitar descida de rank"
@@ -132,10 +126,6 @@ class SolicitarRankModal(discord.ui.Modal):
             )
             return
 
-        cog: "Players" = interaction.client.get_cog("Players")
-        atual_info = _rank_atual(membro)
-
-        pedido_id = uuid.uuid4().hex[:10]
         canal_staff = interaction.client.get_channel(PEDIDOS_RANK_CHANNEL_ID)
         if canal_staff is None:
             await interaction.response.send_message(
@@ -143,6 +133,41 @@ class SolicitarRankModal(discord.ui.Modal):
                 ephemeral=True,
             )
             return
+
+        # O modal do Discord só aceita texto — pra anexar print/vídeo, a
+        # pessoa manda como uma mensagem normal aqui no canal logo em
+        # seguida, e o bot pega o anexo (ou o link, se ela colar um).
+        await interaction.response.send_message(
+            f"📎 Beleza! Agora manda **uma mensagem aqui neste canal** com a comprovação do rank "
+            f"**{novo_info['nome']}** — pode **anexar o print/vídeo** ou colar um link. Você tem 5 minutos.",
+            ephemeral=True,
+        )
+
+        def check(m: discord.Message) -> bool:
+            return m.author.id == membro.id and m.channel.id == interaction.channel.id
+
+        try:
+            msg_comprovacao = await interaction.client.wait_for("message", check=check, timeout=300)
+        except asyncio.TimeoutError:
+            await interaction.followup.send(
+                "⏰ Tempo esgotado esperando a comprovação. Clica no botão de novo pra tentar outra vez.",
+                ephemeral=True,
+            )
+            return
+
+        anexos = [a.url for a in msg_comprovacao.attachments]
+        texto = msg_comprovacao.content.strip()
+
+        if not anexos and not texto:
+            await interaction.followup.send(
+                "❌ Não veio nenhum anexo nem link nessa mensagem. Clica no botão de novo pra tentar de novo.",
+                ephemeral=True,
+            )
+            return
+
+        cog: "Players" = interaction.client.get_cog("Players")
+        atual_info = _rank_atual(membro)
+        pedido_id = uuid.uuid4().hex[:10]
 
         cor = 0x57F287 if self.tipo == "subir" else 0xED4245
         emoji_tipo = "⬆️" if self.tipo == "subir" else "⬇️"
@@ -158,25 +183,45 @@ class SolicitarRankModal(discord.ui.Modal):
             inline=True,
         )
         embed.add_field(name="Novo rank solicitado", value=f"{novo_info['emoji']} {novo_info['nome']}", inline=True)
-        embed.add_field(name="Comprovação", value=self.comprovacao.value.strip(), inline=False)
+        embed.add_field(name="Comprovação", value=texto if texto else "*(ver anexo abaixo)*", inline=False)
+        if anexos:
+            # Se for imagem, já mostra ela direto na embed; se não for
+            # (vídeo, etc), o link ainda vai junto mandado como anexo real.
+            primeiro = anexos[0].lower()
+            if primeiro.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                embed.set_image(url=anexos[0])
+            if len(anexos) > 1 or not primeiro.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                embed.add_field(name="Anexo(s)", value="\n".join(anexos), inline=False)
         embed.set_footer(text=f"ID do jogador: {membro.id} • Pedido {pedido_id}")
 
         view = PendenciaRankView(pedido_id)
-        msg = await canal_staff.send(content=f"📋 Novo pedido de rank — {membro.mention}", embed=embed, view=view)
+        arquivos = [await a.to_file() for a in msg_comprovacao.attachments]
+        msg = await canal_staff.send(
+            content=f"📋 Novo pedido de rank — {membro.mention}",
+            embed=embed,
+            view=view,
+            files=arquivos,
+        )
 
         cog.pedidos[pedido_id] = {
             "solicitante_id": membro.id,
             "tipo": self.tipo,
             "rank_atual_id": atual_info["id"] if atual_info else None,
             "novo_rank_id": novo_info["id"],
-            "comprovacao": self.comprovacao.value.strip(),
+            "comprovacao": texto or "(anexo)",
+            "anexos": anexos,
             "status": "pendente",
             "canal_id": canal_staff.id,
             "msg_id": msg.id,
         }
         salvar("pedidos_rank", cog.pedidos)
 
-        await interaction.response.send_message(
+        try:
+            await msg_comprovacao.delete()
+        except discord.HTTPException:
+            pass
+
+        await interaction.followup.send(
             f"📨 Pedido enviado! A staff vai analisar sua comprovação em {canal_staff.mention} e te avisar por lá assim que decidir.",
             ephemeral=True,
         )
