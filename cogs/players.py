@@ -140,19 +140,25 @@ class SolicitarRankModal(discord.ui.Modal):
         # O modal do Discord só aceita texto — pra anexar print/vídeo, a
         # pessoa manda como uma mensagem normal aqui no canal logo em
         # seguida, e o bot pega o anexo (ou o link, se ela colar um).
+        #
+        # IMPORTANTE: marca a sessão como "aguardando" ANTES de mandar a
+        # mensagem pedindo a comprovação. Se fizer isso depois, existe uma
+        # corrida: o await de enviar a mensagem leva um tempinho, e se a
+        # pessoa for rápida o suficiente pra já responder, o on_message
+        # apaga a mensagem dela achando que é conversa fora do fluxo.
+        cog: "Players" = interaction.client.get_cog("Players")
+        sessao = (interaction.channel.id, membro.id)
+        cog.aguardando_comprovacao.add(sessao)
+
         await interaction.response.send_message(
             f"📎 Beleza! Agora manda **uma mensagem aqui neste canal** com a comprovação do rank "
             f"**{novo_info['nome']}** — pode **anexar o print/vídeo** ou colar um link. Você tem 5 minutos.",
             ephemeral=True,
         )
 
-        cog: "Players" = interaction.client.get_cog("Players")
-        sessao = (interaction.channel.id, membro.id)
-
         def check(m: discord.Message) -> bool:
             return m.author.id == membro.id and m.channel.id == interaction.channel.id
 
-        cog.aguardando_comprovacao.add(sessao)
         try:
             msg_comprovacao = await interaction.client.wait_for("message", check=check, timeout=300)
         except asyncio.TimeoutError:
