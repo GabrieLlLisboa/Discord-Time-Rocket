@@ -211,17 +211,11 @@ class SolicitarRankModal(discord.ui.Modal):
             inline=True,
         )
         embed.add_field(name="Novo rank solicitado", value=f"{novo_info['emoji']} {novo_info['nome']}", inline=True)
-        embed.add_field(name="Comprovação", value=texto if texto else "*(ver anexo abaixo)*", inline=False)
+        embed.add_field(name="Comprovação", value=texto if texto else "*(foto/vídeo mandado em seguida)*", inline=False)
         if anexos and not arquivos:
             # Não conseguiu baixar o anexo original — pelo menos deixa o
             # link registrado, pra staff não ficar sem nada.
             embed.add_field(name="Anexo(s) (link original)", value="\n".join(anexos), inline=False)
-        elif anexos:
-            # Se for imagem, já mostra ela direto na embed; se não for
-            # (vídeo, etc.), o arquivo ainda vai anexado de verdade na mensagem.
-            primeiro = anexos[0].lower()
-            if primeiro.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
-                embed.set_image(url=f"attachment://{arquivos[0].filename}")
         embed.set_footer(text=f"ID do jogador: {membro.id} • Pedido {pedido_id}")
 
         view = PendenciaRankView(pedido_id)
@@ -229,8 +223,12 @@ class SolicitarRankModal(discord.ui.Modal):
             content=f"📋 Novo pedido de rank — {membro.mention}",
             embed=embed,
             view=view,
-            files=arquivos,
         )
+
+        # A comprovação (print/vídeo) vai numa mensagem separada, logo
+        # abaixo da pendência — não fica embutida dentro da embed.
+        if arquivos:
+            await canal_staff.send(content="📎 Comprovação:", files=arquivos)
 
         cog.pedidos[pedido_id] = {
             "solicitante_id": membro.id,
