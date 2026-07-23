@@ -4,6 +4,9 @@ import asyncio
 import uuid
 
 from cogs.backup import ler, salvar
+from cogs.json_store import ler_json, salvar_json
+
+CANAIS_PAINEL_RANK_PATH = "data/canais_painel_rank.json"
 
 # ─────────────────────────────────────────────
 #  Cog: Lista de Jogadores
@@ -143,9 +146,13 @@ class SolicitarRankModal(discord.ui.Modal):
             ephemeral=True,
         )
 
+        cog: "Players" = interaction.client.get_cog("Players")
+        sessao = (interaction.channel.id, membro.id)
+
         def check(m: discord.Message) -> bool:
             return m.author.id == membro.id and m.channel.id == interaction.channel.id
 
+        cog.aguardando_comprovacao.add(sessao)
         try:
             msg_comprovacao = await interaction.client.wait_for("message", check=check, timeout=300)
         except asyncio.TimeoutError:
@@ -154,6 +161,8 @@ class SolicitarRankModal(discord.ui.Modal):
                 ephemeral=True,
             )
             return
+        finally:
+            cog.aguardando_comprovacao.discard(sessao)
 
         anexos = [a.url for a in msg_comprovacao.attachments]
         texto = msg_comprovacao.content.strip()
@@ -163,9 +172,12 @@ class SolicitarRankModal(discord.ui.Modal):
                 "❌ Não veio nenhum anexo nem link nessa mensagem. Clica no botão de novo pra tentar de novo.",
                 ephemeral=True,
             )
+            try:
+                await msg_comprovacao.delete()
+            except discord.HTTPException:
+                pass
             return
 
-        cog: "Players" = interaction.client.get_cog("Players")
         atual_info = _rank_atual(membro)
         pedido_id = uuid.uuid4().hex[:10]
 
@@ -395,6 +407,16 @@ class Players(commands.Cog):
         self.pedidos    = ler("pedidos_rank")  # {pedido_id: {...}}
         self.bot.add_view(PainelSolicitarRankView())  # mantém os botões funcionando após restart
 
+        # Canais onde o painel !setup-rank foi enviado — nesses canais só
+        # pode rolar o fluxo de pedido de rank, o resto é apagado (ver on_message).
+        self.canais_painel_rank: set[int] = set(ler_json(CANAIS_PAINEL_RANK_PATH, []))
+
+        # (channel_id, user_id) de quem já clicou no botão, preencheu o
+        # modal e está esperando mandar a comprovação — enquanto estiver
+        # aqui, a mensagem dela não é apagada pelo on_message (quem processa
+        # e apaga é o próprio fluxo do modal, depois de coletar a imagem).
+        self.aguardando_comprovacao: set[tuple[int, int]] = set()
+
         # Reregistra os botões Aprovar/Recusar dos pedidos ainda pendentes,
         # senão eles param de funcionar depois de um restart do bot.
         for pedido_id, pedido in self.pedidos.items():
@@ -405,6 +427,23 @@ class Players(commands.Cog):
 
     def cog_unload(self):
         self.atualizar_lista.cancel()
+
+    # Mantém o(s) canal(is) do painel de rank limpos: qualquer mensagem que
+    # não seja a comprovação de alguém que já clicou no botão e preencheu o
+    # modal é apagada na hora (a mensagem de comprovação em si é apagada
+    # depois, pelo próprio fluxo do modal, já com a imagem coletada).
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot:
+            return
+        if message.channel.id not in self.canais_painel_rank:
+            return
+        if (message.channel.id, message.author.id) in self.aguardando_comprovacao:
+            return  # é a comprovação esperada — o fluxo do modal cuida dela
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            pass
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
@@ -489,13 +528,21 @@ class Players(commands.Cog):
             title="🎮 Painel de Troca de Rank",
             description=(
                 "Subiu ou desceu de rank? Clica no botão certo abaixo!\n\n"
-                "Você vai informar o **novo rank** e uma **comprovação** (link do print/vídeo). "
+                "Você vai informar o **novo rank** e depois mandar a **comprovação** "
+                "(print/vídeo anexado ou link). "
                 f"O pedido cai como pendência em <#{PEDIDOS_RANK_CHANNEL_ID}> pra staff analisar e aprovar. "
-                "Assim que for aprovado, seu cargo é trocado automaticamente."
+                "Assim que for aprovado, seu cargo é trocado automaticamente.\n\n"
+                "⚠️ **Este canal é só pra isso** — qualquer outra mensagem é apagada automaticamente."
             ),
             color=0xFF5A1F,
         )
         await ctx.send(embed=embed, view=PainelSolicitarRankView())
+
+        # Marca este canal como "canal do painel" — o on_message vai manter
+        # ele limpo, só deixando passar a comprovação de quem clicou no botão.
+        self.canais_painel_rank.add(ctx.channel.id)
+        salvar_json(CANAIS_PAINEL_RANK_PATH, list(self.canais_painel_rank))
+
         try:
             await ctx.message.delete()
         except discord.HTTPException:
