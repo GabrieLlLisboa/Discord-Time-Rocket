@@ -28,6 +28,7 @@ FILES = {
     # demais arquivos em caso de corrupção. AGORA ele participa do mesmo
     # ciclo de backup/restauração que todos os outros arquivos de dados.
     "campeonatos":  "data/campeonatos.json",
+    "pedidos_rank": "data/pedidos_rank.json",
 }
 
 os.makedirs(DATA_DIR, exist_ok=True)

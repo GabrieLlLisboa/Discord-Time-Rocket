@@ -87,6 +87,10 @@ CARGOS_QUE_VEEM_WHITELIST = {
 # e cogs/auto_update.py), não é mais um cargo do Discord.
 DONO_CLUBE_USER_ID = 1487452210605588592
 
+# Cargo mencionado no canal da whitelist assim que ela é aprovada/concluída
+# (mesmo cargo "Tag de Staff" usado em CARGOS_QUE_VEEM_WHITELIST/STAFF_ROLE_IDS).
+CARGO_MENCIONAR_NA_CONCLUSAO_ID = 1529241192183627947
+
 RANK_IDS = set(CARGO_RANKS.values())
 
 PLATAFORMAS = ["PC", "Xbox", "PlayStation", "Switch"]
@@ -423,6 +427,16 @@ class Whitelist(commands.Cog):
             except discord.Forbidden:
                 pass
 
+        # Garante que a pessoa fica SÓ com o cargo de acesso restrito
+        # durante a whitelist — remove qualquer outro cargo que ela já
+        # tenha (ex: cargo dado pelo onboarding do próprio Discord).
+        extras = [r for r in member.roles if r.id not in (guild.id, CARGO_SEM_ACESSO_ID)]
+        if extras:
+            try:
+                await member.remove_roles(*extras, reason="Whitelist iniciada — mantendo só o cargo de acesso restrito")
+            except discord.Forbidden:
+                pass
+
         nome_canal = f"whitelist-{_slug(member.name)}"
 
         existente = discord.utils.get(guild.text_channels, name=nome_canal)
@@ -470,6 +484,24 @@ class Whitelist(commands.Cog):
 
         await canal.send(content=member.mention, embed=embed, view=ComecarWhitelistView())
         return canal
+
+    # Enquanto a whitelist não termina, a pessoa só pode ter o cargo de
+    # acesso restrito — se ganhar qualquer outro cargo nesse meio tempo
+    # (onboarding do Discord, engano de staff, etc), o bot remove na hora.
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        registro = self.dados.get(str(after.id))
+        if not registro or registro.get("status") not in ("em_andamento", "pendente", "visualizada"):
+            return
+
+        extras = [r for r in after.roles if r.id not in (after.guild.id, CARGO_SEM_ACESSO_ID)]
+        if not extras:
+            return
+
+        try:
+            await after.remove_roles(*extras, reason="Whitelist em andamento — só pode ter o cargo de acesso restrito")
+        except discord.Forbidden:
+            pass
 
     # Se a pessoa sair antes de terminar, limpa o canal
     @commands.Cog.listener()
@@ -681,9 +713,12 @@ class Whitelist(commands.Cog):
 
         await self.atualizar_status_board(guild, membro_id)
 
+        cargo_mencionar = guild.get_role(CARGO_MENCIONAR_NA_CONCLUSAO_ID)
+        mencao_staff = f"\n{cargo_mencionar.mention}" if cargo_mencionar else ""
+
         mensagem = (
             f"✅ **Whitelist aprovada por {autor.mention}!** "
-            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🔥{aviso_rank}\n"
+            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🔥{aviso_rank}{mencao_staff}\n"
             f"*(este canal vai ser apagado automaticamente em 10 minutos)*"
         )
 
@@ -819,6 +854,72 @@ class Whitelist(commands.Cog):
 
     @reprovar_whitelist_cmd.error
     async def reprovar_whitelist_cmd_error(self, ctx, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
+
+    # ── Comando: reinicia a whitelist do zero ────────────────────────
+    # Uso: dentro do canal "whitelist-<nick>" da pessoa, digitar
+    # !refazer-whitelist. Apaga as respostas salvas, volta o status pra
+    # "em_andamento" e reenvia a mensagem inicial com o botão de começar.
+    @commands.command(name="refazer-whitelist")
+    @commands.has_permissions(administrator=True)
+    async def refazer_whitelist_cmd(self, ctx: commands.Context):
+        membro_id = self._membro_id_do_canal(ctx.channel.id)
+        if membro_id is None:
+            await ctx.send("⚠️ Esse comando só funciona dentro do canal de whitelist de um membro.", delete_after=8)
+            return
+
+        membro = ctx.guild.get_member(membro_id)
+        if membro is None:
+            await ctx.send("❌ Não encontrei esse membro no servidor.", delete_after=8)
+            return
+
+        # zera as respostas e o status, mantendo o canal já existente
+        self.dados[str(membro_id)] = {
+            "respostas": {},
+            "status": "em_andamento",
+            "canal_id": ctx.channel.id,
+        }
+        salvar("whitelist", self.dados)
+
+        embed = discord.Embed(
+            title="🔄 Whitelist reiniciada",
+            description=(
+                f"{membro.mention}, sua whitelist foi reiniciada por um administrador.\n\n"
+                f"Vamos começar de novo! Clica no botão abaixo 👇"
+            ),
+            color=0xFEE75C,
+        )
+        embed.set_footer(text="Leva menos de 2 minutos!")
+
+        await ctx.send(content=membro.mention, embed=embed, view=ComecarWhitelistView())
+
+    @refazer_whitelist_cmd.error
+    async def refazer_whitelist_cmd_error(self, ctx, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
+
+    # ── Comando: marca/lembra a pessoa de terminar a whitelist ───────
+    # Uso: dentro do canal "whitelist-<nick>" da pessoa, digitar
+    # !incentivar-whitelist. Manda uma menção lembrando ela de continuar.
+    @commands.command(name="incentivar-whitelist")
+    @commands.has_permissions(administrator=True)
+    async def incentivar_whitelist_cmd(self, ctx: commands.Context):
+        membro_id = self._membro_id_do_canal(ctx.channel.id)
+        if membro_id is None:
+            await ctx.send("⚠️ Esse comando só funciona dentro do canal de whitelist de um membro.", delete_after=8)
+            return
+
+        membro = ctx.guild.get_member(membro_id)
+        mencao = membro.mention if membro else f"<@{membro_id}>"
+
+        await ctx.send(
+            f"👋 {mencao}, não esquece de terminar sua whitelist aqui nesse canal! "
+            f"Estamos esperando você 🔥"
+        )
+
+    @incentivar_whitelist_cmd.error
+    async def incentivar_whitelist_cmd_error(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
 

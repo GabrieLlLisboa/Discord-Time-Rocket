@@ -18,8 +18,8 @@ import cogs.atividade as atividade_mod
 
 CONFIG_PATH = "data/autopilot.json"
 
-# Canal padrão (pode ser sobrescrito por /autopilot_canal ou pelo .env)
-CANAL_PADRAO_ID = int(os.getenv("AUTOPILOT_CHANNEL_ID", 0))
+# Canal padrão: chat geral (pode ser sobrescrito por /autopilot_canal ou pelo .env)
+CANAL_PADRAO_ID = int(os.getenv("AUTOPILOT_CHANNEL_ID", 1529233653052346398))
 
 # Intervalo (minutos) entre uma mensagem e outra — sorteado dentro dessa faixa
 # pra não ficar previsível / robótico.

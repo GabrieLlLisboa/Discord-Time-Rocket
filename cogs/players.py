@@ -1,5 +1,8 @@
 import discord
 from discord.ext import commands, tasks
+import uuid
+
+from cogs.backup import ler, salvar
 
 # ─────────────────────────────────────────────
 #  Cog: Lista de Jogadores
@@ -7,6 +10,11 @@ from discord.ext import commands, tasks
 # ─────────────────────────────────────────────
 
 JOGADORES_CHANNEL_ID = 1529233959744049172
+
+# Canal onde caem as pendências de troca de rank (subida/descida),
+# pra staff analisar a comprovação e aprovar ou recusar — usado pelo
+# painel enviado com !setup-rank.
+PEDIDOS_RANK_CHANNEL_ID = 1529234086420418653
 
 # Dono do Clube não é mais um cargo do Discord — é uma pessoa específica,
 # identificada pelo ID de usuário abaixo (mesmo ID usado como autorizado
@@ -74,134 +82,280 @@ def build_embed(guild: discord.Guild) -> discord.Embed:
     return embed
 
 
-class SelecionarJogador(discord.ui.UserSelect):
-    def __init__(self):
-        super().__init__(placeholder="1️⃣ Selecione o jogador...", min_values=1, max_values=1, row=0)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: "SelecaoRankView" = self.view
-        await interaction.response.defer(ephemeral=True)
-        alvo = self.values[0]
-        if not isinstance(alvo, discord.Member):
-            alvo = interaction.guild.get_member(alvo.id) or alvo
-        view.jogador = alvo
-        await view.tentar_executar(interaction)
+def _achar_rank_por_nome(nome: str) -> dict | None:
+    """Acha o cargo de rank pelo nome digitado no modal (case-insensitive,
+    ignora espaços nas pontas). Retorna None se não encontrar."""
+    alvo = nome.strip().lower()
+    for c in CARGOS_RANK:
+        if c["nome"].lower() == alvo:
+            return c
+    return None
 
 
-class SelecionarRank(discord.ui.Select):
-    def __init__(self):
-        opcoes = [
-            discord.SelectOption(label=c["nome"], value=str(c["id"]), emoji=c["emoji"])
-            for c in CARGOS_RANK
-        ]
-        super().__init__(placeholder="2️⃣ Selecione o novo rank...", min_values=1, max_values=1, options=opcoes, row=1)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: "SelecaoRankView" = self.view
-        await interaction.response.defer(ephemeral=True)
-        view.novo_rank_id = int(self.values[0])
-        await view.tentar_executar(interaction)
+def _rank_atual(membro: discord.Member) -> dict | None:
+    cargos_rank_atuais = [r for r in membro.roles if r.id in RANK_IDS]
+    return CARGO_MAP.get(cargos_rank_atuais[0].id) if cargos_rank_atuais else None
 
 
-class SelecaoRankView(discord.ui.View):
-    """Aparece (ephemeral) depois que a staff clica em Subir/Descer no painel.
-    Só executa quando jogador E novo rank já foram escolhidos — assim o bot
-    sempre acerta a mensagem, sem depender de adivinhar pelo diff de cargos."""
+# ─────────────────────────────────────────────
+#  Modal: pedido de troca de rank (subida ou descida)
+#  Preenchido pelo próprio jogador, direto pelo botão do painel.
+# ─────────────────────────────────────────────
+class SolicitarRankModal(discord.ui.Modal):
+    novo_rank = discord.ui.TextInput(
+        label="Qual o novo rank?",
+        placeholder="Ex: Diamante, Champion, Grand Champion...",
+        max_length=40,
+        required=True,
+    )
+    comprovacao = discord.ui.TextInput(
+        label="Comprovação (link do print/vídeo)",
+        style=discord.TextStyle.paragraph,
+        placeholder="Cole aqui o link do print, clipe ou vídeo comprovando o rank",
+        max_length=300,
+        required=True,
+    )
 
     def __init__(self, tipo: str):
-        super().__init__(timeout=180)
-        self.tipo = tipo  # "subir" ou "descer"
-        self.jogador: discord.Member | None = None
-        self.novo_rank_id: int | None = None
-        self.add_item(SelecionarJogador())
-        self.add_item(SelecionarRank())
+        titulo = "⬆️ Solicitar subida de rank" if tipo == "subir" else "⬇️ Solicitar descida de rank"
+        super().__init__(title=titulo)
+        self.tipo = tipo
 
-    async def tentar_executar(self, interaction: discord.Interaction):
-        if self.jogador is None or self.novo_rank_id is None:
-            faltando = "o jogador" if self.jogador is None else "o novo rank"
-            await interaction.followup.send(f"☑️ Escolha registrada. Ainda falta selecionar {faltando}.", ephemeral=True)
+    async def on_submit(self, interaction: discord.Interaction):
+        membro = interaction.user
+        novo_info = _achar_rank_por_nome(self.novo_rank.value)
+        if novo_info is None:
+            opcoes = ", ".join(c["nome"] for c in CARGOS_RANK)
+            await interaction.response.send_message(
+                f"❌ Não achei o rank **{self.novo_rank.value}**. Digite exatamente um destes: {opcoes}",
+                ephemeral=True,
+            )
             return
+
+        cog: "Players" = interaction.client.get_cog("Players")
+        atual_info = _rank_atual(membro)
+
+        pedido_id = uuid.uuid4().hex[:10]
+        canal_staff = interaction.client.get_channel(PEDIDOS_RANK_CHANNEL_ID)
+        if canal_staff is None:
+            await interaction.response.send_message(
+                "⚠️ Não achei o canal de pendências de rank. Chama a staff diretamente.",
+                ephemeral=True,
+            )
+            return
+
+        cor = 0x57F287 if self.tipo == "subir" else 0xED4245
+        emoji_tipo = "⬆️" if self.tipo == "subir" else "⬇️"
+        embed = discord.Embed(
+            title=f"{emoji_tipo} Pedido de {'subida' if self.tipo == 'subir' else 'descida'} de rank",
+            description=f"{membro.mention} está solicitando uma alteração de rank.",
+            color=cor,
+        )
+        embed.set_thumbnail(url=membro.display_avatar.url)
+        embed.add_field(
+            name="Rank atual",
+            value=f"{atual_info['emoji']} {atual_info['nome']}" if atual_info else "— nenhum —",
+            inline=True,
+        )
+        embed.add_field(name="Novo rank solicitado", value=f"{novo_info['emoji']} {novo_info['nome']}", inline=True)
+        embed.add_field(name="Comprovação", value=self.comprovacao.value.strip(), inline=False)
+        embed.set_footer(text=f"ID do jogador: {membro.id} • Pedido {pedido_id}")
+
+        view = PendenciaRankView(pedido_id)
+        msg = await canal_staff.send(content=f"📋 Novo pedido de rank — {membro.mention}", embed=embed, view=view)
+
+        cog.pedidos[pedido_id] = {
+            "solicitante_id": membro.id,
+            "tipo": self.tipo,
+            "rank_atual_id": atual_info["id"] if atual_info else None,
+            "novo_rank_id": novo_info["id"],
+            "comprovacao": self.comprovacao.value.strip(),
+            "status": "pendente",
+            "canal_id": canal_staff.id,
+            "msg_id": msg.id,
+        }
+        salvar("pedidos_rank", cog.pedidos)
+
+        await interaction.response.send_message(
+            f"📨 Pedido enviado! A staff vai analisar sua comprovação em {canal_staff.mention} e te avisar por lá assim que decidir.",
+            ephemeral=True,
+        )
+
+
+# ─────────────────────────────────────────────
+#  Modal: motivo da recusa de um pedido de rank
+# ─────────────────────────────────────────────
+class RecusaPedidoRankModal(discord.ui.Modal, title="Recusar pedido de rank"):
+    motivo = discord.ui.TextInput(
+        label="Motivo da recusa",
+        style=discord.TextStyle.paragraph,
+        max_length=300,
+        required=True,
+        placeholder="Explique por que esse pedido está sendo recusado",
+    )
+
+    def __init__(self, pedido_id: str, view: "PendenciaRankView"):
+        super().__init__()
+        self.pedido_id = pedido_id
+        self.view_pendencia = view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.view_pendencia._recusar_core(interaction, self.pedido_id, self.motivo.value.strip())
+
+
+# ─────────────────────────────────────────────
+#  View: aprovar/recusar pedido de rank (mandada no canal de staff)
+# ─────────────────────────────────────────────
+class PendenciaRankView(discord.ui.View):
+    def __init__(self, pedido_id: str):
+        super().__init__(timeout=None)
+        self.pedido_id = pedido_id
+        self.aprovar.custom_id = f"rankpend_aprovar:{pedido_id}"
+        self.recusar.custom_id = f"rankpend_recusar:{pedido_id}"
+
+    def _checar_admin(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.guild_permissions.administrator
+
+    @discord.ui.button(label="✅ Aprovar", style=discord.ButtonStyle.success)
+    async def aprovar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._checar_admin(interaction):
+            await interaction.response.send_message("❌ Apenas **Administradores** podem decidir pedidos de rank.", ephemeral=True)
+            return
+
+        cog: "Players" = interaction.client.get_cog("Players")
+        pedido = cog.pedidos.get(self.pedido_id)
+        if pedido is None:
+            await interaction.response.send_message("⚠️ Não achei os dados desse pedido.", ephemeral=True)
+            return
+        if pedido["status"] != "pendente":
+            await interaction.response.send_message(f"⚠️ Esse pedido já foi **{pedido['status']}**.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
 
         guild = interaction.guild
-        novo_info = CARGO_MAP[self.novo_rank_id]
-        novo_cargo = guild.get_role(self.novo_rank_id)
-        if novo_cargo is None:
-            await interaction.followup.send("⚠️ Esse cargo de rank não existe mais no servidor.", ephemeral=True)
+        membro = guild.get_member(pedido["solicitante_id"])
+        novo_info = CARGO_MAP[pedido["novo_rank_id"]]
+        novo_cargo = guild.get_role(pedido["novo_rank_id"])
+
+        if membro is None or novo_cargo is None:
+            await interaction.followup.send("⚠️ Jogador ou cargo não encontrado no servidor.", ephemeral=True)
             return
 
-        cargos_rank_atuais = [r for r in self.jogador.roles if r.id in RANK_IDS]
-        antigo_info = CARGO_MAP.get(cargos_rank_atuais[0].id) if cargos_rank_atuais else None
-
+        cargos_rank_atuais = [r for r in membro.roles if r.id in RANK_IDS]
         try:
             if cargos_rank_atuais:
-                await self.jogador.remove_roles(*cargos_rank_atuais, reason=f"Rank atualizado via !setup-rank ({self.tipo})")
-            await self.jogador.add_roles(novo_cargo, reason=f"Rank atualizado via !setup-rank ({self.tipo})")
+                await membro.remove_roles(*cargos_rank_atuais, reason=f"Pedido de rank aprovado por {interaction.user}")
+            await membro.add_roles(novo_cargo, reason=f"Pedido de rank aprovado por {interaction.user}")
         except discord.Forbidden:
             await interaction.followup.send("❌ Não tenho permissão pra alterar os cargos desse jogador.", ephemeral=True)
             return
 
+        pedido["status"] = "aprovado"
+        pedido["decidido_por_id"] = interaction.user.id
+        salvar("pedidos_rank", cog.pedidos)
+
+        # Anúncio no canal de jogadores + atualiza a lista
         channel = interaction.client.get_channel(JOGADORES_CHANNEL_ID)
         if channel is not None:
-            if self.tipo == "subir":
-                if antigo_info:
-                    msg = (
-                        f"⬆️ **{self.jogador.display_name}** upou do rank {antigo_info['emoji']} **{antigo_info['nome']}** "
-                        f"para o rank {novo_info['emoji']} **{novo_info['nome']}**!"
-                    )
-                else:
-                    msg = f"🎉 **{self.jogador.display_name}** entrou no clube com o rank {novo_info['emoji']} **{novo_info['nome']}**!"
+            atual_info = CARGO_MAP.get(pedido["rank_atual_id"]) if pedido.get("rank_atual_id") else None
+            if pedido["tipo"] == "subir":
+                msg = (
+                    f"⬆️ **{membro.display_name}** upou do rank {atual_info['emoji']} **{atual_info['nome']}** "
+                    f"para o rank {novo_info['emoji']} **{novo_info['nome']}**!"
+                    if atual_info else
+                    f"🎉 **{membro.display_name}** entrou no clube com o rank {novo_info['emoji']} **{novo_info['nome']}**!"
+                )
             else:
-                if antigo_info:
-                    msg = (
-                        f"⬇️ **{self.jogador.display_name}** desceu do rank {antigo_info['emoji']} **{antigo_info['nome']}** "
-                        f"para o rank {novo_info['emoji']} **{novo_info['nome']}**."
-                    )
-                else:
-                    msg = f"📉 **{self.jogador.display_name}** entrou no rank {novo_info['emoji']} **{novo_info['nome']}**."
-
+                msg = (
+                    f"⬇️ **{membro.display_name}** desceu do rank {atual_info['emoji']} **{atual_info['nome']}** "
+                    f"para o rank {novo_info['emoji']} **{novo_info['nome']}**."
+                    if atual_info else
+                    f"📉 **{membro.display_name}** entrou no rank {novo_info['emoji']} **{novo_info['nome']}**."
+                )
             notif = await channel.send(msg)
             await notif.delete(delay=300)
+            if cog:
+                await cog._editar_ou_criar(channel)
 
-            players_cog = interaction.client.get_cog("Players")
-            if players_cog:
-                await players_cog._editar_ou_criar(channel)
+        embed = interaction.message.embeds[0]
+        embed.add_field(name="Decisão", value=f"✅ Aprovado por {interaction.user.mention}", inline=False)
+        embed.color = 0x57F287
+        self.aprovar.disabled = True
+        self.recusar.disabled = True
+        await interaction.message.edit(embed=embed, view=self)
 
-        await interaction.followup.send(
-            f"✅ Rank de **{self.jogador.display_name}** atualizado pra {novo_info['emoji']} **{novo_info['nome']}**! "
-            f"Mensagem enviada em {channel.mention if channel else '#canal de jogadores'}.",
-            ephemeral=True,
-        )
-        self.stop()
+        await interaction.followup.send(f"✅ Pedido aprovado! Rank de {membro.mention} atualizado pra {novo_info['emoji']} **{novo_info['nome']}**.")
+
+    @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.danger)
+    async def recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self._checar_admin(interaction):
+            await interaction.response.send_message("❌ Apenas **Administradores** podem decidir pedidos de rank.", ephemeral=True)
+            return
+
+        cog: "Players" = interaction.client.get_cog("Players")
+        pedido = cog.pedidos.get(self.pedido_id)
+        if pedido is None:
+            await interaction.response.send_message("⚠️ Não achei os dados desse pedido.", ephemeral=True)
+            return
+        if pedido["status"] != "pendente":
+            await interaction.response.send_message(f"⚠️ Esse pedido já foi **{pedido['status']}**.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(RecusaPedidoRankModal(self.pedido_id, self))
+
+    async def _recusar_core(self, interaction: discord.Interaction, pedido_id: str, motivo: str):
+        cog: "Players" = interaction.client.get_cog("Players")
+        pedido = cog.pedidos.get(pedido_id)
+        if pedido is None or pedido["status"] != "pendente":
+            await interaction.response.send_message("⚠️ Esse pedido não existe mais ou já foi decidido.", ephemeral=True)
+            return
+
+        pedido["status"] = "recusado"
+        pedido["decidido_por_id"] = interaction.user.id
+        pedido["motivo_recusa"] = motivo
+        salvar("pedidos_rank", cog.pedidos)
+
+        embed = interaction.message.embeds[0]
+        embed.add_field(name="Decisão", value=f"❌ Recusado por {interaction.user.mention}\n**Motivo:** {motivo}", inline=False)
+        embed.color = 0xED4245
+        self.aprovar.disabled = True
+        self.recusar.disabled = True
+        await interaction.message.edit(embed=embed, view=self)
+
+        await interaction.response.send_message(f"❌ Pedido recusado.\n**Motivo:** {motivo}")
 
 
-class PainelRankView(discord.ui.View):
-    """Painel fixo enviado pelo comando !setup-rank."""
-
+# ─────────────────────────────────────────────
+#  View: painel fixo enviado pelo comando !setup-rank
+#  Qualquer jogador pode clicar — é ele quem solicita a troca.
+# ─────────────────────────────────────────────
+class PainelSolicitarRankView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Subir de Rank", emoji="⬆️", style=discord.ButtonStyle.success, custom_id="players_rank_subir")
+    @discord.ui.button(label="Subir de Rank", emoji="⬆️", style=discord.ButtonStyle.success, custom_id="players_rank_solicitar_subir")
     async def subir(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "**⬆️ Subida de rank**\nEscolha o jogador e o novo rank abaixo:",
-            view=SelecaoRankView("subir"),
-            ephemeral=True,
-        )
+        await interaction.response.send_modal(SolicitarRankModal("subir"))
 
-    @discord.ui.button(label="Descer de Rank", emoji="⬇️", style=discord.ButtonStyle.danger, custom_id="players_rank_descer")
+    @discord.ui.button(label="Descer de Rank", emoji="⬇️", style=discord.ButtonStyle.danger, custom_id="players_rank_solicitar_descer")
     async def descer(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "**⬇️ Descida de rank**\nEscolha o jogador e o novo rank abaixo:",
-            view=SelecaoRankView("descer"),
-            ephemeral=True,
-        )
+        await interaction.response.send_modal(SolicitarRankModal("descer"))
 
 
 class Players(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot        = bot
         self.message_id = None
-        self.bot.add_view(PainelRankView())  # mantém os botões funcionando após restart
+        self.pedidos    = ler("pedidos_rank")  # {pedido_id: {...}}
+        self.bot.add_view(PainelSolicitarRankView())  # mantém os botões funcionando após restart
+
+        # Reregistra os botões Aprovar/Recusar dos pedidos ainda pendentes,
+        # senão eles param de funcionar depois de um restart do bot.
+        for pedido_id, pedido in self.pedidos.items():
+            if pedido.get("status") == "pendente":
+                self.bot.add_view(PendenciaRankView(pedido_id))
+
         self.atualizar_lista.start()
 
     def cog_unload(self):
@@ -285,18 +439,18 @@ class Players(commands.Cog):
     @commands.command(name="setup-rank")
     @commands.has_permissions(administrator=True)
     async def setup_rank(self, ctx: commands.Context):
-        """Envia o painel de atualização de rank (Subir/Descer) neste canal."""
+        """Envia o painel de solicitação de troca de rank (Subir/Descer) neste canal."""
         embed = discord.Embed(
-            title="🎮 Painel de Atualização de Rank",
+            title="🎮 Painel de Troca de Rank",
             description=(
-                "Use os botões abaixo quando um jogador **subir** ou **descer** de rank.\n\n"
-                "Você escolhe o jogador e o novo rank, o bot troca o cargo automaticamente "
-                "e manda a mensagem certinha no canal de jogadores — sem depender de adivinhar "
-                "a troca de cargo sozinho."
+                "Subiu ou desceu de rank? Clica no botão certo abaixo!\n\n"
+                "Você vai informar o **novo rank** e uma **comprovação** (link do print/vídeo). "
+                f"O pedido cai como pendência em <#{PEDIDOS_RANK_CHANNEL_ID}> pra staff analisar e aprovar. "
+                "Assim que for aprovado, seu cargo é trocado automaticamente."
             ),
             color=0xFF5A1F,
         )
-        await ctx.send(embed=embed, view=PainelRankView())
+        await ctx.send(embed=embed, view=PainelSolicitarRankView())
         try:
             await ctx.message.delete()
         except discord.HTTPException:
