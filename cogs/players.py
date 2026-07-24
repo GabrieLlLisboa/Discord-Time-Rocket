@@ -336,6 +336,17 @@ class PendenciaRankView(discord.ui.View):
         pedido["decidido_por_id"] = interaction.user.id
         salvar("pedidos_rank", cog.pedidos)
 
+        # Avisa o jogador por DM que o pedido foi aprovado (mesmo padrão
+        # usado na recusa, lá embaixo em _recusar_core).
+        try:
+            await membro.send(
+                f"✅ Seu pedido de {'subida' if pedido['tipo'] == 'subir' else 'descida'} de rank em "
+                f"**{guild.name}** foi **aprovado**!\n\n"
+                f"Seu novo rank é {novo_info['emoji']} **{novo_info['nome']}**."
+            )
+        except discord.Forbidden:
+            pass
+
         # Anúncio no canal de jogadores + atualiza a lista
         channel = interaction.client.get_channel(JOGADORES_CHANNEL_ID)
         if channel is not None:
