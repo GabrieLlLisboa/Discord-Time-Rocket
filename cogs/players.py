@@ -397,6 +397,17 @@ class PendenciaRankView(discord.ui.View):
         pedido["motivo_recusa"] = motivo
         salvar("pedidos_rank", cog.pedidos)
 
+        solicitante = interaction.guild.get_member(pedido["solicitante_id"])
+        if solicitante:
+            try:
+                await solicitante.send(
+                    f"❌ Você foi recusado no seu pedido de rank em **{interaction.guild.name}**.\n\n"
+                    f"**Motivo:** {motivo}\n\n"
+                    f"Se acha que foi errado, abra um tíquete no nosso Discord."
+                )
+            except discord.Forbidden:
+                pass
+
         embed = interaction.message.embeds[0]
         embed.add_field(name="Decisão", value=f"❌ Recusado por {interaction.user.mention}\n**Motivo:** {motivo}", inline=False)
         embed.color = 0xED4245

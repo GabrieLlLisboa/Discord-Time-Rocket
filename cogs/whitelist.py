@@ -767,8 +767,9 @@ class Whitelist(commands.Cog):
         if membro:
             try:
                 await membro.send(
-                    f"❌ Sua whitelist em **{guild.name}** foi reprovada.\n"
-                    f"**Motivo:** {registro['motivo_recusa']}"
+                    f"❌ Você foi recusado na whitelist de **{guild.name}**.\n\n"
+                    f"**Motivo:** {registro['motivo_recusa']}\n\n"
+                    f"Se acha que foi errado, abra um tíquete no nosso Discord."
                 )
             except discord.Forbidden:
                 pass
