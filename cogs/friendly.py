@@ -166,6 +166,11 @@ class ConfirmarPresencaView(discord.ui.View):
         amistoso["confirmados"].append(membro.id)
         salvar("amistosos", amistosos)
 
+        # Participar de amistoso também conta como atividade
+        atividade_cog = interaction.client.get_cog("Atividade")
+        if atividade_cog is not None:
+            await atividade_cog.marcar_ativo_por_amistoso(membro)
+
         # Atualiza embed do anúncio a partir da lista canônica (JSON)
         await _atualizar_embed_confirmados(interaction.message, interaction.guild, amistoso["confirmados"])
 

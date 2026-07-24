@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 import asyncio
+import io
 import uuid
 
 from cogs.backup import ler, salvar
@@ -189,10 +190,13 @@ class SolicitarRankModal(discord.ui.Modal):
         # apagando, etc.) apagar a mensagem antes do bot conseguir ler o
         # arquivo. Se mesmo assim falhar, a pendência ainda é mandada só
         # com o link/texto, em vez de sumir tudo em silêncio.
-        try:
-            arquivos = [await a.to_file() for a in msg_comprovacao.attachments]
-        except (discord.NotFound, discord.HTTPException):
-            arquivos = []
+        arquivos = []
+        for a in msg_comprovacao.attachments:
+            try:
+                dados = await a.read()
+                arquivos.append(discord.File(io.BytesIO(dados), filename=a.filename))
+            except Exception:
+                pass
 
         atual_info = _rank_atual(membro)
         pedido_id = uuid.uuid4().hex[:10]
@@ -228,7 +232,12 @@ class SolicitarRankModal(discord.ui.Modal):
         # A comprovação (print/vídeo) vai numa mensagem separada, logo
         # abaixo da pendência — não fica embutida dentro da embed.
         if arquivos:
-            await canal_staff.send(content="📎 Comprovação:", files=arquivos)
+            try:
+                await canal_staff.send(content="📎 Comprovação:", files=arquivos)
+            except Exception:
+                await canal_staff.send(
+                    f"📎 Comprovação (não consegui reenviar o arquivo, segue o link original): {', '.join(anexos)}"
+                )
 
         cog.pedidos[pedido_id] = {
             "solicitante_id": membro.id,

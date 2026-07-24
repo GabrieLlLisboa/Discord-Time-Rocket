@@ -165,6 +165,44 @@ class Atividade(commands.Cog):
             self.dados[chave] = {"mensagens": 0, "voz_segundos": 0, "anunciado": False}
         return self.dados[chave]
 
+    # Chamado por cogs/friendly.py quando alguém confirma presença num
+    # amistoso — participar de amistoso também conta como atividade, igual
+    # bater a meta de mensagens ou tempo de call.
+    async def marcar_ativo_por_amistoso(self, membro: discord.Member):
+        if not _periodo_ativo():
+            return
+
+        registro = self._registro(membro.id)
+        if registro["anunciado"]:
+            return
+
+        registro["anunciado"] = True
+        _salvar(self.dados)
+
+        canal = self.bot.get_channel(CANAL_ANUNCIO_ID)
+        if canal is not None:
+            embed = discord.Embed(
+                title="✅ Jogador ativo!",
+                description=f"{membro.mention} se demonstrou **ativo** no servidor!",
+                color=0x57F287,
+                timestamp=datetime.now(timezone.utc),
+            )
+            embed.add_field(name="Motivo", value="⚔️ Participou de um amistoso", inline=False)
+            embed.set_footer(text=f"Período: {INICIO_PERIODO.strftime('%d/%m/%Y')} até {FIM_PERIODO.strftime('%d/%m/%Y')}")
+            try:
+                await canal.send(embed=embed)
+            except discord.Forbidden:
+                print(f"[ATIVIDADE] ⚠️ Sem permissão para mandar mensagem no canal {CANAL_ANUNCIO_ID}.")
+
+        # Se a pessoa estiver em quarentena, tira ela automaticamente
+        demote_cog = self.bot.get_cog("Demote")
+        if demote_cog is not None:
+            await demote_cog.forcar_saida_quarentena(
+                membro, motivo="Marcado como ativo automaticamente (participação em amistoso)"
+            )
+
+        print(f"[ATIVIDADE] ✅ {membro} marcado como ativo por participar de amistoso.")
+
     async def _checar_e_anunciar(self, membro: discord.Member):
         registro = self._registro(membro.id)
         if registro["anunciado"]:
