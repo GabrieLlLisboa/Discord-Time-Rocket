@@ -216,6 +216,49 @@ class Moderation(commands.Cog):
         await _responder(interaction, embed)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
+    # ── /inativar ─────────────────────────────────────────────────────────
+    @app_commands.command(name="inativar", description="Expulsa um membro por inatividade.")
+    @app_commands.describe(membro="Membro a ser expulso por inatividade")
+    @app_commands.default_permissions(kick_members=True)
+    async def inativar(self, interaction: discord.Interaction, membro: discord.Member):
+        motivo = "Inatividade"
+
+        pode, erro = mu.pode_moderar(interaction.user, membro)
+        if not pode:
+            return await interaction.response.send_message(embed=mu.embed_erro(erro), ephemeral=True)
+
+        confirmado, interaction = await mu.confirmar_acao(
+            interaction, "Confirmar expulsão por inatividade",
+            f"Tem certeza que quer expulsar {membro.mention} por inatividade?",
+            exigir=_exige_confirmacao(interaction.guild_id),
+        )
+        if not confirmado:
+            return
+
+        # Manda a DM ANTES de expulsar — depois do kick o bot não consegue
+        # mais mandar mensagem direta pra pessoa (perde o "servidor em comum").
+        await mu.notificar_usuario(
+            membro,
+            mu.embed_base(
+                "👋 Você foi removido da Ignition RL",
+                "Notamos que você ficou um bom tempo sem atividade por aqui, então seu acesso "
+                f"na **{interaction.guild.name}** foi removido por inatividade.\n\n"
+                "Se quiser voltar, é só entrar de novo pelo nosso convite quando estiver mais "
+                "ativo — as portas continuam abertas! 🔥",
+                mu.COR_ERRO,
+            ),
+        )
+
+        try:
+            await membro.kick(reason=f"Expulso por inatividade — por {interaction.user}")
+        except discord.Forbidden:
+            return await interaction.followup.send(embed=mu.embed_erro("Sem permissão pra expulsar esse membro."), ephemeral=True)
+
+        registro = mu.registrar_punicao(interaction.guild_id, membro.id, interaction.user.id, "kick", motivo)
+        embed = mu.embed_punicao("kick", membro, interaction.user, motivo, punicao_id=registro["id"])
+        await _responder(interaction, embed)
+        await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
+
     # ── /ban ──────────────────────────────────────────────────────────────
     @app_commands.command(name="ban", description="Bane um membro/usuário permanentemente.")
     @app_commands.describe(usuario="Usuário (pode ser ID de quem não está no servidor)", motivo="Motivo",
