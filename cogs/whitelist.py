@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 import asyncio
+import random
 import re
 import time
 
@@ -102,6 +103,39 @@ PEAK_RANKS = [
 DIVISOES = ["Divisão 1", "Divisão 2", "Divisão 3"]
 
 TEMPOS_JOGANDO = ["Menos de 1 ano", "1 a 2 anos", "2 a 4 anos", "Mais de 4 anos"]
+
+# ─────────────────────────────────────────────
+#  Incentivo automático de whitelist
+#
+#  Quem NUNCA começou (respostas vazias): espera um tempo aleatório entre
+#  10 e 15 minutos após entrar e manda UMA mensagem incentivando a começar.
+#
+#  Quem começou mas deixou pela metade (já tem pelo menos 1 resposta,
+#  ex: o nick): recebe lembretes periódicos, com um intervalo aleatório
+#  entre 15 e 25 minutos entre um e outro, pra não spammar a pessoa.
+#
+#  Os dois casos usam o mesmo campo "proximo_lembrete_em" no registro —
+#  é ele que o loop lembretes_whitelist confere a cada minuto.
+# ─────────────────────────────────────────────
+LEMBRETE_NAO_INICIOU_MIN_SEG = 10 * 60
+LEMBRETE_NAO_INICIOU_MAX_SEG = 15 * 60
+
+LEMBRETE_INCOMPLETA_MIN_SEG = 15 * 60
+LEMBRETE_INCOMPLETA_MAX_SEG = 25 * 60
+
+MSGS_NAO_INICIOU = [
+    "🔥 {mencao}, vamos começar sua whitelist? É rapidinho e você já fica mais perto de acessar o servidor!",
+    "👋 {mencao}, tudo certo por aí? Só falta clicar em **🔥 Começar Whitelist** aqui embaixo pra gente liberar seu acesso!",
+    "🎮 {mencao}, bora começar sua whitelist? Leva menos de 2 minutinhos e você já pode curtir o servidor com a gente!",
+]
+
+MSGS_INCOMPLETA = [
+    "⏳ {mencao}, falta bem pouquinho! Termine sua whitelist e tenha acesso aos canais do servidor.",
+    "💪 {mencao}, você já começou, só falta terminar! Continua de onde parou aqui mesmo no canal.",
+    "🚀 {mencao}, tá quase lá! Finaliza sua whitelist pra destravar o servidor todo.",
+    "😊 {mencao}, não esquece de concluir sua whitelist, hein? É rapidinho e vale muito a pena!",
+    "🔥 {mencao}, faltam só alguns passinhos pra você fazer parte do servidor! Vamos terminar juntos?",
+]
 
 
 def _slug(nome: str) -> str:
@@ -300,9 +334,66 @@ class Whitelist(commands.Cog):
         self.bot = bot
         self.dados = ler("whitelist")  # {user_id_str: {"respostas": {...}, "canal_id":..., "status":...}}
         self.limpeza_canais.start()
+        self.lembretes_whitelist.start()
 
     def cog_unload(self):
         self.limpeza_canais.cancel()
+        self.lembretes_whitelist.cancel()
+
+    # ── Lembretes automáticos: quem não começou e quem começou e não terminou ──
+    @tasks.loop(minutes=1)
+    async def lembretes_whitelist(self):
+        await self.bot.wait_until_ready()
+        agora = time.time()
+        mudou = False
+        for uid_str, registro in list(self.dados.items()):
+            # Só mexe em quem ainda está em andamento — status "pendente",
+            # "aprovada" ou "recusada" já saiu desse fluxo.
+            if registro.get("status") != "em_andamento":
+                continue
+
+            proximo = registro.get("proximo_lembrete_em")
+            if not proximo or agora < proximo:
+                continue
+
+            canal_id = registro.get("canal_id")
+            canal = self.bot.get_channel(canal_id) if canal_id else None
+            if canal is None:
+                # Canal sumiu (apagado manualmente, etc.) — não tem pra onde
+                # mandar lembrete, então limpa o agendamento e segue.
+                registro.pop("proximo_lembrete_em", None)
+                mudou = True
+                continue
+
+            membro_id = int(uid_str)
+            mencao = f"<@{membro_id}>"
+
+            if not registro.get("respostas"):
+                # Nunca começou: manda UMA mensagem incentivando a começar,
+                # sem reagendar de novo depois.
+                texto = random.choice(MSGS_NAO_INICIOU).format(mencao=mencao)
+                registro.pop("proximo_lembrete_em", None)
+            else:
+                # Começou mas não terminou: manda o lembrete e já agenda o
+                # próximo, com um intervalo aleatório diferente, pra não
+                # ficar repetindo sempre no mesmo ritmo.
+                texto = random.choice(MSGS_INCOMPLETA).format(mencao=mencao)
+                registro["proximo_lembrete_em"] = agora + random.uniform(
+                    LEMBRETE_INCOMPLETA_MIN_SEG, LEMBRETE_INCOMPLETA_MAX_SEG
+                )
+
+            try:
+                await canal.send(texto)
+            except discord.HTTPException:
+                pass
+            mudou = True
+
+        if mudou:
+            salvar("whitelist", self.dados)
+
+    @lembretes_whitelist.before_loop
+    async def antes_lembretes(self):
+        await self.bot.wait_until_ready()
 
     @tasks.loop(minutes=1)
     async def limpeza_canais(self):
@@ -335,7 +426,15 @@ class Whitelist(commands.Cog):
     def salvar_resposta(self, user_id: int, chave: str, valor: str):
         uid = str(user_id)
         registro = self.dados.setdefault(uid, {"respostas": {}, "status": "em_andamento"})
+        acabou_de_comecar = not registro["respostas"]
         registro["respostas"][chave] = valor
+        if acabou_de_comecar:
+            # Passou de "não iniciou" pra "iniciou, não concluiu" — troca o
+            # lembrete de "vamos começar" pelo de "termina logo", com um
+            # intervalo maior e aleatório.
+            registro["proximo_lembrete_em"] = time.time() + random.uniform(
+                LEMBRETE_INCOMPLETA_MIN_SEG, LEMBRETE_INCOMPLETA_MAX_SEG
+            )
         salvar("whitelist", self.dados)
 
     # ── Categoria (cria se não existir) ─────────────────────────────
@@ -468,7 +567,16 @@ class Whitelist(commands.Cog):
             reason=f"Whitelist de {member}",
         )
 
-        self.dados[str(member.id)] = {"respostas": {}, "status": "em_andamento", "canal_id": canal.id}
+        self.dados[str(member.id)] = {
+            "respostas": {},
+            "status": "em_andamento",
+            "canal_id": canal.id,
+            # Se em 10-15min a pessoa ainda não tiver clicado em "Começar
+            # Whitelist", o loop lembretes_whitelist manda o incentivo.
+            "proximo_lembrete_em": time.time() + random.uniform(
+                LEMBRETE_NAO_INICIOU_MIN_SEG, LEMBRETE_NAO_INICIOU_MAX_SEG
+            ),
+        }
         salvar("whitelist", self.dados)
 
         embed = discord.Embed(
@@ -880,6 +988,9 @@ class Whitelist(commands.Cog):
             "respostas": {},
             "status": "em_andamento",
             "canal_id": ctx.channel.id,
+            "proximo_lembrete_em": time.time() + random.uniform(
+                LEMBRETE_NAO_INICIOU_MIN_SEG, LEMBRETE_NAO_INICIOU_MAX_SEG
+            ),
         }
         salvar("whitelist", self.dados)
 
