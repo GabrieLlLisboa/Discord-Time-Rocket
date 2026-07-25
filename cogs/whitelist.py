@@ -116,17 +116,25 @@ TEMPOS_JOGANDO = ["Menos de 1 ano", "1 a 2 anos", "2 a 4 anos", "Mais de 4 anos"
 #
 #  Os dois casos usam o mesmo campo "proximo_lembrete_em" no registro —
 #  é ele que o loop lembretes_whitelist confere a cada minuto.
+#
+#  Modo "insistente": o primeiro lembrete demora entre 10 e 15 minutos,
+#  mas a partir daí ele repete a cada ~10 minutos sem parar (com uma
+#  variação de alguns segundos só pra não ficar cravado no mesmo segundo
+#  toda vez), até a pessoa começar ou concluir a whitelist.
 # ─────────────────────────────────────────────
 LEMBRETE_NAO_INICIOU_MIN_SEG = 10 * 60
 LEMBRETE_NAO_INICIOU_MAX_SEG = 15 * 60
 
-LEMBRETE_INCOMPLETA_MIN_SEG = 15 * 60
-LEMBRETE_INCOMPLETA_MAX_SEG = 25 * 60
+LEMBRETE_REPETICAO_MIN_SEG = 9.5 * 60   # ~10 minutos
+LEMBRETE_REPETICAO_MAX_SEG = 10.5 * 60  # ~10 minutos
 
 MSGS_NAO_INICIOU = [
     "🔥 {mencao}, vamos começar sua whitelist? É rapidinho e você já fica mais perto de acessar o servidor!",
     "👋 {mencao}, tudo certo por aí? Só falta clicar em **🔥 Começar Whitelist** aqui embaixo pra gente liberar seu acesso!",
     "🎮 {mencao}, bora começar sua whitelist? Leva menos de 2 minutinhos e você já pode curtir o servidor com a gente!",
+    "⏰ {mencao}, ainda dando aquela enroladinha? Bora começar a whitelist logo, é rapidinho!",
+    "📢 {mencao}, esse canal aqui não vai se preencher sozinho, hein! Clica em **🔥 Começar Whitelist** e vamos nessa!",
+    "🙃 {mencao}, seu acesso tá esperando só você clicar em começar. Bora lá?",
 ]
 
 MSGS_INCOMPLETA = [
@@ -135,6 +143,9 @@ MSGS_INCOMPLETA = [
     "🚀 {mencao}, tá quase lá! Finaliza sua whitelist pra destravar o servidor todo.",
     "😊 {mencao}, não esquece de concluir sua whitelist, hein? É rapidinho e vale muito a pena!",
     "🔥 {mencao}, faltam só alguns passinhos pra você fazer parte do servidor! Vamos terminar juntos?",
+    "📌 {mencao}, sua whitelist continua parada aqui esperando você. Volta e termina logo!",
+    "⏰ {mencao}, mais um lembrete: sua whitelist ainda tá incompleta. Bora fechar isso?",
+    "🙋 {mencao}, cadê você? Falta só terminar a whitelist pra liberar seu acesso!",
 ]
 
 
@@ -369,18 +380,18 @@ class Whitelist(commands.Cog):
             mencao = f"<@{membro_id}>"
 
             if not registro.get("respostas"):
-                # Nunca começou: manda UMA mensagem incentivando a começar,
-                # sem reagendar de novo depois.
+                # Nunca começou: manda o lembrete e já reagenda pro próximo
+                # ciclo (~10min) — modo insistente, não para até a pessoa
+                # começar.
                 texto = random.choice(MSGS_NAO_INICIOU).format(mencao=mencao)
-                registro.pop("proximo_lembrete_em", None)
             else:
-                # Começou mas não terminou: manda o lembrete e já agenda o
-                # próximo, com um intervalo aleatório diferente, pra não
-                # ficar repetindo sempre no mesmo ritmo.
+                # Começou mas não terminou: mesma lógica, insiste a cada
+                # ~10min até a pessoa concluir.
                 texto = random.choice(MSGS_INCOMPLETA).format(mencao=mencao)
-                registro["proximo_lembrete_em"] = agora + random.uniform(
-                    LEMBRETE_INCOMPLETA_MIN_SEG, LEMBRETE_INCOMPLETA_MAX_SEG
-                )
+
+            registro["proximo_lembrete_em"] = agora + random.uniform(
+                LEMBRETE_REPETICAO_MIN_SEG, LEMBRETE_REPETICAO_MAX_SEG
+            )
 
             try:
                 await canal.send(texto)
@@ -430,10 +441,10 @@ class Whitelist(commands.Cog):
         registro["respostas"][chave] = valor
         if acabou_de_comecar:
             # Passou de "não iniciou" pra "iniciou, não concluiu" — troca o
-            # lembrete de "vamos começar" pelo de "termina logo", com um
-            # intervalo maior e aleatório.
+            # lembrete de "vamos começar" pelo de "termina logo", mantendo
+            # o ritmo insistente de ~10 em 10 minutos.
             registro["proximo_lembrete_em"] = time.time() + random.uniform(
-                LEMBRETE_INCOMPLETA_MIN_SEG, LEMBRETE_INCOMPLETA_MAX_SEG
+                LEMBRETE_REPETICAO_MIN_SEG, LEMBRETE_REPETICAO_MAX_SEG
             )
         salvar("whitelist", self.dados)
 
