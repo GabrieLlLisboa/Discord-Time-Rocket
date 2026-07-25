@@ -128,6 +128,10 @@ LEMBRETE_NAO_INICIOU_MAX_SEG = 15 * 60
 LEMBRETE_REPETICAO_MIN_SEG = 9.5 * 60   # ~10 minutos
 LEMBRETE_REPETICAO_MAX_SEG = 10.5 * 60  # ~10 minutos
 
+# Se passar 1 dia inteiro sem NENHUMA mensagem no canal de whitelist
+# (nem começar, nem responder nada), a pessoa é expulsa automaticamente.
+EXPIRA_WHITELIST_SEG = 24 * 60 * 60
+
 MSGS_NAO_INICIOU = [
     "🔥 {mencao}, vamos começar sua whitelist? É rapidinho e você já fica mais perto de acessar o servidor!",
     "👋 {mencao}, tudo certo por aí? Só falta clicar em **🔥 Começar Whitelist** aqui embaixo pra gente liberar seu acesso!",
@@ -363,6 +367,14 @@ class Whitelist(commands.Cog):
             if registro.get("status") != "em_andamento":
                 continue
 
+            # ── Expulsão automática: 1 dia inteiro sem nenhuma mensagem no
+            # canal de whitelist (nem começou a responder, nem mandou nada).
+            ultima_atividade = registro.get("ultima_atividade_em")
+            if ultima_atividade and (agora - ultima_atividade) >= EXPIRA_WHITELIST_SEG:
+                await self._expulsar_por_inatividade(uid_str, registro)
+                mudou = True
+                continue
+
             proximo = registro.get("proximo_lembrete_em")
             if not proximo or agora < proximo:
                 continue
@@ -406,6 +418,44 @@ class Whitelist(commands.Cog):
     async def antes_lembretes(self):
         await self.bot.wait_until_ready()
 
+    async def _expulsar_por_inatividade(self, uid_str: str, registro: dict):
+        """1 dia sem nenhuma mensagem no canal de whitelist -> DM + kick + limpa tudo."""
+        membro_id = int(uid_str)
+        guild_id = registro.get("guild_id")
+        guild = self.bot.get_guild(guild_id) if guild_id else None
+
+        membro = guild.get_member(membro_id) if guild else None
+        if membro is None and guild:
+            try:
+                membro = await guild.fetch_member(membro_id)
+            except discord.NotFound:
+                membro = None
+
+        if membro is not None:
+            # Manda a DM ANTES de expulsar — depois do kick o bot perde o
+            # "servidor em comum" e não consegue mais mandar DM.
+            try:
+                await membro.send(
+                    "Você não respondeu a whitelist durante um dia e foi exulso."
+                )
+            except discord.Forbidden:
+                pass
+
+            try:
+                await membro.kick(reason="Whitelist expirada — 1 dia sem responder")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
+        canal_id = registro.get("canal_id")
+        canal = self.bot.get_channel(canal_id) if canal_id else None
+        if canal:
+            try:
+                await canal.delete(reason="Whitelist expirada por inatividade")
+            except discord.HTTPException:
+                pass
+
+        self.dados.pop(uid_str, None)
+
     @tasks.loop(minutes=1)
     async def limpeza_canais(self):
         await self.bot.wait_until_ready()
@@ -439,6 +489,7 @@ class Whitelist(commands.Cog):
         registro = self.dados.setdefault(uid, {"respostas": {}, "status": "em_andamento"})
         acabou_de_comecar = not registro["respostas"]
         registro["respostas"][chave] = valor
+        registro["ultima_atividade_em"] = time.time()
         if acabou_de_comecar:
             # Passou de "não iniciou" pra "iniciou, não concluiu" — troca o
             # lembrete de "vamos começar" pelo de "termina logo", mantendo
@@ -582,6 +633,10 @@ class Whitelist(commands.Cog):
             "respostas": {},
             "status": "em_andamento",
             "canal_id": canal.id,
+            "guild_id": guild.id,
+            # Usado pra saber se a pessoa passou 1 dia inteiro sem falar
+            # nada no canal — ver checar_expiracao_whitelist().
+            "ultima_atividade_em": time.time(),
             # Se em 10-15min a pessoa ainda não tiver clicado em "Começar
             # Whitelist", o loop lembretes_whitelist manda o incentivo.
             "proximo_lembrete_em": time.time() + random.uniform(
@@ -607,6 +662,20 @@ class Whitelist(commands.Cog):
     # Enquanto a whitelist não termina, a pessoa só pode ter o cargo de
     # acesso restrito — se ganhar qualquer outro cargo nesse meio tempo
     # (onboarding do Discord, engano de staff, etc), o bot remove na hora.
+    # Qualquer mensagem da pessoa no canal dela conta como atividade —
+    # reseta o prazo de 1 dia usado por checar_expiracao_whitelist.
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot or not message.guild:
+            return
+        registro = self.dados.get(str(message.author.id))
+        if not registro or registro.get("status") != "em_andamento":
+            return
+        if registro.get("canal_id") != message.channel.id:
+            return
+        registro["ultima_atividade_em"] = time.time()
+        salvar("whitelist", self.dados)
+
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         registro = self.dados.get(str(after.id))
@@ -999,6 +1068,8 @@ class Whitelist(commands.Cog):
             "respostas": {},
             "status": "em_andamento",
             "canal_id": ctx.channel.id,
+            "guild_id": ctx.guild.id,
+            "ultima_atividade_em": time.time(),
             "proximo_lembrete_em": time.time() + random.uniform(
                 LEMBRETE_NAO_INICIOU_MIN_SEG, LEMBRETE_NAO_INICIOU_MAX_SEG
             ),
