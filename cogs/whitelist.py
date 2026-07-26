@@ -125,8 +125,8 @@ TEMPOS_JOGANDO = ["Menos de 1 ano", "1 a 2 anos", "2 a 4 anos", "Mais de 4 anos"
 LEMBRETE_NAO_INICIOU_MIN_SEG = 10 * 60
 LEMBRETE_NAO_INICIOU_MAX_SEG = 15 * 60
 
-LEMBRETE_REPETICAO_MIN_SEG = 9.5 * 60   # ~10 minutos
-LEMBRETE_REPETICAO_MAX_SEG = 10.5 * 60  # ~10 minutos
+LEMBRETE_REPETICAO_MIN_SEG = 30 * 60  # 30 minutos
+LEMBRETE_REPETICAO_MAX_SEG = 60 * 60  # 60 minutos
 
 # Se passar 1 dia inteiro sem NENHUMA mensagem no canal de whitelist
 # (nem começar, nem responder nada), a pessoa é expulsa automaticamente.
@@ -139,6 +139,16 @@ MSGS_NAO_INICIOU = [
     "⏰ {mencao}, ainda dando aquela enroladinha? Bora começar a whitelist logo, é rapidinho!",
     "📢 {mencao}, esse canal aqui não vai se preencher sozinho, hein! Clica em **🔥 Começar Whitelist** e vamos nessa!",
     "🙃 {mencao}, seu acesso tá esperando só você clicar em começar. Bora lá?",
+    "😴 {mencao}, cochilou? A whitelist tá ali, é só clicar em **🔥 Começar Whitelist** e pronto!",
+    "🚨 {mencao}, ainda não vi você começar a whitelist. Bora resolver isso agora?",
+    "🕹️ {mencao}, o servidor todo já tá esperando só você começar sua whitelist!",
+    "📍 {mencao}, seu canal tá aqui do seu lado só esperando um clique pra começar!",
+    "🤨 {mencao}, ainda enrolando? Vai que é rapidinho, só clicar em começar!",
+    "🔔 {mencao}, esse é mais um toque: falta só você começar a sua whitelist!",
+    "🚀 {mencao}, quer acesso logo ao servidor? Então bora começar a whitelist de uma vez!",
+    "😬 {mencao}, seu acesso continua trancado até você clicar em **🔥 Começar Whitelist**. Vamos nessa?",
+    "🔁 {mencao}, tô insistindo porque vale a pena: começa sua whitelist agora, é rapidinho!",
+    "👉 {mencao}, um clique separa você do resto do servidor. Bora começar?",
 ]
 
 MSGS_INCOMPLETA = [
@@ -150,6 +160,11 @@ MSGS_INCOMPLETA = [
     "📌 {mencao}, sua whitelist continua parada aqui esperando você. Volta e termina logo!",
     "⏰ {mencao}, mais um lembrete: sua whitelist ainda tá incompleta. Bora fechar isso?",
     "🙋 {mencao}, cadê você? Falta só terminar a whitelist pra liberar seu acesso!",
+    "🔁 {mencao}, tô voltando aqui de novo: sua whitelist ainda tá pela metade, bora fechar?",
+    "🎯 {mencao}, você já fez a parte difícil, agora é só terminar! Não deixa pra depois.",
+    "🚦 {mencao}, sua whitelist tá parada no meio do caminho. Volta aqui e termina de uma vez!",
+    "📋 {mencao}, faltam só as últimas perguntas! Continua daqui e finaliza sua whitelist.",
+    "🔥 {mencao}, insistindo mais uma vez: termina logo sua whitelist e já libera seu acesso!",
 ]
 
 
