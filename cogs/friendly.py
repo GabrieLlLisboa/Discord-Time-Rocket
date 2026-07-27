@@ -222,6 +222,11 @@ async def criar_amistoso(
     mencao_str   = " ".join(guild.get_role(rid).mention for rid in ranks_ids if guild.get_role(rid))
     rank_salvo   = " + ".join(nomes_ranks)
 
+    # Confirma a interação JÁ, antes de criar o canal — criar canal às vezes
+    # demora mais que os 3s que o Discord dá, e sem isso o comando aparecia
+    # como "não respondeu a tempo" mesmo funcionando.
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
     nome_canal = "amistoso-" + "".join(c if c.isalnum() or c == "-" else "-" for c in adversario.lower().strip())
     nome_canal = nome_canal[:50]
 
@@ -261,7 +266,7 @@ async def criar_amistoso(
 
     canal_anuncio = interaction.client.get_channel(AMISTOSOS_CHANNEL_ID)
     if canal_anuncio is None:
-        await interaction.response.send_message("❌ Canal de amistosos não encontrado.", ephemeral=True)
+        await interaction.followup.send("❌ Canal de amistosos não encontrado.", ephemeral=True)
         return
 
     view_conf   = ConfirmarPresencaView(rank_alvo=rank_salvo, rank_id=ranks_ids[0], canal_amistoso_id=canal_amistoso.id, rank_ids_extras=ranks_ids)
@@ -294,7 +299,7 @@ async def criar_amistoso(
         color=0xFF5A1F
     )
     await canal_amistoso.send(embed=embed_canal, view=SairAmistosoView())
-    await interaction.response.send_message(f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}", ephemeral=True)
+    await interaction.followup.send(f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}", ephemeral=True)
     print(f"[AMISTOSO] ✅ {interaction.user} anunciou amistoso vs {adversario} — {rank_salvo}")
 
 

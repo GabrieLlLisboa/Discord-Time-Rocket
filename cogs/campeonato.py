@@ -373,6 +373,11 @@ class Campeonato(commands.Cog):
             )
             return
 
+        # Confirma a interação JÁ, antes de criar cargo/mensagens — criar cargo
+        # às vezes demora mais que os 3s que o Discord dá, e sem isso o
+        # comando aparecia como "não respondeu a tempo" mesmo funcionando.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
         info = {
             "nome": nome,
             "rank": rank.value,
@@ -403,7 +408,7 @@ class Campeonato(commands.Cog):
 
         # Responde só pra você, de forma discreta — o anúncio de verdade vai
         # como mensagem própria do bot, sem aparecer como resposta ao seu comando
-        await interaction.response.send_message("✅ Campeonato criado!", ephemeral=True)
+        await interaction.followup.send("✅ Campeonato criado!", ephemeral=True)
 
         canal = interaction.channel
         msg_info = await canal.send(embed=construir_embed_info(info), view=EntrarTorneioView(chave))

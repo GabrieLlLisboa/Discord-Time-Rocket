@@ -502,11 +502,12 @@ class Moderation(commands.Cog):
 
     @canal_group.command(name="criar", description="Cria um novo canal de texto.")
     async def canal_criar(self, interaction: discord.Interaction, nome: str, categoria: discord.CategoryChannel = None):
+        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             canal = await interaction.guild.create_text_channel(nome, category=categoria, reason=f"Criado por {interaction.user}")
         except discord.Forbidden:
-            return await interaction.response.send_message(embed=mu.embed_erro("Sem permissão pra criar canais."), ephemeral=True)
-        await interaction.response.send_message(embed=mu.embed_sucesso(f"Canal {canal.mention} criado."))
+            return await interaction.followup.send(embed=mu.embed_erro("Sem permissão pra criar canais."), ephemeral=True)
+        await interaction.followup.send(embed=mu.embed_sucesso(f"Canal {canal.mention} criado."))
 
     @canal_group.command(name="deletar", description="Deleta um canal.")
     async def canal_deletar(self, interaction: discord.Interaction, canal: discord.abc.GuildChannel = None):
