@@ -195,11 +195,15 @@ class PaisModalTreino(discord.ui.Modal, title="Inscrição no Treino"):
 
         info["inscritos"][str(interaction.user.id)] = {"pais": str(self.pais)}
         salvar_treinos(dados)
-        await _atualizar_lista(self.bot, self.chave)
-        await _dar_cargo(self.bot, info, interaction.user.id)
+
+        # Responde JÁ (dado já salvo) — atualizar a lista e dar o cargo são
+        # chamadas de rede (fetch_message/edit/add_roles) que podem demorar
+        # mais que os 3s que o Discord dá pra confirmar a interação.
         await interaction.response.send_message(
             f"✅ Inscrição confirmada no treino **{info['nome']}**!", ephemeral=True
         )
+        await _atualizar_lista(self.bot, self.chave)
+        await _dar_cargo(self.bot, info, interaction.user.id)
 
 
 # ── View de confirmação quando o rank não bate ───────────────────────────────
@@ -301,8 +305,11 @@ class ConfirmarExclusaoViewTreino(discord.ui.View):
 
     @discord.ui.button(label="Sim, apagar", style=discord.ButtonStyle.danger)
     async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _apagar_treino(self.bot, self.chave)
+        # Confirma JÁ (o botão deixa de existir pro usuário na hora) — apagar
+        # de verdade envolve várias chamadas de rede (deletar 2 mensagens,
+        # deletar o cargo) que podem passar dos 3s do Discord.
         await interaction.response.edit_message(content="🗑️ Treino apagado.", view=None)
+        await _apagar_treino(self.bot, self.chave)
 
     @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary)
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -493,9 +500,6 @@ class Treino(commands.Cog):
                 ids_novos.append(membro.id)
 
         salvar_treinos(dados)
-        await _atualizar_lista(self.bot, chave)
-        for membro_id in ids_novos:
-            await _dar_cargo(self.bot, info, membro_id)
 
         partes = []
         if inscritos_agora:
@@ -503,7 +507,14 @@ class Treino(commands.Cog):
         if ja_estavam:
             partes.append(f"⚠️ Já estavam inscritos (ignorados): {', '.join(ja_estavam)}")
 
+        # Responde JÁ (dados já salvos) — atualizar a lista e dar cargo pra
+        # cada membro novo são várias chamadas de rede que, com vários
+        # membros de uma vez, facilmente passam dos 3s do Discord.
         await interaction.response.send_message("\n".join(partes) or "⚠️ Nada pra fazer.", ephemeral=True)
+
+        await _atualizar_lista(self.bot, chave)
+        for membro_id in ids_novos:
+            await _dar_cargo(self.bot, info, membro_id)
 
     @treinar.error
     async def treinar_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -559,8 +570,10 @@ class Treino(commands.Cog):
 
         info["inscricoes_abertas"] = False
         salvar_treinos(dados)
-        await _atualizar_botao_inscricao(self.bot, chave, fechado=True)
+        # Responde JÁ — reeditar o botão no anúncio é uma chamada de rede à
+        # parte que pode demorar mais que os 3s do Discord.
         await interaction.response.send_message(f"🔒 Inscrições de **{info['nome']}** fechadas.", ephemeral=True)
+        await _atualizar_botao_inscricao(self.bot, chave, fechado=True)
 
     @fechar_inscricoes_treino.error
     async def fechar_inscricoes_treino_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -588,8 +601,8 @@ class Treino(commands.Cog):
 
         info["inscricoes_abertas"] = True
         salvar_treinos(dados)
-        await _atualizar_botao_inscricao(self.bot, chave, fechado=False)
         await interaction.response.send_message(f"✅ Inscrições de **{info['nome']}** reabertas.", ephemeral=True)
+        await _atualizar_botao_inscricao(self.bot, chave, fechado=False)
 
     @abrir_inscricoes_treino.error
     async def abrir_inscricoes_treino_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
