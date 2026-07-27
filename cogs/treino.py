@@ -22,7 +22,7 @@ from cogs.json_store import ler_json, salvar_json
 #    2) A mensagem com a lista de inscritos (atualizada à parte)
 # ─────────────────────────────────────────────
 
-DATA_FILE = "data/treinos.json"
+DATA_FILE = "data/treino_inscricoes.json"
 
 RANKS_VALIDOS = {c["nome"].lower(): c for c in CARGOS if c["secao"] == "rank"}
 RANK_TODOS = "Todos"
@@ -43,7 +43,14 @@ TIPO_CHOICES = [
 
 
 def ler_treinos() -> dict:
-    return ler_json(DATA_FILE, {})
+    dados = ler_json(DATA_FILE, {})
+    if not isinstance(dados, dict):
+        # Segurança extra: se por algum motivo o arquivo vier num formato
+        # errado (ex: lista, de algum sistema antigo usando o mesmo nome),
+        # não deixa o resto do cog quebrar tentando usar .get()/[chave] nele.
+        print(f"[TREINO] ⚠️ {DATA_FILE} não é um dicionário (veio {type(dados).__name__}) — ignorando e começando vazio.")
+        return {}
+    return dados
 
 
 def salvar_treinos(dados: dict):
