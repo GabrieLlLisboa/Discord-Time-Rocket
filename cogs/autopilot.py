@@ -4,10 +4,7 @@ from discord import app_commands
 import os
 import random
 import time
-from datetime import datetime, timezone, timedelta
-
 from cogs.json_store import ler_json, salvar_json
-import cogs.atividade as atividade_mod
 
 # ─────────────────────────────────────────────
 #  Cog: Autopilot
@@ -22,9 +19,12 @@ CONFIG_PATH = "data/autopilot.json"
 CANAL_PADRAO_ID = int(os.getenv("AUTOPILOT_CHANNEL_ID", 0))
 
 # Intervalo (minutos) entre uma mensagem e outra — sorteado dentro dessa faixa
-# pra não ficar previsível / robótico.
-INTERVALO_MIN = int(os.getenv("AUTOPILOT_INTERVALO_MIN", 120))
-INTERVALO_MAX = int(os.getenv("AUTOPILOT_INTERVALO_MAX", 180))
+# pra não ficar previsível / robótico. Padrão: 3h a 5h.
+INTERVALO_MIN = int(os.getenv("AUTOPILOT_INTERVALO_MIN", 180))
+INTERVALO_MAX = int(os.getenv("AUTOPILOT_INTERVALO_MAX", 300))
+
+# Canal onde só rolam curiosidades de Rocket League (nada de curiosidade geral).
+CANAL_SO_RL_ID = 1511898323840405655
 
 
 def ler_config() -> dict:
@@ -105,91 +105,23 @@ CURIOSIDADES_GERAIS = [
 ]
 
 CATEGORIAS = {
-    "incentivo": INCENTIVO,
-    "brincadeira": BRINCADEIRAS,
     "curiosidade": CURIOSIDADES,
     "curiosidade_geral": CURIOSIDADES_GERAIS,
 }
 
-# ── Madrugada: nada de incentivo, só curiosidade/brincadeira ────────────────
-# Entre 00h e 06h (horário de Brasília, UTC-3) o bot não manda mensagens de
-# incentivo (nem a categoria "incentivo" nem o incentivo direcionado a membro
-# inativo) — nesse horário só rola curiosidade/curiosidade_geral/brincadeira.
-FUSO_BRASILIA = timezone(timedelta(hours=-3))
-MADRUGADA_INICIO = 0   # 00:00
-MADRUGADA_FIM = 6      # 06:00 (intervalo [0h, 6h))
-
-CATEGORIAS_BLOQUEADAS_MADRUGADA = {"incentivo"}
+# Canal exclusivo de RL: só curiosidades de Rocket League, nada de curiosidade geral.
+CATEGORIAS_SO_RL = {
+    "curiosidade": CURIOSIDADES,
+}
 
 
-def em_madrugada() -> bool:
-    hora_atual = datetime.now(FUSO_BRASILIA).hour
-    return MADRUGADA_INICIO <= hora_atual < MADRUGADA_FIM
-
-# ── Incentivo direcionado a membros inativos ────────────────────────────────
-# 70% das vezes (CHANCE_INCENTIVO_INATIVO), em vez de uma mensagem genérica,
-# o bot chama por nome/menção algum membro inativo — com prioridade pra quem
-# NUNCA mandou nenhuma mensagem — incentivando a pessoa a participar.
-CHANCE_INCENTIVO_INATIVO = 0.7
-
-INCENTIVO_DIRECIONADO = [
-    "Ei {mention}, ainda não te vimos por aqui no chat! Bora dar um alô? 👋",
-    "{mention} cadê você? O servidor tá esperando sua estreia no chat! 🚀",
-    "Psst, {mention}... já pensou em soltar o verbo aqui no chat hoje? Bora! 💬",
-    "{mention} tá guardando as palavras pra quê? Vem interagir com a galera! 😄",
-    "E aí {mention}, que tal quebrar o silêncio e mandar sua primeira mensagem hoje? 🎮",
-    "{mention}, o servidor sente sua falta no chat! Aparece aí! 🙌",
-    "Alguém viu o(a) {mention}? Ainda tá devendo aquele 'oi' pro servidor! 👀",
-    "{mention}, bora contar pra gente qual seu rank atual? Vem interagir! 🏆",
-]
-
-
-def _membro_ja_falou(dados_atividade: dict, membro: discord.Member) -> bool:
-    registro = dados_atividade.get(str(membro.id))
-    return bool(registro and registro.get("mensagens", 0) > 0)
-
-
-def _membro_ja_foi_anunciado(dados_atividade: dict, membro: discord.Member) -> bool:
-    registro = dados_atividade.get(str(membro.id))
-    return bool(registro and registro.get("anunciado", False))
-
-
-def _escolher_membro_inativo(guild: discord.Guild) -> discord.Member | None:
-    """Escolhe um membro inativo pra incentivar, priorizando quem NUNCA
-    mandou mensagem nenhuma. Ignora bots e quem entrou depois que o período
-    de avaliação de atividade já tinha começado."""
-    dados_atividade = ler_json(atividade_mod.DATA_PATH, {})
-
-    nunca_falaram = []
-    inativos_geral = []
-
-    for membro in guild.members:
-        if membro.bot:
-            continue
-        if atividade_mod.entrou_durante_periodo(membro):
-            continue
-        if _membro_ja_foi_anunciado(dados_atividade, membro):
-            continue  # já bateu a meta de atividade, não precisa de incentivo
-
-        inativos_geral.append(membro)
-        if not _membro_ja_falou(dados_atividade, membro):
-            nunca_falaram.append(membro)
-
-    if nunca_falaram:
-        return random.choice(nunca_falaram)
-    if inativos_geral:
-        return random.choice(inativos_geral)
-    return None
-
-
-def escolher_mensagem(ultima_categoria: str | None) -> tuple[str, str]:
+def escolher_mensagem(ultima_categoria: str | None, apenas_rl: bool = False) -> tuple[str, str]:
     """Escolhe uma categoria diferente da última (pra não repetir o mesmo tipo
-    de mensagem duas vezes seguidas) e sorteia uma mensagem dela.
-    Durante a madrugada (0h-6h, horário de Brasília), incentivo fica fora —
-    só curiosidade/curiosidade_geral/brincadeira."""
-    categorias_base = CATEGORIAS
-    if em_madrugada():
-        categorias_base = {c: msgs for c, msgs in CATEGORIAS.items() if c not in CATEGORIAS_BLOQUEADAS_MADRUGADA}
+    de mensagem duas vezes seguidas) e sorteia uma mensagem dela. Só rola
+    curiosidade normal / curiosidade geral — sem incentivo, sem brincadeira.
+    Se `apenas_rl` for True (canal exclusivo de RL), só entra curiosidade de
+    Rocket League."""
+    categorias_base = CATEGORIAS_SO_RL if apenas_rl else CATEGORIAS
 
     categorias_disponiveis = [c for c in categorias_base if c != ultima_categoria]
     if not categorias_disponiveis:
@@ -268,20 +200,8 @@ class Autopilot(commands.Cog):
             print(f"[AUTOPILOT] ⚠️ Canal {canal_id} não encontrado.")
             return
 
-        # 70% de chance de chamar especificamente algum membro inativo
-        # (com prioridade pra quem nunca mandou mensagem nenhuma). Se não
-        # tiver ninguém inativo pra incentivar, cai pro conteúdo normal.
-        # Não roda de madrugada — nesse horário é só curiosidade/brincadeira.
-        if not em_madrugada() and random.random() < CHANCE_INCENTIVO_INATIVO:
-            membro = _escolher_membro_inativo(canal.guild)
-            if membro is not None:
-                mensagem = random.choice(INCENTIVO_DIRECIONADO).format(mention=membro.mention)
-                config["ultima_categoria"] = "incentivo_direcionado"
-                salvar_config(config)
-                await canal.send(mensagem)
-                return
-
-        categoria, mensagem = escolher_mensagem(config.get("ultima_categoria"))
+        apenas_rl = canal_id == CANAL_SO_RL_ID
+        categoria, mensagem = escolher_mensagem(config.get("ultima_categoria"), apenas_rl=apenas_rl)
         config["ultima_categoria"] = categoria
         salvar_config(config)
 
