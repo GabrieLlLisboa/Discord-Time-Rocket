@@ -20,18 +20,18 @@ EXTRA_COACHES_FILE = "data/coaches_extra.json"
 # chave interna -> { user_id do coach, channel_id do canal dele, nome de exibição }
 COACHES: dict[str, dict] = {
     "isaque": {
-        "user_id": 1525158865426059274,
-        "channel_id": 1421693641184772147,
+        "user_id": 1421693641184772147,
+        "channel_id": 1525158865426059274,
         "nome": "Isaque",
     },
     "whei": {
-        "user_id": 1525158888393932860,
-        "channel_id": 1190705463310942208,
+        "user_id": 1190705463310942208,
+        "channel_id": 1525158888393932860,
         "nome": "Whei",
     },
     "borelli": {
-        "user_id": 1526771115538649128,
-        "channel_id": 1454478828910022742,
+        "user_id": 1454478828910022742,
+        "channel_id": 1526771115538649128,
         "nome": "Borelli",
     },
 }
