@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 #  uma janela curta de tempo) com o alvo do evento.
 # ─────────────────────────────────────────────
 
-LOG_CHANNEL_ID = 1521897698419019907
+LOG_CHANNEL_ID = None  # sem canal de logs configurado nesse servidor
 
 # ── Cores por categoria de evento ────────────────────────────────────────────
 COR_ENTRADA   = 0x57F287  # verde
@@ -53,6 +53,9 @@ class Logs(commands.Cog):
     # ── Helper central: manda um embed no canal de logs ─────────────────────
     async def log(self, title: str, description: str = "", color: int = COR_SERVIDOR,
                    fields: list | None = None, thumbnail: str | None = None):
+        if LOG_CHANNEL_ID is None:
+            return
+
         canal = self.bot.get_channel(LOG_CHANNEL_ID)
         if canal is None:
             try:
