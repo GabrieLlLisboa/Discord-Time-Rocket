@@ -48,7 +48,7 @@ COGS = [
     "cogs.tiktok",
     "cogs.backup",
     "cogs.stats",
-    "cogs.treino",
+    "cogs.treinos",
     "cogs.resultados",
     "cogs.tracker",
     "cogs.atividade",
@@ -61,6 +61,7 @@ COGS = [
     "cogs.auto_update",
     "cogs.demote",
     "cogs.coach_commands",
+    "cogs.tradutor",
     "cogs.quiz",
     "cogs.autopilot",
     "cogs.conversar",
@@ -130,22 +131,6 @@ async def registrar_views_persistentes():
             print(f"[VIEWS] ✅ {count} view(s) de campeonato(s) recarregada(s).")
     except Exception as e:
         print(f"[VIEWS] ⚠️  Erro ao recarregar views de campeonatos: {e}")
-
-    # Views de treinos em aberto (o botão "Entrar no Treino" precisa ser
-    # recriado com o custom_id certo pra continuar funcionando)
-    try:
-        from cogs.treino import EntrarTreinoView, ler_treinos
-        treinos = ler_treinos()
-        count = 0
-        for chave, info in treinos.items():
-            fechado = not info.get("inscricoes_abertas", True)
-            bot.add_view(EntrarTreinoView(chave, fechado=fechado))
-            count += 1
-        if count:
-            print(f"[VIEWS] ✅ {count} view(s) de treino(s) recarregada(s).")
-    except Exception as e:
-        print(f"[VIEWS] ⚠️  Erro ao recarregar views de treinos: {e}")
-
 
     # Sistema de Coaches: um botão "Comprar Atendimento" por coach + um
     # botão "Avaliar Coach" para cada ticket já finalizado mas ainda sem
@@ -243,7 +228,10 @@ async def on_ready():
 
     try:
         await bot.change_presence(
-            activity=discord.Game(name="Rocket League")
+            activity=discord.Activity(
+                type=discord.ActivityType.watching,
+                name="TryHarders RL"
+            )
         )
     except discord.HTTPException:
         pass

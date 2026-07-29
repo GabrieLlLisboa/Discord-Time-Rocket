@@ -68,7 +68,7 @@ def _rank_display(rank_nome: str) -> str:
 
 def construir_embed_info(info: dict) -> discord.Embed:
     """Mensagem 1: informações do campeonato (não muda depois de criada)."""
-    embed = discord.Embed(title=f"🏆 Campeonato: {info['nome']}", color=0xFF5A1F)
+    embed = discord.Embed(title=f"🏆 Campeonato: {info['nome']}", color=0xD4A843)
     embed.add_field(name="🎮 Rank exigido", value=_rank_display(info["rank"]), inline=True)
     embed.add_field(name="⚔️ Formato", value=info["formato"], inline=True)
     embed.add_field(name="🌍 Tipo", value=info["tipo"], inline=True)
@@ -84,7 +84,7 @@ def construir_embed_resposta(info: dict, canal: discord.abc.GuildChannel) -> dis
     embed = discord.Embed(
         title=f"🏆 Novo campeonato: {info['nome']}",
         description=f"As inscrições já estão abertas em {canal.mention}!",
-        color=0xFF5A1F,
+        color=0xD4A843,
     )
     embed.add_field(name="🎮 Rank exigido", value=_rank_display(info["rank"]), inline=True)
     embed.add_field(name="⚔️ Formato", value=info["formato"], inline=True)
@@ -100,7 +100,7 @@ def construir_embed_lista(info: dict) -> discord.Embed:
     embed = discord.Embed(
         title=f"📋 Lista de inscritos — {info['nome']}",
         description="\n".join(f"▸ <@{uid}>" for uid in inscritos.keys()) if inscritos else "*— ninguém inscrito ainda —*",
-        color=0xFF5A1F,
+        color=0xD4A843,
     )
     embed.set_footer(text=f"{len(inscritos)} inscrito(s)")
     embed.timestamp = datetime.now(timezone.utc)
@@ -191,14 +191,11 @@ class PaisModal(discord.ui.Modal, title="Inscrição no Torneio"):
 
         info["inscritos"][str(interaction.user.id)] = {"pais": str(self.pais)}
         salvar_campeonatos(dados)
-
-        # Responde JÁ (dado já salvo) — atualizar a lista e dar o cargo são
-        # chamadas de rede que podem demorar mais que os 3s do Discord.
+        await _atualizar_lista(self.bot, self.chave)
+        await _dar_cargo(self.bot, info, interaction.user.id)
         await interaction.response.send_message(
             f"✅ Inscrição confirmada no campeonato **{info['nome']}**!", ephemeral=True
         )
-        await _atualizar_lista(self.bot, self.chave)
-        await _dar_cargo(self.bot, info, interaction.user.id)
 
 
 # ── View de confirmação quando o rank não bate ───────────────────────────────
@@ -300,10 +297,8 @@ class ConfirmarExclusaoView(discord.ui.View):
 
     @discord.ui.button(label="Sim, apagar", style=discord.ButtonStyle.danger)
     async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Confirma JÁ — apagar de verdade envolve várias chamadas de rede
-        # (deletar 2 mensagens + o cargo) que podem passar dos 3s do Discord.
-        await interaction.response.edit_message(content="🗑️ Campeonato apagado.", view=None)
         await _apagar_campeonato(self.bot, self.chave)
+        await interaction.response.edit_message(content="🗑️ Campeonato apagado.", view=None)
 
     @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary)
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -378,11 +373,6 @@ class Campeonato(commands.Cog):
             )
             return
 
-        # Confirma a interação JÁ, antes de criar cargo/mensagens — criar cargo
-        # às vezes demora mais que os 3s que o Discord dá, e sem isso o
-        # comando aparecia como "não respondeu a tempo" mesmo funcionando.
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
         info = {
             "nome": nome,
             "rank": rank.value,
@@ -413,7 +403,7 @@ class Campeonato(commands.Cog):
 
         # Responde só pra você, de forma discreta — o anúncio de verdade vai
         # como mensagem própria do bot, sem aparecer como resposta ao seu comando
-        await interaction.followup.send("✅ Campeonato criado!", ephemeral=True)
+        await interaction.response.send_message("✅ Campeonato criado!", ephemeral=True)
 
         canal = interaction.channel
         msg_info = await canal.send(embed=construir_embed_info(info), view=EntrarTorneioView(chave))
@@ -494,6 +484,9 @@ class Campeonato(commands.Cog):
                 ids_novos.append(membro.id)
 
         salvar_campeonatos(dados)
+        await _atualizar_lista(self.bot, chave)
+        for membro_id in ids_novos:
+            await _dar_cargo(self.bot, info, membro_id)
 
         partes = []
         if inscritos_agora:
@@ -501,14 +494,7 @@ class Campeonato(commands.Cog):
         if ja_estavam:
             partes.append(f"⚠️ Já estavam inscritos (ignorados): {', '.join(ja_estavam)}")
 
-        # Responde JÁ (dados já salvos) — atualizar lista e dar cargo pra
-        # cada membro novo são várias chamadas de rede que, com vários
-        # membros de uma vez, facilmente passam dos 3s do Discord.
         await interaction.response.send_message("\n".join(partes) or "⚠️ Nada pra fazer.", ephemeral=True)
-
-        await _atualizar_lista(self.bot, chave)
-        for membro_id in ids_novos:
-            await _dar_cargo(self.bot, info, membro_id)
 
     @torneiar.error
     async def torneiar_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -564,8 +550,8 @@ class Campeonato(commands.Cog):
 
         info["inscricoes_abertas"] = False
         salvar_campeonatos(dados)
-        await interaction.response.send_message(f"🔒 Inscrições de **{info['nome']}** fechadas.", ephemeral=True)
         await _atualizar_botao_inscricao(self.bot, chave, fechado=True)
+        await interaction.response.send_message(f"🔒 Inscrições de **{info['nome']}** fechadas.", ephemeral=True)
 
     @fechar_inscricoes.error
     async def fechar_inscricoes_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -593,8 +579,8 @@ class Campeonato(commands.Cog):
 
         info["inscricoes_abertas"] = True
         salvar_campeonatos(dados)
-        await interaction.response.send_message(f"✅ Inscrições de **{info['nome']}** reabertas.", ephemeral=True)
         await _atualizar_botao_inscricao(self.bot, chave, fechado=False)
+        await interaction.response.send_message(f"✅ Inscrições de **{info['nome']}** reabertas.", ephemeral=True)
 
     @abrir_inscricoes.error
     async def abrir_inscricoes_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):

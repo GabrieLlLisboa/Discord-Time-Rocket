@@ -23,13 +23,10 @@ from cogs.json_store import ler_json, salvar_json
 
 # ───────────────── CONFIGURAÇÕES (preencha os IDs do seu servidor) ─────────────────
 STAFF_ROLE_IDS = [
-    1529150684296122438,   # Sub-Dono
-    1529241192183627947,   # Tag de Staff
+    1511895253777649704,   # Dono do Clube
+    1511894837790769204,   # Sub-Dono
+    1523843469016043600,   # Tag de Staff
 ]                                             # cargos que enxergam os canais de quarentena
-
-# Dono do Clube não é mais um cargo — é uma pessoa específica, então é
-# mencionada separadamente (por ID de usuário) junto com os cargos acima.
-DONO_CLUBE_USER_ID = 1487452210605588592
 
 MEMBRO_ROLE_ID = 0                           # não há cargo de "Membro" no servidor — deixado em 0,
                                               # então essa etapa é simplesmente pulada.
@@ -42,7 +39,7 @@ QUARENTENA_CATEGORY_NAME = "🔒 Quarentena"
 DIAS_QUARENTENA = 7
 INTERVALO_VERIFICACAO_MINUTOS = 30           # de quanto em quanto tempo o bot checa expiração
 
-LOG_CHANNEL_ID = 1529234118557306971         # canal onde o bot manda o log de tudo que faz aqui
+LOG_CHANNEL_ID = 1521897698419019907         # canal onde o bot manda o log de tudo que faz aqui
 
 DATA_FILE = "data/quarentena.json"
 
@@ -51,13 +48,13 @@ MENSAGEM_QUARENTENA = (
     "Durante nosso período de avaliação, não identificamos atividade suficiente da sua "
     "parte. Para manter o clube ativo, jogadores inativos passam por esta etapa antes de "
     "uma remoção definitiva.\n\n"
-    "Caso deseje continuar fazendo parte da **Ignition RL**, basta responder neste canal "
+    "Caso deseje continuar fazendo parte da **TryHarders RL**, basta responder neste canal "
     "dentro de **7 dias**.\n\n"
     "Se não houver nenhuma resposta nesse período, você será removido automaticamente do clube."
 )  # legado — não é mais usada pelo !demotar, só fica aqui pra não quebrar quarentenas antigas
 
 MENSAGEM_REMOCAO_FINAL = (
-    "Olá! Você foi removido da **Ignition RL** porque não houve nenhuma interação "
+    "Olá! Você foi removido da **TryHarders RL** porque não houve nenhuma interação "
     "durante o período de quarentena de 7 dias.\n\n"
     "Caso queira receber uma nova oportunidade para voltar ao clube, entre em contato com "
     "**ravokes** pelo Discord. Após a análise da Staff, você poderá receber uma nova chance "
@@ -123,7 +120,7 @@ class Demote(commands.Cog):
             description=MENSAGEM_EXPULSAO_DIRETA,
             color=0xED4245,
         )
-        embed.set_footer(text="Ignition RL")
+        embed.set_footer(text="TryHarders RL")
         try:
             await membro.send(embed=embed)
             return True
@@ -289,7 +286,7 @@ class Demote(commands.Cog):
             try:
                 await membro.send(
                     "✅ Sua quarentena foi encerrada e você continua fazendo parte da "
-                    "**Ignition RL**. Bem-vindo(a) de volta à atividade!"
+                    "**TryHarders RL**. Bem-vindo(a) de volta à atividade!"
                 )
             except discord.Forbidden:
                 pass
@@ -356,7 +353,7 @@ class Demote(commands.Cog):
         try:
             await membro.send(
                 "✅ Sua quarentena foi encerrada e você continua fazendo parte da "
-                "**Ignition RL**. Bem-vindo(a) de volta à atividade!"
+                "**TryHarders RL**. Bem-vindo(a) de volta à atividade!"
             )
         except discord.Forbidden:
             pass
@@ -440,7 +437,7 @@ class Demote(commands.Cog):
         try:
             await membro.send(
                 "✅ Você foi marcado(a) como ativo(a) e sua quarentena foi encerrada. "
-                "Bem-vindo(a) de volta à atividade na **Ignition RL**!"
+                "Bem-vindo(a) de volta à atividade na **TryHarders RL**!"
             )
         except discord.Forbidden:
             pass
@@ -490,9 +487,6 @@ class Demote(commands.Cog):
             role.mention for rid in STAFF_ROLE_IDS
             if (role := message.guild.get_role(rid)) is not None
         ]
-        dono = message.guild.get_member(DONO_CLUBE_USER_ID)
-        if dono:
-            mencoes.append(dono.mention)
         mencao = " ".join(mencoes) if mencoes else "Staff"
 
         nomes_cargos = ", ".join(r.name for r in cargos_restaurados) if cargos_restaurados else "Nenhum cargo para restaurar"
@@ -589,7 +583,7 @@ class Demote(commands.Cog):
                             description=MENSAGEM_REMOCAO_FINAL,
                             color=0xED4245,
                         )
-                        embed.set_footer(text="Ignition RL")
+                        embed.set_footer(text="TryHarders RL")
                         await membro.send(embed=embed)
                     except discord.Forbidden:
                         pass

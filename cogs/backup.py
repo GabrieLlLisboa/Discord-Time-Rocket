@@ -28,11 +28,6 @@ FILES = {
     # demais arquivos em caso de corrupção. AGORA ele participa do mesmo
     # ciclo de backup/restauração que todos os outros arquivos de dados.
     "campeonatos":  "data/campeonatos.json",
-    "pedidos_rank": "data/pedidos_rank.json",
-    # Sistema de treinos "estilo torneio" (cogs/treino.py) — nome de arquivo
-    # diferente do antigo data/treinos.json (que era do agendador simples
-    # que existia antes) pra nunca mais colidir formatos.
-    "treino_inscricoes": "data/treino_inscricoes.json",
 }
 
 os.makedirs(DATA_DIR, exist_ok=True)

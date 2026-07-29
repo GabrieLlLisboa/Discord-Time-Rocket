@@ -10,16 +10,17 @@ from cogs.backup import ler, salvar, agora_str
 # ─────────────────────────────────────────────
 
 RANKS_IDS = {
-    1529152122942390366: ("🌌", "Super Sonic Legend"),
-    1529152259630305402: ("👑", "Grand Champion"),
-    1529152654629142679: ("🏅", "Champion"),
-    1529153925486215350: ("💎", "Diamante"),
-    1529154068314849450: ("🪙", "Platina"),
-    1529160458769006804: ("📋", "Coach"),
+    1514772134327488642: ("🌌", "Super Sonic Legend"),
+    1513343857125752992: ("👑", "Grand Champion"),
+    1512304793534861313: ("🏅", "Champion"),
+    1512305401075466320: ("💎", "Diamante"),
+    1512305547544625273: ("🪙", "Platina"),
+    1512571913849933956: ("🥇", "Ouro"),
+    1513356584946896946: ("📋", "Coach"),
     1513240072139309317: ("🎬", "Editor de vídeo"),
-    1529150684296122438: ("🥈", "Sub-Dono"),
+    1511894837790769204: ("🥈", "Sub-Dono"),
 }
-ADMIN_ROLE_ID = 1529150684296122438
+ADMIN_ROLE_ID = 1511894837790769204
 
 
 def obter_rank(member: discord.Member) -> str:
@@ -67,19 +68,19 @@ class Stats(commands.Cog):
 
         embed = discord.Embed(
             title=f"👤  {membro.display_name}",
-            color=0xFF5A1F,
+            color=0xD4A843,
         )
         embed.set_thumbnail(url=membro.display_avatar.url)
         embed.add_field(name="\u200b", value="```╔══════════  📋  PERFIL  ══════════╗```", inline=False)
         embed.add_field(name="🏷️  Cargo",          value=rank,         inline=True)
         embed.add_field(name="📅  Entrou em",       value=entrou_em,    inline=True)
         embed.add_field(name="🗓️  Conta criada",    value=conta_criada, inline=True)
-        embed.add_field(name="\u200b", value="```╔══════════  🚗  AMISTOSOS  ══════════╗```", inline=False)
+        embed.add_field(name="\u200b", value="```╔══════════  ⚽  AMISTOSOS  ══════════╗```", inline=False)
         embed.add_field(name="🎮  Disputados", value=f"`{amistosos}`", inline=True)
         embed.add_field(name="✅  Vitórias",   value=f"`{vitorias}`",  inline=True)
         embed.add_field(name="❌  Derrotas",   value=f"`{derrotas}`",  inline=True)
         embed.add_field(name="📊  Winrate",    value=f"`{winrate}`",   inline=True)
-        embed.set_footer(text=f"Ignition RL • {agora_str()}")
+        embed.set_footer(text=f"TryHarders RL • {agora_str()}")
 
         await interaction.response.send_message(embed=embed)
 
@@ -96,7 +97,7 @@ class Stats(commands.Cog):
 
         embed = discord.Embed(
             title="📋  Histórico de Amistosos",
-            color=0xFF5A1F,
+            color=0xD4A843,
         )
 
         for a in amistosos[-10:][::-1]:  # últimos 10, mais recente primeiro
@@ -107,7 +108,7 @@ class Stats(commands.Cog):
                 f"{resultado}{' — ' + placar if placar else ''}"
             )
             embed.add_field(
-                name=f"🆚  Ignition vs {a['adversario']}",
+                name=f"🆚  TryHarders vs {a['adversario']}",
                 value=valor,
                 inline=False,
             )

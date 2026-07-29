@@ -10,7 +10,7 @@ from cogs.backup import ler, salvar
 #  /treino — agenda e lembra 30 min antes
 # ─────────────────────────────────────────────
 
-ADMIN_ROLE_ID = 1529150684296122438
+ADMIN_ROLE_ID = 1511894837790769204
 
 
 def parse_data(data_str: str, hora_str: str) -> datetime | None:
@@ -85,8 +85,8 @@ class Treinos(commands.Cog):
         dt_relativo = discord.utils.format_dt(dt, style="R")
 
         embed = discord.Embed(
-            title="🔥  Treino Marcado!",
-            color=0xFF5A1F,
+            title="🎯  Treino Agendado!",
+            color=0xD4A843,
         )
         embed.add_field(name="📅  Data e Hora",  value=f"{dt_discord} ({dt_relativo})", inline=False)
         embed.add_field(name="📝  Descrição",    value=descricao,                        inline=False)
@@ -120,7 +120,7 @@ class Treinos(commands.Cog):
             )
             return
 
-        embed = discord.Embed(title="🔥  Próximos Treinos", color=0xFF5A1F)
+        embed = discord.Embed(title="🎯  Próximos Treinos", color=0xD4A843)
         for t in proximos[:5]:
             dt      = datetime.fromisoformat(t["timestamp"])
             relativo = discord.utils.format_dt(dt, style="R")
@@ -152,13 +152,13 @@ class Treinos(commands.Cog):
                     if canal:
                         dt_discord = discord.utils.format_dt(dt, style="t")
                         embed = discord.Embed(
-                            title="🔥  Bora Treinar!",
+                            title="⏰  Lembrete de Treino!",
                             description="O treino começa em menos de **30 minutos**!",
                             color=0xED4245,
                         )
                         embed.add_field(name="🕐  Horário", value=dt_discord,      inline=True)
                         embed.add_field(name="📝  Descrição", value=t["descricao"], inline=True)
-                        embed.set_footer(text="Ignition RL — Partiu treino! 🔥")
+                        embed.set_footer(text="TryHarders RL — Bora treinar! 🚀")
                         await canal.send(embed=embed)
                         print(f"[TREINO] ⏰ Lembrete enviado para treino #{t['id']}")
 

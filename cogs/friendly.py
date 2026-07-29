@@ -3,31 +3,23 @@ from discord.ext import commands
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 
-AMISTOSOS_CHANNEL_ID = 1529233878617817220
-
-# Dono do Clube não é mais um cargo — é uma pessoa específica (mesmo ID usado
-# em cogs/players.py, cogs/conversar.py, cogs/atividade.py e cogs/auto_update.py).
-DONO_CLUBE_USER_ID = 1487452210605588592
+AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
 # Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
-# pelo sistema de coaches — ver cogs/coach_config.py).
+# pelo sistema de coaches — ver cogs/coach_config.py). Antes havia apenas
+# um ADMIN_ROLE_ID; agora são dois cargos, e qualquer um dos dois basta.
 ADMIN_ROLE_IDS = {
-    1529150684296122438,
+    1511895253777649704,
+    1511894837790769204,
 }
 
-
-def _pode_gerenciar_amistoso(user: discord.Member) -> bool:
-    """Dono do Clube (por ID) ou qualquer um dos cargos em ADMIN_ROLE_IDS."""
-    if user.id == DONO_CLUBE_USER_ID:
-        return True
-    return any(role.id in ADMIN_ROLE_IDS for role in getattr(user, "roles", []))
-
 RANKS = {
-    "Super Sonic Legend": 1529152122942390366,
-    "Grand Champion":     1529152259630305402,
-    "Champion":           1529152654629142679,
-    "Diamante":           1529153925486215350,
-    "Platina":            1529154068314849450,
+    "Super Sonic Legend": 1514772134327488642,
+    "Grand Champion":     1513343857125752992,
+    "Champion":           1512304793534861313,
+    "Diamante":           1512305401075466320,
+    "Platina":            1512305547544625273,
+    "Ouro":               1512571913849933956,
 }
 
 RANK_EMOJIS = {
@@ -36,6 +28,7 @@ RANK_EMOJIS = {
     "Champion":           "🏅",
     "Diamante":           "💎",
     "Platina":            "🪙",
+    "Ouro":               "🥇",
 }
 
 
@@ -166,11 +159,6 @@ class ConfirmarPresencaView(discord.ui.View):
         amistoso["confirmados"].append(membro.id)
         salvar("amistosos", amistosos)
 
-        # Participar de amistoso também conta como atividade
-        atividade_cog = interaction.client.get_cog("Atividade")
-        if atividade_cog is not None:
-            await atividade_cog.marcar_ativo_por_amistoso(membro)
-
         # Atualiza embed do anúncio a partir da lista canônica (JSON)
         await _atualizar_embed_confirmados(interaction.message, interaction.guild, amistoso["confirmados"])
 
@@ -183,7 +171,7 @@ class ConfirmarPresencaView(discord.ui.View):
             await canal_amistoso.send(f"✅ {membro.mention} confirmou presença!")
 
         await interaction.response.send_message(
-            f"✅ Presença confirmada! Você agora tem acesso a {canal_amistoso.mention if canal_amistoso else 'o canal do amistoso'}. 🔥",
+            f"✅ Presença confirmada! Você agora tem acesso a {canal_amistoso.mention if canal_amistoso else 'o canal do amistoso'}. 🚀",
             ephemeral=True
         )
         print(f"[AMISTOSO] ✅ {membro} confirmou presença.")
@@ -222,11 +210,6 @@ async def criar_amistoso(
     mencao_str   = " ".join(guild.get_role(rid).mention for rid in ranks_ids if guild.get_role(rid))
     rank_salvo   = " + ".join(nomes_ranks)
 
-    # Confirma a interação JÁ, antes de criar o canal — criar canal às vezes
-    # demora mais que os 3s que o Discord dá, e sem isso o comando aparecia
-    # como "não respondeu a tempo" mesmo funcionando.
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
     nome_canal = "amistoso-" + "".join(c if c.isalnum() or c == "-" else "-" for c in adversario.lower().strip())
     nome_canal = nome_canal[:50]
 
@@ -234,9 +217,6 @@ async def criar_amistoso(
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         guild.me:           discord.PermissionOverwrite(view_channel=True, send_messages=True),
     }
-    dono = guild.get_member(DONO_CLUBE_USER_ID)
-    if dono:
-        overwrites[dono] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
     for admin_role_id in ADMIN_ROLE_IDS:
         admin_role = guild.get_role(admin_role_id)
         if admin_role:
@@ -249,7 +229,7 @@ async def criar_amistoso(
         reason=f"Amistoso vs {adversario} criado por {interaction.user}"
     )
 
-    embed = discord.Embed(title="🚗  RACHA ANUNCIADO", color=0xFF5A1F)
+    embed = discord.Embed(title="⚽  AMISTOSO ANUNCIADO", color=0xD4A843)
     embed.add_field(name="\u200b", value="```╔══════════  📋  DETALHES  ══════════╗```", inline=False)
     embed.add_field(name="🆚  Adversário",  value=f"**{adversario}**", inline=True)
     embed.add_field(name="📅  Data / Hora", value=f"**{data_hora}**",  inline=True)
@@ -266,7 +246,7 @@ async def criar_amistoso(
 
     canal_anuncio = interaction.client.get_channel(AMISTOSOS_CHANNEL_ID)
     if canal_anuncio is None:
-        await interaction.followup.send("❌ Canal de amistosos não encontrado.", ephemeral=True)
+        await interaction.response.send_message("❌ Canal de amistosos não encontrado.", ephemeral=True)
         return
 
     view_conf   = ConfirmarPresencaView(rank_alvo=rank_salvo, rank_id=ranks_ids[0], canal_amistoso_id=canal_amistoso.id, rank_ids_extras=ranks_ids)
@@ -288,7 +268,7 @@ async def criar_amistoso(
     salvar("amistosos", amistosos)
 
     embed_canal = discord.Embed(
-        title=f"🚗 Amistoso vs {adversario}",
+        title=f"⚽ Amistoso vs {adversario}",
         description=(
             f"Bem-vindos ao canal do amistoso!\n\n"
             f"**🏅 Rank:** {rank_display}\n"
@@ -296,10 +276,10 @@ async def criar_amistoso(
             + (f"**📝 Info:** {info_extra}\n" if info_extra else "") +
             "\nSe quiser desistir, clique no botão abaixo."
         ),
-        color=0xFF5A1F
+        color=0xD4A843
     )
     await canal_amistoso.send(embed=embed_canal, view=SairAmistosoView())
-    await interaction.followup.send(f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}", ephemeral=True)
+    await interaction.response.send_message(f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}", ephemeral=True)
     print(f"[AMISTOSO] ✅ {interaction.user} anunciou amistoso vs {adversario} — {rank_salvo}")
 
 
@@ -355,7 +335,7 @@ class Friendly(commands.Cog):
             print(f"[AMISTOSO] 🗑️ Canal {canal.name} deletado junto com o anúncio.")
 
     @app_commands.command(name="amistoso", description="Anuncia um amistoso no canal de amistosos.")
-    @app_commands.check(lambda interaction: _pode_gerenciar_amistoso(interaction.user))
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     @app_commands.describe(
         adversario="Nome do time adversário",
         data_hora="Data e horário (ex: 15/06 às 20h00)",
@@ -376,8 +356,8 @@ class Friendly(commands.Cog):
 
     @amistoso.error
     async def amistoso_error(self, interaction: discord.Interaction, error):
-        if isinstance(error, app_commands.CheckFailure):
-            await interaction.response.send_message("❌ Apenas o **Dono do Clube** ou **Administradores** podem anunciar amistosos.", ephemeral=True)
+        if isinstance(error, app_commands.MissingRole):
+            await interaction.response.send_message("❌ Apenas **Administradores** podem anunciar amistosos.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

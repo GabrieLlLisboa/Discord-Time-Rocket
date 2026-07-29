@@ -12,7 +12,7 @@ CARGOS_NOTIFICACAO = {
     "amistosos": {
         "id":    1514788829695971378,
         "label": "Notificação Amistosos",
-        "emoji": "🚗",
+        "emoji": "⚽",
         "desc":  "Seja avisado sobre amistosos.",
     },
     "anuncios": {
@@ -22,7 +22,7 @@ CARGOS_NOTIFICACAO = {
         "desc":  "Receba os anúncios do servidor.",
     },
     "novo_jogador": {
-        "id":    1529241383930695700,
+        "id":    1514788887300538531,
         "label": "Notificação Novo Jogador",
         "emoji": "🆕",
         "desc":  "Saiba quando um novo jogador entrar.",
@@ -34,7 +34,7 @@ CARGOS_NOTIFICACAO = {
         "desc":  "Comemore cada vitória do time!",
     },
     "video_novo": {
-        "id":    1529241281023180930,
+        "id":    1515158913555894443,
         "label": "Notificação Vídeo Novo",
         "emoji": "🎵",
         "desc":  "Seja avisado quando sair vídeo novo no TikTok.",
@@ -118,7 +118,7 @@ class Notifications(commands.Cog):
             description=(
                 "Selecione abaixo quais notificações deseja receber.\n"
                 "Clique novamente em uma opção já ativa para **remover**.\n\n"
-                "🚗 **Amistosos** — Avisos de partidas amistosas\n"
+                "⚽ **Amistosos** — Avisos de partidas amistosas\n"
                 "📢 **Anúncios** — Novidades e comunicados\n"
                 "🆕 **Novo Jogador** — Entrada de novos membros\n"
                 "🏆 **Vitória** — Comemorações de vitória\n"

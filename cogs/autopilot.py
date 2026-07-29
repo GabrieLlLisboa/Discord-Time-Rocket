@@ -18,13 +18,13 @@ import cogs.atividade as atividade_mod
 
 CONFIG_PATH = "data/autopilot.json"
 
-# Canal padrão: chat geral (pode ser sobrescrito por /autopilot_canal ou pelo .env)
-CANAL_PADRAO_ID = int(os.getenv("AUTOPILOT_CHANNEL_ID", 1529233653052346398))
+# Canal padrão (pode ser sobrescrito por /autopilot_canal ou pelo .env)
+CANAL_PADRAO_ID = int(os.getenv("AUTOPILOT_CHANNEL_ID", 0))
 
 # Intervalo (minutos) entre uma mensagem e outra — sorteado dentro dessa faixa
 # pra não ficar previsível / robótico.
-INTERVALO_MIN = int(os.getenv("AUTOPILOT_INTERVALO_MIN", 30))
-INTERVALO_MAX = int(os.getenv("AUTOPILOT_INTERVALO_MAX", 40))
+INTERVALO_MIN = int(os.getenv("AUTOPILOT_INTERVALO_MIN", 120))
+INTERVALO_MAX = int(os.getenv("AUTOPILOT_INTERVALO_MAX", 180))
 
 
 def ler_config() -> dict:
@@ -43,26 +43,12 @@ def salvar_config(dados: dict) -> None:
 # ── Conteúdo ─────────────────────────────────────────────────────────────────
 INCENTIVO = [
     "💪 Bora treinar hoje? Todo Grand Champion um dia já foi Bronze também.",
-    "🔥 Lembrete do dia: aim ruim se treina, rotação ruim se treina, atitude ruim... também dá pra treinar 😏",
+    "🚀 Lembrete do dia: aim ruim se treina, rotação ruim se treina, atitude ruim... também dá pra treinar 😏",
     "🔥 Depois de um dia difícil de rank, lembra: até o Squishy já teve dia ruim de mira.",
     "🏆 Cada partida é uma chance de aprender algo novo. Bora pra treinos hoje?",
     "⚡ Se você perdeu uma partida hoje, isso não te define. Levanta e chama o próximo amistoso!",
     "🎯 Foco no processo, não só no resultado. Boost management ganha mais partida que mecânica bonita.",
     "🥇 Quem treina consistência é quem sobe de elo. Nada de sessão de 8h só uma vez por mês, hein!",
-    "🚀 Rank não sobe sozinho: cada treino de hoje é um degrau pro seu próximo elo.",
-    "😤 Perdeu de shot no último segundo? Guarda a raiva, chama o próximo amistoso e desconta em campo.",
-    "🎮 Aquele mecânico que você treina hoje e erra 10 vezes, semana que vem você acerta sem pensar.",
-    "🔥 Não existe jogador ruim, existe jogador que ainda não treinou o suficiente. Bora nessa!",
-    "💥 Um dia de treino não muda nada. Um mês de treino muda tudo. Continua!",
-    "🏋️ Freeplay 20 minutinhos por dia já faz diferença gigante no seu aim depois de algumas semanas.",
-    "🧠 Rank também é mental: descansa a cabeça antes de tiltar a sessão inteira.",
-    "🎯 Cada replay que você assiste dos seus próprios jogos te ensina mais que 10 partidas jogando no automático.",
-    "⭐ Não compara sua jornada com a dos outros. Compara você hoje com você de 1 mês atrás.",
-    "🥊 Time que se comunica sobe junto. Chama o call e treina rotação com a galera!",
-    "🚧 Travou de rank? É sinal que chegou a hora de mudar o treino, não de desistir.",
-    "🏆 Quem não erra flip reset é porque não tenta. Continua tentando, o resultado vem.",
-    "💡 Assistir replay de pro player ensina mais posicionamento do que qualquer dica de chat.",
-    "🔋 Boost mal usado é rank perdido. Treina economia de boost hoje, é de graça e muda o jogo.",
 ]
 
 BRINCADEIRAS = [
@@ -84,7 +70,7 @@ CURIOSIDADES = [
     "📚 Curiosidade: existem mais de 15 mapas diferentes no modo competitivo padrão ao longo da história do jogo.",
     "📚 Você sabia? Um 'ceiling shot' usa o teto do mapa pra pegar impulso antes de finalizar — é uma das mecânicas mais avançadas.",
     # ── Curiosidade especial do servidor ──
-    "🔥 Você sabia que o criador do flip reset está no nosso servidor? É o **fyshokid**! 👀",
+    "🚀 Você sabia que o criador do flip reset está no nosso servidor? É o **fyshokid**! 👀",
     # ── Recordes e histórico de RLCS ──
     "🏆 Curiosidade RLCS: alguns jogadores acumulam anos de campeonato sem nunca terem levantado um troféu mundial — a pressão no cenário competitivo é gigante.",
     "🥇 Curiosidade RLCS: os times europeus dominam boa parte dos títulos mundiais da história da competição.",
@@ -99,20 +85,6 @@ CURIOSIDADES = [
     "🎲 Aleatório do dia: se Rocket League ganhasse um mapa novo amanhã, que tema vocês queriam? Espaço, deserto, praia?",
     "🎲 Pergunta sem nexo: se você pudesse trocar seu carro por qualquer carro do jogo, qual escolheria e por quê?",
     "🎲 Curiosidade aleatória: sabia que dá pra jogar Rocket League com o carro andando de ré o jogo inteiro? Ninguém faz isso, mas dá.",
-    "📚 Você sabia? O Rocket League roda a 120 quadros por segundo no PC quando o hardware permite, o que ajuda demais na precisão dos inputs.",
-    "📚 Curiosidade: o modo Hoops (basquete) e o Dropshot (piso que quebra) são variações oficiais do próprio jogo, não são mods.",
-    "🚗 Você sabia? O carro Octane é de longe o mais usado no competitivo por causa do hitbox (a 'caixa' de colisão) considerada mais equilibrada.",
-    "🏟️ Curiosidade: o mapa DFH Stadium foi um dos primeiros do jogo e ainda é usado no competitivo até hoje.",
-    "🎮 Você sabia? Rocket League já teve crossplay entre PlayStation, Xbox, Switch e PC bem antes de virar padrão em outros jogos.",
-    "🥅 Curiosidade: existe um recorde de gol mais rápido de uma partida — feito literalmente nos primeiros segundos do jogo.",
-    "🔧 Você sabia? Cada carro tem uma 'hitbox' diferente (Octane, Dominus, Breakout, etc.), mesmo que a aparência visual mude, a física de colisão pode ser igual entre alguns modelos.",
-    "🏆 Curiosidade RLCS: já teve final de mundial decidida na prorrogação, com milhões de espectadores assistindo ao vivo.",
-    "🌐 Você sabia? Rocket League tem servidores dedicados em várias regiões do mundo, e o matchmaking tenta te colocar sempre no de menor ping.",
-    "⚡ Curiosidade: o 'air roll' foi uma das mecânicas que mais mudou o nível competitivo do jogo desde que virou popular.",
-    "🎨 Você sabia? Existem itens puramente cosméticos no jogo que já foram revendidos por milhares de dólares no mercado de trocas.",
-    "🛞 Curiosidade: as rodas do carro são só estética — elas não influenciam em nada na física ou na velocidade do carro.",
-    "📅 Você sabia? O Rocket League completou 10 anos de existência em 2025, um marco gigante pra um jogo de carros com bola.",
-    "🤖 Curiosidade: bots do próprio jogo (nível fácil, médio, difícil) são usados até por pro players pra treinar mecânicas específicas.",
 ]
 
 CURIOSIDADES_GERAIS = [
@@ -130,20 +102,6 @@ CURIOSIDADES_GERAIS = [
     "🦴 Curiosidade: os ossos humanos são, proporcionalmente, mais resistentes que o aço — pra sustentar o mesmo peso, pesam bem menos.",
     "🍇 Você sabia? Uvas podem soltar faíscas se colocadas no micro-ondas, por causa da forma como concentram energia eletromagnética.",
     "🐧 Curiosidade: os pinguins-imperador conseguem mergulhar a mais de 500 metros de profundidade pra caçar.",
-    "🌕 Você sabia? A Lua está se afastando da Terra cerca de 3,8 cm por ano.",
-    "🐙 Curiosidade: polvos conseguem mudar a cor E a textura da pele em menos de 1 segundo pra se camuflar.",
-    "🧊 Você sabia? A água quente pode congelar mais rápido que a água fria em certas condições — é o chamado 'efeito Mpemba'.",
-    "🦋 Curiosidade: borboletas sentem gosto com as patas, não com a boca.",
-    "🌙 Você sabia? Um dia em Vênus é mais longo que um ano em Vênus, porque o planeta gira muito devagar em torno do próprio eixo.",
-    "🐘 Curiosidade: elefantes são os únicos mamíferos que não conseguem pular, por causa da estrutura das patas.",
-    "🍫 Você sabia? O chocolate branco tecnicamente não é chocolate, porque não contém sólidos de cacau, só manteiga de cacau.",
-    "🦷 Curiosidade: o esmalte dos dentes é a substância mais dura do corpo humano, mais até que os ossos.",
-    "🌊 Você sabia? Mais de 80% dos oceanos da Terra ainda não foram explorados ou mapeados pelo ser humano.",
-    "🐦 Curiosidade: os beija-flores são as únicas aves capazes de voar pra trás.",
-    "🧬 Você sabia? Humanos compartilham cerca de 60% do DNA com bananas.",
-    "🕷️ Curiosidade: as teias de algumas aranhas são tão resistentes que, proporcionalmente, seriam mais fortes que o aço.",
-    "🌡️ Você sabia? O corpo humano perde mais calor pela cabeça só porque ela costuma ficar exposta, não porque tem alguma propriedade especial.",
-    "🐢 Curiosidade: algumas espécies de tartaruga conseguem viver mais de 100 anos, e algumas até passam dos 150.",
 ]
 
 CATEGORIAS = {
@@ -176,7 +134,7 @@ CHANCE_INCENTIVO_INATIVO = 0.7
 
 INCENTIVO_DIRECIONADO = [
     "Ei {mention}, ainda não te vimos por aqui no chat! Bora dar um alô? 👋",
-    "{mention} cadê você? O servidor tá esperando sua estreia no chat! 🔥",
+    "{mention} cadê você? O servidor tá esperando sua estreia no chat! 🚀",
     "Psst, {mention}... já pensou em soltar o verbo aqui no chat hoje? Bora! 💬",
     "{mention} tá guardando as palavras pra quê? Vem interagir com a galera! 😄",
     "E aí {mention}, que tal quebrar o silêncio e mandar sua primeira mensagem hoje? 🎮",
@@ -196,24 +154,15 @@ def _membro_ja_foi_anunciado(dados_atividade: dict, membro: discord.Member) -> b
     return bool(registro and registro.get("anunciado", False))
 
 
-# Depois de chamar alguém, esse membro fica "de fora" por um tempo — assim o
-# incentivo direcionado roda entre todo mundo elegível, em vez de sempre cair
-# na mesma pessoa (ex: só tem 1 membro que nunca falou nada, então sem esse
-# cooldown ele seria escolhido toda vez).
-COOLDOWN_INCENTIVO_MEMBRO_SEG = 3 * 60 * 60  # 3 horas
-
-
 def _escolher_membro_inativo(guild: discord.Guild) -> discord.Member | None:
-    """Escolhe um membro inativo pra incentivar, dando prioridade (mas não
-    exclusividade) a quem NUNCA mandou mensagem nenhuma, e evitando repetir
-    a mesma pessoa antes do cooldown passar — pra rodar entre todo mundo
-    elegível em vez de martelar sempre a mesma."""
+    """Escolhe um membro inativo pra incentivar, priorizando quem NUNCA
+    mandou mensagem nenhuma. Ignora bots e quem entrou depois que o período
+    de avaliação de atividade já tinha começado."""
     dados_atividade = ler_json(atividade_mod.DATA_PATH, {})
-    config = ler_config()
-    ultimos_incentivos = config.setdefault("ultimo_incentivo", {})
-    agora = time.time()
 
-    candidatos = []
+    nunca_falaram = []
+    inativos_geral = []
+
     for membro in guild.members:
         if membro.bot:
             continue
@@ -222,27 +171,15 @@ def _escolher_membro_inativo(guild: discord.Guild) -> discord.Member | None:
         if _membro_ja_foi_anunciado(dados_atividade, membro):
             continue  # já bateu a meta de atividade, não precisa de incentivo
 
-        ultimo = ultimos_incentivos.get(str(membro.id), 0)
-        if agora - ultimo < COOLDOWN_INCENTIVO_MEMBRO_SEG:
-            continue  # foi chamado(a) recentemente, dá espaço pros outros
+        inativos_geral.append(membro)
+        if not _membro_ja_falou(dados_atividade, membro):
+            nunca_falaram.append(membro)
 
-        candidatos.append(membro)
-
-    if not candidatos:
-        return None
-
-    nunca_falaram = [m for m in candidatos if not _membro_ja_falou(dados_atividade, m)]
-    # 70% de chance de priorizar quem nunca falou nada (se tiver alguém nessa
-    # situação disponível); os outros 30% dão chance pra quem já falou pouco
-    # mas segue inativo — evita ficar só em cima de 1 pessoa.
-    if nunca_falaram and random.random() < 0.7:
-        escolhido = random.choice(nunca_falaram)
-    else:
-        escolhido = random.choice(candidatos)
-
-    ultimos_incentivos[str(escolhido.id)] = agora
-    salvar_config(config)
-    return escolhido
+    if nunca_falaram:
+        return random.choice(nunca_falaram)
+    if inativos_geral:
+        return random.choice(inativos_geral)
+    return None
 
 
 def escolher_mensagem(ultima_categoria: str | None) -> tuple[str, str]:

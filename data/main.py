@@ -96,7 +96,10 @@ async def on_ready():
         print(f"[SLASH] ❌ Erro ao sincronizar: {e}")
 
     await bot.change_presence(
-        activity=discord.Game(name="Rocket League")
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name="TryHarders RL"
+        )
     )
 
 async def main():

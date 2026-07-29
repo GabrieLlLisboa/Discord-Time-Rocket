@@ -7,8 +7,6 @@ import re
 import os
 import random
 
-from cogs.json_store import ler_json, salvar_json
-
 # ─────────────────────────────────────────────
 #  Cog: TikTok Notifier — Multi-layer fallback
 #  Arquivo: cogs/tiktok.py
@@ -20,14 +18,10 @@ from cogs.json_store import ler_json, salvar_json
 #    5. RSS via TikTok RSS Bridge
 # ─────────────────────────────────────────────
 
-TIKTOK_CHANNEL_ID_PADRAO = 1515151647641178193
-TIKTOK_USER          = "ignition.rl"
-VIDEO_NOVO_ROLE_ID   = 1529241281023180930
+TIKTOK_CHANNEL_ID = 1515151647641178193
+TIKTOK_USER          = "tryharders.rl"
+VIDEO_NOVO_ROLE_ID   = 1515158913555894443
 LAST_VIDEO_FILE   = "last_tiktok.txt"
-
-# Onde fica salvo o canal configurado via !setup-tiktok / !canal-tiktok —
-# se ainda não foi configurado, usa TIKTOK_CHANNEL_ID_PADRAO acima.
-TIKTOK_CONFIG_PATH = "data/tiktok_config.json"
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -321,15 +315,10 @@ class TikTok(commands.Cog):
         self.bot          = bot
         self.ultimo_video = carregar_ultimo_video()
         self.falhas       = 0
-        self.config       = ler_json(TIKTOK_CONFIG_PATH, {})  # {"canal_id": 123...}
         self.verificar_tiktok.start()
 
     def cog_unload(self):
         self.verificar_tiktok.cancel()
-
-    def get_canal_id(self) -> int:
-        """Canal configurado via !setup-tiktok, ou o padrão se ninguém configurou ainda."""
-        return self.config.get("canal_id", TIKTOK_CHANNEL_ID_PADRAO)
 
     @tasks.loop(minutes=30)
     async def verificar_tiktok(self):
@@ -354,10 +343,10 @@ class TikTok(commands.Cog):
     # seja usado de propósito).
     async def _checar_e_notificar(self, forcar: bool = False) -> str:
         """Retorna uma mensagem curta descrevendo o que aconteceu (pra usar na resposta do comando)."""
-        canal = self.bot.get_channel(self.get_canal_id())
+        canal = self.bot.get_channel(TIKTOK_CHANNEL_ID)
         if canal is None:
-            print(f"[TIKTOK] ⚠️  Canal {self.get_canal_id()} não encontrado.")
-            return f"⚠️ Canal `{self.get_canal_id()}` não encontrado."
+            print(f"[TIKTOK] ⚠️  Canal {TIKTOK_CHANNEL_ID} não encontrado.")
+            return f"⚠️ Canal `{TIKTOK_CHANNEL_ID}` não encontrado."
 
         video = await buscar_ultimo_video()
 
@@ -393,12 +382,12 @@ class TikTok(commands.Cog):
         mencao = cargo.mention if cargo else ""
 
         embed = discord.Embed(
-            title="🔥  A Ignition RL soltou um vídeo novo!",
-            color=0xFF5A1F,
+            title="🎵  A TryHarders RL postou um vídeo novo!",
+            color=0xD4A843,
         )
         embed.add_field(name="📌  Título", value=video["titulo"], inline=False)
         embed.add_field(name="🔗  Link",   value=video["url"],    inline=False)
-        embed.set_footer(text="TikTok • @ignition.rl")
+        embed.set_footer(text="TikTok • @tryharders.rl")
         embed.timestamp = discord.utils.utcnow()
 
         await canal.send(content=mencao if mencao else None, embed=embed)
@@ -429,26 +418,6 @@ class TikTok(commands.Cog):
         else:
             raise error
 
-    # ── Comando: configura em qual canal os vídeos do TikTok são postados.
-    # Uso: !setup-tiktok #canal  (ou sem argumento pra usar o canal atual).
-    # Fica salvo em cogs/data/tiktok_config.json, então sobrevive a restart.
-    @commands.command(name="setup-tiktok", aliases=["canal-tiktok"])
-    @commands.has_permissions(manage_guild=True)
-    async def setup_tiktok(self, ctx: commands.Context, canal: discord.TextChannel = None):
-        canal = canal or ctx.channel
-        self.config["canal_id"] = canal.id
-        salvar_json(TIKTOK_CONFIG_PATH, self.config)
-        await ctx.send(f"✅ Vídeos novos do TikTok (@{TIKTOK_USER}) agora são postados em {canal.mention}.")
-
-    @setup_tiktok.error
-    async def setup_tiktok_error(self, ctx: commands.Context, error: commands.CommandError):
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ Você precisa de permissão de **Gerenciar Servidor** pra usar esse comando.")
-        elif isinstance(error, commands.ChannelNotFound):
-            await ctx.send("❌ Não achei esse canal. Marca o canal (`#nome`) ou usa o ID dele.")
-        else:
-            raise error
-
     # ── Comando manual: cola o link e o bot posta o anúncio na hora, sem
     # depender do scraping automático. Serve pra casos como vídeo fixado
     # atrapalhando a detecção, TikTok bloqueando a raspagem, ou só pra
@@ -461,9 +430,9 @@ class TikTok(commands.Cog):
     async def video_novo(self, interaction: discord.Interaction, link: str):
         await interaction.response.defer()
 
-        canal = self.bot.get_channel(self.get_canal_id())
+        canal = self.bot.get_channel(TIKTOK_CHANNEL_ID)
         if canal is None:
-            await interaction.followup.send(f"⚠️ Canal `{self.get_canal_id()}` não encontrado.")
+            await interaction.followup.send(f"⚠️ Canal `{TIKTOK_CHANNEL_ID}` não encontrado.")
             return
 
         try:
@@ -495,12 +464,12 @@ class TikTok(commands.Cog):
         mencao = cargo.mention if cargo else ""
 
         embed = discord.Embed(
-            title="🔥  A Ignition RL soltou um vídeo novo!",
-            color=0xFF5A1F,
+            title="🎵  A TryHarders RL postou um vídeo novo!",
+            color=0xD4A843,
         )
         embed.add_field(name="📌  Título", value=video["titulo"], inline=False)
         embed.add_field(name="🔗  Link",   value=video["url"],    inline=False)
-        embed.set_footer(text="TikTok • @ignition.rl")
+        embed.set_footer(text="TikTok • @tryharders.rl")
         embed.timestamp = discord.utils.utcnow()
 
         await canal.send(content=mencao if mencao else None, embed=embed)

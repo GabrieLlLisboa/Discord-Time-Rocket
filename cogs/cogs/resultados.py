@@ -64,7 +64,7 @@ FRASES_JOGO = [
 ]
 
 FRASES_RESULTADO = {
-    "vitoria": "Mas mesmo assim: **Ganhamos!** 🔥🏆",
+    "vitoria": "Mas mesmo assim: **Ganhamos!** 🏆🚀",
     "derrota": "Mas mesmo assim: **Perdemos.** 💪 Cabeça erguida!",
     "empate":  "Mas mesmo assim: **Empatamos.** ⚖️",
 }
@@ -231,14 +231,14 @@ class Resultados(commands.Cog):
                 rank_amistoso = amistosos[amistoso_idx].get("rank", "") if amistoso_idx is not None else ""
 
                 embed_dm = discord.Embed(
-                    title=f"{titulo_resultado}  Ignition vs {adversario}",
+                    title=f"{titulo_resultado}  TryHarders vs {adversario}",
                     color=cores[resultado.value],
                 )
                 embed_dm.add_field(name="🆚  Adversário", value=f"**{adversario}**", inline=True)
                 if rank_amistoso:
                     embed_dm.add_field(name="🏅  Rank", value=f"**{rank_amistoso}**", inline=True)
                 if placar:
-                    embed_dm.add_field(name="🚗  Placar", value=f"**{placar}**", inline=True)
+                    embed_dm.add_field(name="⚽  Placar", value=f"**{placar}**", inline=True)
 
                 linhas_dm = [frase_jogo, frase_resultado]
                 if descricao:
@@ -253,7 +253,7 @@ class Resultados(commands.Cog):
                         inline=False,
                     )
 
-                embed_dm.set_footer(text="Ignition RL 🔥")
+                embed_dm.set_footer(text="TryHarders RL 🚀")
 
                 dm = await membro.create_dm()
                 if transcricao_arquivo:
@@ -280,7 +280,7 @@ class Resultados(commands.Cog):
         if rank_amistoso:
             embed_pub.add_field(name="🏅  Rank", value=f"**{rank_amistoso}**", inline=True)
         if placar:
-            embed_pub.add_field(name="🚗  Placar", value=f"**{placar}**", inline=True)
+            embed_pub.add_field(name="⚽  Placar", value=f"**{placar}**", inline=True)
 
         linhas_pub = [frase_jogo, frase_resultado]
         if descricao:
@@ -350,7 +350,7 @@ class Resultados(commands.Cog):
         empates  = sum(1 for r in resultados if r["resultado"] == "empate")
         winrate  = f"{round((vitorias / total) * 100)}%" if total > 0 else "—"
 
-        embed = discord.Embed(title="🔥  Placar da Squad Ignition", color=0xFF5A1F)
+        embed = discord.Embed(title="🏆  Placar TryHarders RL", color=0xD4A843)
         embed.add_field(name="\u200b", value="```╔══════════  📊  GERAL  ══════════╗```", inline=False)
         embed.add_field(name="🎮  Total",    value=f"`{total}`",    inline=True)
         embed.add_field(name="✅  Vitórias", value=f"`{vitorias}`", inline=True)
@@ -358,7 +358,7 @@ class Resultados(commands.Cog):
         embed.add_field(name="🤝  Empates",  value=f"`{empates}`",  inline=True)
         embed.add_field(name="📊  Winrate",  value=f"`{winrate}`",  inline=True)
 
-        embed.set_footer(text=f"Ignition RL • {agora_str()}")
+        embed.set_footer(text=f"TryHarders RL • {agora_str()}")
 
         if not resultados or len(resultados) <= 5:
             if resultados:
@@ -380,7 +380,7 @@ class Resultados(commands.Cog):
             embed_resumo = embed
 
             def montar_pagina(pagina, total, fatia, offset):
-                e = discord.Embed(title="🔥  Squad Ignition — Histórico de Jogos", color=0xFF5A1F)
+                e = discord.Embed(title="🏆  Placar TryHarders RL — Jogos", color=0xD4A843)
                 for i, r in enumerate(fatia):
                     num    = offset + i
                     emoji  = {"vitoria": "✅", "derrota": "❌", "empate": "🤝"}.get(r["resultado"], "❓")
@@ -476,7 +476,7 @@ class Resultados(commands.Cog):
                     color=0x808080,
                 )
                 embed_dm.add_field(name="📝  Motivo", value=motivo, inline=False)
-                embed_dm.set_footer(text="Ignition RL 🔥")
+                embed_dm.set_footer(text="TryHarders RL 🚀")
                 dm = await membro.create_dm()
                 await dm.send(embed=embed_dm)
                 dm_enviadas += 1
@@ -518,7 +518,7 @@ class Resultados(commands.Cog):
         from cogs.paginacao import paginar, PaginacaoView
 
         def montar_embed(pagina, total, fatia, offset):
-            embed = discord.Embed(title="📋  Resultados Registrados", color=0xFF5A1F)
+            embed = discord.Embed(title="📋  Resultados Registrados", color=0xD4A843)
             for i, r in enumerate(fatia):
                 num    = offset + i
                 emoji  = {"vitoria": "✅", "derrota": "❌", "empate": "🤝"}.get(r["resultado"], "❓")

@@ -19,9 +19,21 @@ EXTRA_COACHES_FILE = "data/coaches_extra.json"
 # ── Coaches ──────────────────────────────────────────────────────────────────
 # chave interna -> { user_id do coach, channel_id do canal dele, nome de exibição }
 COACHES: dict[str, dict] = {
-    # Coaches de fábrica removidos (eram do servidor antigo).
-    # Adicione novos coaches com o comando /adicionar-coach — eles ficam
-    # salvos em data/coaches_extra.json e recarregados automaticamente aqui.
+    "isaque": {
+        "user_id": 1421693641184772147,
+        "channel_id": 1525158865426059274,
+        "nome": "Isaque",
+    },
+    "whei": {
+        "user_id": 1190705463310942208,
+        "channel_id": 1525158888393932860,
+        "nome": "Whei",
+    },
+    "borelli": {
+        "user_id": 1454478828910022742,
+        "channel_id": 1526771115538649128,
+        "nome": "Borelli",
+    },
 }
 
 # Carrega os coaches adicionados via /adicionar-coach (persistidos em disco)
@@ -31,14 +43,10 @@ COACHES.update(ler_json(EXTRA_COACHES_FILE, dict))
 # ── Cargos autorizados a gerenciar/finalizar tudo relacionado a coaches ──────
 # (mesmos cargos usados para gerenciar/finalizar amistosos)
 MANAGER_ROLE_IDS: set[int] = {
-    1529150684296122438,
-    1529241192183627947,
+    1511895253777649704,
+    1511894837790769204,
+    1523843469016043600,
 }
-
-# Dono do Clube não é mais um cargo — é uma pessoa específica (mesmo ID usado
-# em cogs/players.py, cogs/friendly.py, cogs/resultados.py, cogs/conversar.py,
-# cogs/atividade.py e cogs/auto_update.py).
-DONO_CLUBE_USER_ID = 1487452210605588592
 
 # Categoria onde o canal de voz de cada atendimento é criado.
 CATEGORIA_VOZ_ID: int = 1525158787894218884
