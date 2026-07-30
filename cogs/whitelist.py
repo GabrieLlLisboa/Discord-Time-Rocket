@@ -283,6 +283,12 @@ class EscolhaSelect(discord.ui.Select):
             await self.cog.enviar_pergunta(interaction.channel, membro, "tempo")
             return
 
+        # Quem não tem TikTok pula o formulário de link e vai direto pras dúvidas
+        if self.step == "tem_tiktok" and valor == "Não":
+            self.cog.salvar_resposta(membro.id, "tiktok", "Não possui")
+            await self.cog.enviar_pergunta(interaction.channel, membro, "duvidas")
+            return
+
         if self.prox_step:
             await self.cog.enviar_pergunta(interaction.channel, membro, self.prox_step)
 
@@ -679,8 +685,12 @@ class Whitelist(commands.Cog):
             await canal.send("🎤 **Você tem microfone pra jogar?**", view=view)
 
         elif step == "ativo":
-            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "perguntas_abertas")
+            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "tem_tiktok")
             await canal.send("📈 **Você pretende ser um membro ativo na equipe?**", view=view)
+
+        elif step == "tem_tiktok":
+            view = EscolhaView(self, "tem_tiktok", ["Sim", "Não"], "Você tem TikTok?", "perguntas_abertas")
+            await canal.send("🎵 **Você tem conta no TikTok?**", view=view)
 
         elif step == "perguntas_abertas":
             embed = discord.Embed(
