@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 import asyncio
 import re
 import time
@@ -42,6 +43,10 @@ STATUS_LABELS = {
     "aprovada":    ("✅ Aprovada",   0x57F287),
     "recusada":    ("❌ Recusada",   0xED4245),
 }
+
+# Cargo "membro da equipe" — quem tem esse cargo pode usar /perfil-whitelist
+# pra consultar o perfil/respostas de whitelist de qualquer membro.
+CARGO_MEMBRO_EQUIPE_ID = 1532184563491541164
 
 # Cargo "membro da equipe" — NÃO é dado automaticamente no fim da whitelist
 # (deixado aqui só de referência, caso você use em outro lugar).
@@ -146,22 +151,11 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
 #  Modal: perguntas abertas (texto livre)
 # ─────────────────────────────────────────────
 class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
-    motivo_entrada = discord.ui.TextInput(
-        label="Por que você quer entrar no clube?",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=True,
-    )
-    reacao_regras = discord.ui.TextInput(
-        label="Reação a membro quebrando regra/confusão?",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=True,
-    )
-    motivo_aceitar = discord.ui.TextInput(
-        label="Por que deveríamos te aceitar?",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
+    tiktok = discord.ui.TextInput(
+        label="Qual o link da sua conta do TikTok?",
+        placeholder="Ex: https://www.tiktok.com/@seuusuario",
+        style=discord.TextStyle.short,
+        max_length=200,
         required=True,
     )
 
@@ -171,9 +165,7 @@ class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
 
     async def on_submit(self, interaction: discord.Interaction):
         membro = interaction.user
-        self.cog.salvar_resposta(membro.id, "motivo_entrada", self.motivo_entrada.value.strip())
-        self.cog.salvar_resposta(membro.id, "reacao_regras", self.reacao_regras.value.strip())
-        self.cog.salvar_resposta(membro.id, "motivo_aceitar", self.motivo_aceitar.value.strip())
+        self.cog.salvar_resposta(membro.id, "tiktok", self.tiktok.value.strip())
 
         await interaction.response.send_message("✅ Respostas registradas!")
         await self.cog.enviar_pergunta(interaction.channel, membro, "duvidas")
@@ -589,13 +581,10 @@ class Whitelist(commands.Cog):
 
         elif step == "perguntas_abertas":
             embed = discord.Embed(
-                title="📝 Últimas perguntas",
+                title="📝 Última pergunta",
                 description=(
-                    "Agora só faltam 3 perguntas rápidas com resposta em texto livre. "
-                    "Clica no botão abaixo pra abrir o formulário:\n\n"
-                    "• Por que você quer entrar no clube?\n"
-                    "• Como você reagiria se visse um membro quebrando as regras ou causando confusão?\n"
-                    "• Por que deveríamos aceitar você no clube?"
+                    "Só falta mais uma coisa. Clica no botão abaixo pra abrir o formulário:\n\n"
+                    "• Qual o link da sua conta do TikTok?"
                 ),
                 color=0x5865F2,
             )
@@ -655,9 +644,7 @@ class Whitelist(commands.Cog):
         embed_resumo.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
         embed_resumo.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed_resumo.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
-        embed_resumo.add_field(name="Por que quer entrar?", value=r.get("motivo_entrada", "—"), inline=False)
-        embed_resumo.add_field(name="Reação a quebra de regra", value=r.get("reacao_regras", "—"), inline=False)
-        embed_resumo.add_field(name="Por que devemos aceitar?", value=r.get("motivo_aceitar", "—"), inline=False)
+        embed_resumo.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
         embed_resumo.set_footer(text=f"ID: {membro.id}")
         await interaction.channel.send(embed=embed_resumo)
 
@@ -875,6 +862,47 @@ class Whitelist(commands.Cog):
     async def reprovar_whitelist_cmd_error(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
+
+    # ── /perfil-whitelist: mostra o perfil completo de whitelist de alguém ──
+    @app_commands.command(name="perfil-whitelist", description="[Staff] Vê o perfil/respostas da whitelist de um membro.")
+    @app_commands.describe(membro="Membro cujo perfil de whitelist você quer ver")
+    @app_commands.checks.has_role(CARGO_MEMBRO_EQUIPE_ID)
+    async def perfil_whitelist(self, interaction: discord.Interaction, membro: discord.Member):
+        registro = self.dados.get(str(membro.id))
+        if not registro:
+            await interaction.response.send_message(
+                "⚠️ Esse membro ainda não tem uma whitelist registrada.", ephemeral=True
+            )
+            return
+
+        r = registro.get("respostas", {})
+        status_label, status_cor = STATUS_LABELS.get(registro.get("status", "pendente"), ("—", 0x5865F2))
+
+        embed = discord.Embed(
+            title=f"📋 Perfil de Whitelist — {membro}",
+            color=status_cor,
+        )
+        embed.set_thumbnail(url=membro.display_avatar.url)
+        embed.add_field(name="Status", value=status_label, inline=True)
+        embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
+        embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
+        embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
+        embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
+        embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
+        embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
+        embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
+        embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
+        embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
+        embed.set_footer(text=f"ID: {membro.id}")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @perfil_whitelist.error
+    async def perfil_whitelist_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingRole):
+            await interaction.response.send_message(
+                "❌ Só quem tem o cargo de **Membro da Equipe** pode usar esse comando.", ephemeral=True
+            )
 
 
 async def setup(bot: commands.Bot):
