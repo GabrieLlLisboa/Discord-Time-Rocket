@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
+import random
 import re
 import time
 
@@ -10,6 +11,38 @@ from cogs.players import CARGOS as PLAYER_CARGOS
 
 # {"Ouro": id, "Platina": id, ...} — montado a partir dos cargos de rank já existentes
 CARGO_RANKS = {c["nome"]: c["id"] for c in PLAYER_CARGOS if c["secao"] == "rank"}
+
+# ── Incentivo/cobrança pra quem não termina a whitelist ─────────────────────
+# Só começa a incomodar 15 min depois do canal criado, e depois disso repete
+# a cada 10-15 min (sorteado), até a pessoa terminar (status sai de
+# "em_andamento") ou o canal ser apagado.
+INCENTIVO_ESPERA_INICIAL_SEGUNDOS = 15 * 60
+INCENTIVO_INTERVALO_MIN = 10
+INCENTIVO_INTERVALO_MAX = 15
+
+# Pra quem ainda nem começou a responder nada.
+INCENTIVO_NAO_COMECOU = [
+    "{mention} bora começar? 👀",
+    "{mention} tá esperando o quê pra começar a whitelist? 🚀",
+    "Ei {mention}, sua whitelist tá esperando você aqui! Bora começar? 😄",
+    "{mention} vem logo, é rapidinho! Bora começar a whitelist? 🙌",
+    "{mention} cadê você? Bora dar o start na whitelist! 💬",
+    "Psst {mention}... a whitelist não vai se responder sozinha, bora começar? 😅",
+    "{mention} só faltam alguns cliques pra você entrar de vez! Começa aí! 🎮",
+    "{mention} bora lá, não deixa isso esfriar! Começa a whitelist! 🔥",
+    "E aí {mention}, vamos começar a whitelist? Tá bem rápido! ⏱️",
+    "{mention} ainda dá tempo, bora começar sua whitelist agora! ✅",
+]
+
+# Pra quem já começou mas parou no meio do caminho.
+INCENTIVO_PAROU_NO_MEIO = [
+    "{mention} bora acabar? Você já começou, falta pouco! 💪",
+    "{mention} não para no meio não, vem terminar a whitelist! 🏁",
+    "Ei {mention}, você tava indo bem! Bora acabar a whitelist? 👀",
+    "{mention} falta só um pouquinho, vem finalizar! 🚀",
+    "{mention} volta aí e termina sua whitelist, já foi metade do caminho! 🙌",
+]
+
 
 # ─────────────────────────────────────────────
 #  Cog: Whitelist
@@ -347,9 +380,79 @@ class Whitelist(commands.Cog):
         self.bot = bot
         self.dados = ler("whitelist")  # {user_id_str: {"respostas": {...}, "canal_id":..., "status":...}}
         self.limpeza_canais.start()
+        self.incentivo_whitelist.start()
 
     def cog_unload(self):
         self.limpeza_canais.cancel()
+        self.incentivo_whitelist.cancel()
+
+    @tasks.loop(minutes=1)
+    async def incentivo_whitelist(self):
+        """Cobra (de forma chata mesmo, de propósito) quem não terminou a
+        whitelist: manda mensagem no canal dele a cada 10-15 min, começando
+        só 15 min depois do canal ter sido criado."""
+        await self.bot.wait_until_ready()
+        agora = time.time()
+        mudou = False
+
+        for uid_str, registro in list(self.dados.items()):
+            if registro.get("status") != "em_andamento":
+                continue
+
+            canal_id = registro.get("canal_id")
+            if not canal_id:
+                continue
+
+            criado_ts = registro.get("criado_ts")
+            if not criado_ts:
+                # Registro antigo, sem criado_ts salvo — começa a contar a
+                # partir de agora, não vamos disparar retroativamente.
+                registro["criado_ts"] = agora
+                mudou = True
+                continue
+
+            if agora - criado_ts < INCENTIVO_ESPERA_INICIAL_SEGUNDOS:
+                continue
+
+            proximo_ts = registro.get("proximo_incentivo_ts")
+            if not proximo_ts:
+                registro["proximo_incentivo_ts"] = agora
+                mudou = True
+                proximo_ts = agora
+
+            if agora < proximo_ts:
+                continue
+
+            canal = self.bot.get_channel(canal_id)
+            if canal is None:
+                registro["proximo_incentivo_ts"] = agora + random.randint(INCENTIVO_INTERVALO_MIN, INCENTIVO_INTERVALO_MAX) * 60
+                mudou = True
+                continue
+
+            membro = canal.guild.get_member(int(uid_str))
+            if membro is None:
+                registro["proximo_incentivo_ts"] = agora + random.randint(INCENTIVO_INTERVALO_MIN, INCENTIVO_INTERVALO_MAX) * 60
+                mudou = True
+                continue
+
+            ja_comecou = bool(registro.get("respostas"))
+            lista = INCENTIVO_PAROU_NO_MEIO if ja_comecou else INCENTIVO_NAO_COMECOU
+            mensagem = random.choice(lista).format(mention=membro.mention)
+
+            try:
+                await canal.send(mensagem)
+            except discord.HTTPException:
+                pass
+
+            registro["proximo_incentivo_ts"] = agora + random.randint(INCENTIVO_INTERVALO_MIN, INCENTIVO_INTERVALO_MAX) * 60
+            mudou = True
+
+        if mudou:
+            salvar("whitelist", self.dados)
+
+    @incentivo_whitelist.before_loop
+    async def antes_incentivo_whitelist(self):
+        await self.bot.wait_until_ready()
 
     @tasks.loop(minutes=1)
     async def limpeza_canais(self):
@@ -499,7 +602,7 @@ class Whitelist(commands.Cog):
             reason=f"Whitelist de {member}",
         )
 
-        self.dados[str(member.id)] = {"respostas": {}, "status": "em_andamento", "canal_id": canal.id}
+        self.dados[str(member.id)] = {"respostas": {}, "status": "em_andamento", "canal_id": canal.id, "criado_ts": time.time()}
         salvar("whitelist", self.dados)
 
         embed = discord.Embed(
