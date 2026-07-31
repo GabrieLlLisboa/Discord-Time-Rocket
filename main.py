@@ -16,6 +16,24 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 
+
+@bot.before_invoke
+async def apagar_mensagem_do_comando(ctx: commands.Context):
+    """Roda antes de QUALQUER comando de prefixo (!setup, !clear, etc).
+    Apaga a mensagem de quem digitou o comando, pra manter o canal limpo,
+    sem precisar repetir 'ctx.message.delete()' em cada cog.
+
+    Só chega até aqui depois que os checks de permissão passaram, então um
+    comando negado por falta de permissão não apaga a mensagem (o autor
+    ainda vê o próprio comando e o aviso de erro)."""
+    if ctx.guild is None:
+        # Em DM não existe permissão de gerenciar mensagens pra apagar.
+        return
+    try:
+        await ctx.message.delete()
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        pass
+
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
     import traceback

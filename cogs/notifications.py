@@ -111,8 +111,6 @@ class Notifications(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def notificacoes(self, ctx: commands.Context):
         """Envia o painel de seleção de notificações no canal atual."""
-        await ctx.message.delete()
-
         embed = discord.Embed(
             title="🔔 Notificações",
             description=(

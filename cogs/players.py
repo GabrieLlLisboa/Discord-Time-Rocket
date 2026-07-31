@@ -278,7 +278,6 @@ class Players(commands.Cog):
     @commands.command(name="atualizarjogadores")
     @commands.has_permissions(administrator=True)
     async def forcar_atualizacao(self, ctx: commands.Context):
-        await ctx.message.delete()
         channel = self.bot.get_channel(JOGADORES_CHANNEL_ID)
         await self._editar_ou_criar(channel)
         await ctx.send("✅ Lista de jogadores atualizada!", delete_after=4)
@@ -298,10 +297,6 @@ class Players(commands.Cog):
             color=0xD4A843,
         )
         await ctx.send(embed=embed, view=PainelRankView())
-        try:
-            await ctx.message.delete()
-        except discord.HTTPException:
-            pass
 
     @setup_rank.error
     async def setup_rank_error(self, ctx: commands.Context, error: commands.CommandError):

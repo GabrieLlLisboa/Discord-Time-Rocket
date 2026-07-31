@@ -364,6 +364,20 @@ _TEXTO_TEMPO = {
     "10min_ambos": "10 minutos",
 }
 
+# Aviso extra que acompanha o lembrete, pedindo pra quem não vai poder
+# participar sair do amistoso — assim a lista de confirmados fica sempre
+# atualizada. No canal, o botão vai anexado na própria mensagem. Na DM não
+# dá pra anexar o botão (ele só funciona dentro do canal do amistoso), então
+# o texto pede pra clicar por lá.
+_AVISO_SAIR_CANAL = (
+    "\n\n📌 Gostaríamos de lembrar que, se você não pode participar, aperte "
+    "no botão de sair anexado a esta mensagem — isso torna tudo mais organizado."
+)
+_AVISO_SAIR_DM = (
+    "\n\n📌 Gostaríamos de lembrar que, se você não pode participar, aperte "
+    "no botão de sair no canal do amistoso — isso torna tudo mais organizado."
+)
+
 
 # ── Cog ───────────────────────────────────────────────────────────────────────
 class Friendly(commands.Cog):
@@ -475,6 +489,8 @@ class Friendly(commands.Cog):
                 try:
                     await canal.send(
                         f"⏰ **Faltam {tempo_texto} pro amistoso vs {adversario}!** ({data_hora})\n{mencoes}"
+                        f"{_AVISO_SAIR_CANAL}",
+                        view=SairAmistosoView(),
                     )
                 except discord.HTTPException as e:
                     print(f"[AMISTOSO] ⚠️ Erro ao mandar lembrete no canal: {e}")
@@ -491,6 +507,7 @@ class Friendly(commands.Cog):
                     await usuario.send(
                         f"⏰ **Faltam {tempo_texto} pro seu amistoso vs {adversario}!** ({data_hora})\n"
                         f"Não esquece de aparecer! 🚀"
+                        f"{_AVISO_SAIR_DM}"
                     )
                 except discord.Forbidden:
                     pass  # DM fechada — nada a fazer

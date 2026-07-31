@@ -183,7 +183,6 @@ class GraficoJogadores(commands.Cog):
     @commands.command(name="atualizargrafico")
     @commands.has_permissions(administrator=True)
     async def forcar_atualizacao(self, ctx: commands.Context):
-        await ctx.message.delete()
         if not MATPLOTLIB_OK:
             await ctx.send("❌ `matplotlib` não está instalado no servidor do bot. Rode `pip install matplotlib`.", delete_after=8)
             return

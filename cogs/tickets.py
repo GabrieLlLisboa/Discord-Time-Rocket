@@ -242,8 +242,6 @@ class Tickets(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def setup(self, ctx: commands.Context):
         """Envia o painel de abertura de tíquetes no canal atual."""
-        await ctx.message.delete()
-
         embed = discord.Embed(
             title="🎫 Central de Suporte",
             description=(

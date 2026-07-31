@@ -368,10 +368,6 @@ class ModSetup(commands.Cog):
         """Envia o painel de moderação com botões neste canal."""
         view = PainelModeracaoView()
         await ctx.send(embed=_embed_painel(ctx.guild), view=view)
-        try:
-            await ctx.message.delete()
-        except discord.HTTPException:
-            pass
 
     @setup_moderacao.error
     async def setup_moderacao_error(self, ctx: commands.Context, error: commands.CommandError):

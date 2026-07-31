@@ -19,8 +19,6 @@ class Clear(commands.Cog):
           !clear all    → apaga todas as mensagens (até 1000)
           !clear 50     → apaga as últimas 50 mensagens
         """
-        await ctx.message.delete()
-
         if quantidade is None:
             await ctx.send(
                 "⚠️ Use `!clear all` ou `!clear <número>` (ex: `!clear 50`)",

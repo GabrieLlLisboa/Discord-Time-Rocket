@@ -1090,7 +1090,6 @@ class Whitelist(commands.Cog):
     @commands.command(name="whitelist")
     @commands.has_permissions(administrator=True)
     async def whitelist_manual(self, ctx: commands.Context, membro: discord.Member):
-        await ctx.message.delete()
         canal = await self.criar_canal_whitelist(membro)
         await ctx.send(f"✅ Canal de whitelist pronto: {canal.mention}", delete_after=6)
 

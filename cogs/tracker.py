@@ -205,8 +205,6 @@ class Tracker(commands.Cog):
     @commands.command(name="tracker")
     async def tracker(self, ctx: commands.Context):
         """Envia o painel de consulta de rank do Rocket League."""
-        await ctx.message.delete()
-
         embed = discord.Embed(
             title="🚀  Consulta de Rank — Rocket League",
             description=(
