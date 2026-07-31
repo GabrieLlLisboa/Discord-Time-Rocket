@@ -342,6 +342,145 @@ class Resultados(commands.Cog):
         )
         print(f"[RESULTADO] ✅ {resultado.value} vs {adversario} | DMs: {dm_enviadas}/{len(confirmados_ids)}")
 
+    # ── /finalizar-amistoso ───────────────────────────────────────────────────
+    @app_commands.command(
+        name="finalizar-amistoso",
+        description="Encerra o amistoso deste canal: avisa os confirmados por DM e apaga os canais (texto e voz)."
+    )
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    @app_commands.describe(mensagem="Mensagem opcional pra mandar junto do aviso de encerramento")
+    async def finalizar_amistoso(
+        self,
+        interaction: discord.Interaction,
+        mensagem: str = "",
+    ):
+        """
+        Só encerra o amistoso: usado DE DENTRO do canal do próprio amistoso,
+        não pede resultado/placar — é só pra fechar tudo (avisa por DM,
+        avisa no canal de anúncios e apaga o canal de texto + o de voz).
+        Pra registrar vitória/derrota/placar pro histórico e ranking, use
+        `/resultado` (fora do canal) ou peça esse comando de volta caso
+        precise dessa versão detalhada.
+        """
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.channel_id == AMISTOSOS_CHANNEL_ID:
+            await interaction.followup.send(
+                "❌ Esse comando precisa ser usado **dentro do canal do amistoso** "
+                "(o canal privado criado quando o amistoso foi anunciado), não aqui.",
+                ephemeral=True
+            )
+            return
+
+        amistosos = ler("amistosos")
+
+        amistoso_idx = None
+        for i, a in enumerate(amistosos):
+            if a.get("canal_id") == interaction.channel_id:
+                amistoso_idx = i
+                break
+
+        if amistoso_idx is None:
+            await interaction.followup.send(
+                "❌ Não encontrei nenhum amistoso vinculado a este canal.",
+                ephemeral=True
+            )
+            return
+
+        amistoso           = amistosos[amistoso_idx]
+        adversario         = amistoso["adversario"]
+        confirmados_ids    = amistoso.get("confirmados", [])
+        canal_amistoso     = interaction.channel  # o próprio canal onde o comando rodou
+        canal_voz_id       = amistoso.get("canal_voz_id")
+        canal_voz_amistoso = self.bot.get_channel(canal_voz_id) if canal_voz_id else None
+
+        # Marca como encerrado (se ainda não tinha resultado registrado por
+        # /resultado), só pra não ficar reaparecendo em lembretes/reconstrução
+        # de botões depois de o canal já ter sido apagado.
+        if not amistoso.get("resultado"):
+            amistoso["resultado"] = "🏁 Encerrado"
+            salvar("amistosos", amistosos)
+
+        # ── DM pra cada jogador confirmado ─────────────────────────────────
+        dm_enviadas = 0
+        dm_falhas   = 0
+        for mid in confirmados_ids:
+            membro = interaction.guild.get_member(mid)
+            if membro is None:
+                continue
+            try:
+                embed_dm = discord.Embed(
+                    title="🏁 Amistoso Encerrado",
+                    description=f"O amistoso contra **{adversario}** foi encerrado.",
+                    color=0xD4A843,
+                )
+                if mensagem:
+                    embed_dm.add_field(name="📝 Aviso", value=mensagem, inline=False)
+                embed_dm.set_footer(text="TryHarders RL 🚀")
+                dm = await membro.create_dm()
+                await dm.send(embed=embed_dm)
+                dm_enviadas += 1
+            except discord.Forbidden:
+                dm_falhas += 1
+                print(f"[FINALIZAR] ⚠️ Não foi possível enviar DM para {membro}.")
+
+        # ── Avisa no canal de anúncios (reply na mensagem original) ────────
+        canal_pub = self.bot.get_channel(AMISTOSOS_CHANNEL_ID)
+        if canal_pub:
+            embed_pub = discord.Embed(
+                title="🏁 Amistoso Encerrado",
+                description=f"O amistoso contra **{adversario}** foi encerrado.",
+                color=0xD4A843,
+            )
+            if mensagem:
+                embed_pub.add_field(name="📝 Aviso", value=mensagem, inline=False)
+            embed_pub.set_footer(text=f"Encerrado por {interaction.user.display_name}")
+
+            msg_amistoso = None
+            msg_anuncio_id = amistoso.get("msg_anuncio_id")
+            if msg_anuncio_id:
+                try:
+                    msg_amistoso = await canal_pub.fetch_message(msg_anuncio_id)
+                except discord.HTTPException as e:
+                    print(f"[FINALIZAR] ⚠️ Não achei a mensagem do anúncio original: {e}")
+
+            if msg_amistoso:
+                await msg_amistoso.reply(embed=embed_pub)
+            else:
+                await canal_pub.send(embed=embed_pub)
+
+        # ── Responde a interação (o canal ainda existe nesse momento) ──────
+        await interaction.followup.send(
+            f"✅ Amistoso vs **{adversario}** encerrado.\n"
+            f"📬 DMs enviadas: `{dm_enviadas}` | ❌ Falhas: `{dm_falhas}`\n"
+            f"🗑️ Este canal e o de voz serão apagados em instantes...",
+            ephemeral=True
+        )
+
+        # ── Deleta o canal do amistoso e o de voz ──────────────────────────
+        await asyncio.sleep(3)
+        try:
+            await canal_amistoso.delete(reason=f"Amistoso vs {adversario} encerrado via /finalizar-amistoso.")
+            print(f"[FINALIZAR] 🗑️ Canal {canal_amistoso.name} deletado.")
+        except Exception as e:
+            print(f"[FINALIZAR] ⚠️ Erro ao deletar canal: {e}")
+
+        if canal_voz_amistoso:
+            try:
+                await canal_voz_amistoso.delete(reason=f"Amistoso vs {adversario} encerrado via /finalizar-amistoso.")
+                print(f"[FINALIZAR] 🗑️ Canal de voz {canal_voz_amistoso.name} deletado.")
+            except Exception as e:
+                print(f"[FINALIZAR] ⚠️ Erro ao deletar canal de voz: {e}")
+
+        print(f"[FINALIZAR] ✅ Amistoso vs {adversario} encerrado por {interaction.user} | DMs: {dm_enviadas}/{len(confirmados_ids)}")
+
+    @finalizar_amistoso.error
+    async def finalizar_amistoso_error(self, interaction: discord.Interaction, error):
+        if isinstance(error, app_commands.MissingRole):
+            await interaction.response.send_message(
+                "❌ Apenas **Administradores** podem finalizar amistosos.", ephemeral=True
+            )
+
     @resultado.error
     async def resultado_error(self, interaction: discord.Interaction, error):
         if isinstance(error, app_commands.MissingRole):
