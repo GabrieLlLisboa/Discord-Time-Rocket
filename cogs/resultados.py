@@ -154,6 +154,7 @@ class Resultados(commands.Cog):
         # amistoso não tem mais efeito duplicado.
         amistoso_idx  = None
         canal_amistoso = None
+        canal_voz_amistoso = None
         confirmados_ids = []
         amistoso_ja_processado = False
 
@@ -167,6 +168,9 @@ class Resultados(commands.Cog):
                 canal_id        = amistosos[i].get("canal_id")
                 if canal_id:
                     canal_amistoso = self.bot.get_channel(canal_id)
+                canal_voz_id = amistosos[i].get("canal_voz_id")
+                if canal_voz_id:
+                    canal_voz_amistoso = self.bot.get_channel(canal_voz_id)
                 break
 
         if amistoso_idx is None and amistoso_ja_processado:
@@ -316,6 +320,13 @@ class Resultados(commands.Cog):
                 print(f"[RESULTADO] 🗑️ Canal {canal_amistoso.name} deletado.")
             except Exception as e:
                 print(f"[RESULTADO] ⚠️ Erro ao deletar canal: {e}")
+
+        if canal_voz_amistoso:
+            try:
+                await canal_voz_amistoso.delete(reason=f"Amistoso vs {adversario} encerrado — resultado registrado.")
+                print(f"[RESULTADO] 🗑️ Canal de voz {canal_voz_amistoso.name} deletado.")
+            except Exception as e:
+                print(f"[RESULTADO] ⚠️ Erro ao deletar canal de voz: {e}")
 
         # Limpa arquivo de transcrição temporário
         if transcricao_arquivo:

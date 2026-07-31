@@ -9,6 +9,10 @@ from cogs.backup import ler, salvar, agora_str
 
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
+# Categoria onde os canais de voz dos amistosos são criados (separada da
+# categoria do canal de texto).
+CATEGORIA_VOZ_AMISTOSOS_ID = 1532853494317449337
+
 FUSO_BRASILIA = timezone(timedelta(hours=-3))
 
 # Aceita formatos tipo "15/06 às 20h00", "15/06 20:00", "15/06 as 21h",
@@ -147,6 +151,17 @@ class SairAmistosoView(discord.ui.View):
                 break
         salvar("amistosos", amistosos)
 
+        # Remove também o acesso ao canal de voz do amistoso, se existir.
+        if amistoso_atual:
+            canal_voz_id = amistoso_atual.get("canal_voz_id")
+            if canal_voz_id:
+                canal_voz = interaction.client.get_channel(canal_voz_id)
+                if canal_voz:
+                    try:
+                        await canal_voz.set_permissions(membro, overwrite=None)
+                    except discord.HTTPException as e:
+                        print(f"[AMISTOSO] ⚠️ Erro ao remover acesso do canal de voz pra {membro}: {e}")
+
         # Atualiza embed do anúncio a partir do JSON (fonte única de verdade
         # — assim a próxima tentativa de confirmar presença desse membro,
         # seja pela mesma view ou depois de um restart do bot, já vê que
@@ -221,6 +236,17 @@ class ConfirmarPresencaView(discord.ui.View):
             )
             await canal_amistoso.send(f"✅ {membro.mention} confirmou presença!")
 
+        # Libera acesso ao canal de voz do amistoso também, se existir
+        # (amistosos criados antes dessa atualização não têm esse campo).
+        canal_voz_id = amistoso.get("canal_voz_id")
+        if canal_voz_id:
+            canal_voz = interaction.client.get_channel(canal_voz_id)
+            if canal_voz:
+                try:
+                    await canal_voz.set_permissions(membro, view_channel=True, connect=True, speak=True)
+                except discord.HTTPException as e:
+                    print(f"[AMISTOSO] ⚠️ Erro ao liberar canal de voz pra {membro}: {e}")
+
         await interaction.response.send_message(
             f"✅ Presença confirmada! Você agora tem acesso a {canal_amistoso.mention if canal_amistoso else 'o canal do amistoso'}. 🚀",
             ephemeral=True
@@ -273,11 +299,30 @@ async def criar_amistoso(
         if admin_role:
             overwrites[admin_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
+    # Mesma regra de acesso do canal de texto, só que com permissões de voz
+    # (conectar/falar) em vez de mandar mensagem. Só a equipe (mesmos cargos
+    # acima) e quem confirmar presença conseguem entrar.
+    overwrites_voz = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
+        guild.me:           discord.PermissionOverwrite(view_channel=True, connect=True, speak=True),
+    }
+    for admin_role_id in ADMIN_ROLE_IDS:
+        admin_role = guild.get_role(admin_role_id)
+        if admin_role:
+            overwrites_voz[admin_role] = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
+
     canal_ref      = guild.get_channel(AMISTOSOS_CHANNEL_ID)
     categoria      = canal_ref.category if canal_ref else None
     canal_amistoso = await guild.create_text_channel(
         name=nome_canal, overwrites=overwrites, category=categoria,
         reason=f"Amistoso vs {adversario} criado por {interaction.user}"
+    )
+
+    categoria_voz  = guild.get_channel(CATEGORIA_VOZ_AMISTOSOS_ID)
+    nome_canal_voz = f"⚽│Amistoso {adversario}"[:100]
+    canal_voz = await guild.create_voice_channel(
+        name=nome_canal_voz, overwrites=overwrites_voz, category=categoria_voz,
+        reason=f"Canal de voz do amistoso vs {adversario} criado por {interaction.user}"
     )
 
     embed = discord.Embed(title="⚽  AMISTOSO ANUNCIADO", color=0xD4A843)
@@ -289,7 +334,11 @@ async def criar_amistoso(
         embed.add_field(name="📝  Informações", value=info_extra, inline=False)
     embed.add_field(
         name="\u200b",
-        value=f"🔔 {mencao_str} — Confirme sua presença abaixo!\n📁 Canal do amistoso: {canal_amistoso.mention}",
+        value=(
+            f"🔔 {mencao_str} — Confirme sua presença abaixo!\n"
+            f"📁 Canal do amistoso: {canal_amistoso.mention}\n"
+            f"🔊 Canal de voz: {canal_voz.mention}"
+        ),
         inline=False
     )
     embed.set_footer(text=f"Anunciado por {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
@@ -305,14 +354,14 @@ async def criar_amistoso(
 
     cog = interaction.client.cogs.get("Friendly")
     if cog:
-        cog.registrar(msg_anuncio.id, canal_amistoso.id)
+        cog.registrar(msg_anuncio.id, canal_amistoso.id, canal_voz.id)
 
     amistosos = ler("amistosos")
     data_hora_ts = _parse_data_hora(data_hora)
     amistosos.append({
         "id": len(amistosos) + 1, "adversario": adversario, "data": data_hora,
         "rank": rank_salvo, "resultado": None, "placar": "", "confirmados": [],
-        "canal_id": canal_amistoso.id, "criado_em": agora_str(),
+        "canal_id": canal_amistoso.id, "canal_voz_id": canal_voz.id, "criado_em": agora_str(),
         "msg_anuncio_id": msg_anuncio.id,
         "rank_id": ranks_ids[0],
         "rank_ids_extras": ranks_ids,
@@ -327,12 +376,14 @@ async def criar_amistoso(
             f"Bem-vindos ao canal do amistoso!\n\n"
             f"**🏅 Rank:** {rank_display}\n"
             f"**📅 Data:** {data_hora}\n"
+            f"**🔊 Voz:** {canal_voz.mention}\n"
             + (f"**📝 Info:** {info_extra}\n" if info_extra else "") +
             "\nSe quiser desistir, clique no botão abaixo."
         ),
         color=0xD4A843
     )
     await canal_amistoso.send(embed=embed_canal, view=SairAmistosoView())
+    await canal_amistoso.send(f"🔊 Canal de voz do amistoso: {canal_voz.mention}")
 
     if data_hora_ts is None:
         aviso_lembretes = (
@@ -383,7 +434,7 @@ _AVISO_SAIR_DM = (
 class Friendly(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.amistoso_map: dict[int, int] = {}
+        self.amistoso_map: dict[int, tuple[int, int | None]] = {}  # msg_id -> (canal_id, canal_voz_id)
 
         # Reconstrói os botões (✅ Confirmar Presença / 🚪 Sair do Amistoso)
         # de todo amistoso que ainda não tem resultado registrado — assim,
@@ -397,9 +448,10 @@ class Friendly(commands.Cog):
             if a.get("resultado") is not None:
                 continue  # já finalizado — não precisa mais reativar os botões dele
 
-            msg_id   = a.get("msg_anuncio_id")
-            canal_id = a.get("canal_id")
-            rank_id  = a.get("rank_id")
+            msg_id       = a.get("msg_anuncio_id")
+            canal_id     = a.get("canal_id")
+            canal_voz_id = a.get("canal_voz_id")
+            rank_id      = a.get("rank_id")
             if msg_id is None or canal_id is None:
                 # Amistosos criados antes dessa atualização não têm esses
                 # dados salvos — sem eles não dá pra reconstruir a view
@@ -413,15 +465,15 @@ class Friendly(commands.Cog):
                 rank_ids_extras=a.get("rank_ids_extras") or ([rank_id] if rank_id else []),
             )
             self.bot.add_view(view, message_id=msg_id)
-            self.amistoso_map[msg_id] = canal_id
+            self.amistoso_map[msg_id] = (canal_id, canal_voz_id)
 
         self.lembretes_amistoso.start()
 
     def cog_unload(self):
         self.lembretes_amistoso.cancel()
 
-    def registrar(self, message_id: int, canal_id: int):
-        self.amistoso_map[message_id] = canal_id
+    def registrar(self, message_id: int, canal_id: int, canal_voz_id: int | None = None):
+        self.amistoso_map[message_id] = (canal_id, canal_voz_id)
 
     # ── Lembretes automáticos pra quem confirmou presença ────────────────
     @tasks.loop(minutes=1)
@@ -518,13 +570,21 @@ class Friendly(commands.Cog):
     async def on_message_delete(self, message: discord.Message):
         if message.channel.id != AMISTOSOS_CHANNEL_ID:
             return
-        canal_id = self.amistoso_map.pop(message.id, None)
-        if canal_id is None:
+        info = self.amistoso_map.pop(message.id, None)
+        if info is None:
             return
+        canal_id, canal_voz_id = info
+
         canal = self.bot.get_channel(canal_id)
         if canal:
             await canal.delete(reason="Mensagem do amistoso deletada — canal removido automaticamente.")
             print(f"[AMISTOSO] 🗑️ Canal {canal.name} deletado junto com o anúncio.")
+
+        if canal_voz_id:
+            canal_voz = self.bot.get_channel(canal_voz_id)
+            if canal_voz:
+                await canal_voz.delete(reason="Mensagem do amistoso deletada — canal de voz removido automaticamente.")
+                print(f"[AMISTOSO] 🗑️ Canal de voz {canal_voz.name} deletado junto com o anúncio.")
 
     @app_commands.command(name="amistoso", description="Anuncia um amistoso no canal de amistosos.")
     @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
