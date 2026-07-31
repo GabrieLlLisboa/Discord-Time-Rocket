@@ -55,6 +55,12 @@ CATEGORIAS = [
         emoji="🔧",
         value="tecnico"
     ),
+    discord.SelectOption(
+        label="Desenvolvimento",
+        description="Assunto interno da equipe de desenvolvimento.",
+        emoji="💻",
+        value="dev"
+    ),
 ]
 
 NOMES = {
@@ -62,6 +68,7 @@ NOMES = {
     "denuncias": "denuncia",
     "time":      "time",
     "tecnico":   "tecnico",
+    "dev":       "dev",
 }
 
 CORES = {
@@ -69,7 +76,13 @@ CORES = {
     "denuncias": 0xED4245,
     "time":      0xFEE75C,
     "tecnico":   0x57F287,
+    "dev":       0x9B59B6,
 }
+
+# Categoria "Desenvolvimento": tíquete restrito — só quem abriu e o cargo
+# abaixo enxergam o canal. Diferente das outras categorias, administradores
+# NÃO são adicionados automaticamente aqui.
+CARGO_DESENVOLVIMENTO_ID = 1525540085112770746
 
 
 # ── Select Menu ────────────────────────────────────────────────────────────────
@@ -141,10 +154,19 @@ class TicketSelect(discord.ui.Select):
             guild.me:           discord.PermissionOverwrite(view_channel=True, send_messages=True),
         }
 
-        # Administradores também veem
-        for role in guild.roles:
-            if role.permissions.administrator:
-                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        if valor == "dev":
+            # Categoria restrita: só quem abriu e o cargo de Desenvolvimento
+            # enxergam esse tíquete. Administradores não entram automaticamente.
+            cargo_dev = guild.get_role(CARGO_DESENVOLVIMENTO_ID)
+            if cargo_dev is not None:
+                overwrites[cargo_dev] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+            else:
+                print(f"[TICKET] ⚠️ Cargo de Desenvolvimento ({CARGO_DESENVOLVIMENTO_ID}) não encontrado no servidor.")
+        else:
+            # Administradores também veem
+            for role in guild.roles:
+                if role.permissions.administrator:
+                    overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
 
         # Cria o canal
         canal = await guild.create_text_channel(
@@ -184,10 +206,16 @@ class FecharTicketView(discord.ui.View):
 
     @discord.ui.button(label="🔒 Fechar Tíquete", style=discord.ButtonStyle.danger, custom_id="fechar_ticket")
     async def fechar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Apenas administradores podem fechar
-        if not interaction.user.guild_permissions.administrator:
+        # Normalmente só administradores fecham. Exceção: nos tíquetes de
+        # Desenvolvimento, administradores não têm acesso automático ao
+        # canal, então o próprio cargo de Desenvolvimento também pode fechar.
+        pode_fechar = interaction.user.guild_permissions.administrator
+        if not pode_fechar and interaction.channel.name.startswith(f"ticket-{NOMES['dev']}-"):
+            pode_fechar = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+
+        if not pode_fechar:
             await interaction.response.send_message(
-                "❌ Apenas administradores podem fechar tíquetes.",
+                "❌ Você não tem permissão para fechar este tíquete.",
                 ephemeral=True
             )
             return
@@ -224,7 +252,8 @@ class Tickets(commands.Cog):
                 "❓ **Dúvidas** — Perguntas gerais\n"
                 "🚨 **Denúncias** — Reporte jogadores\n"
                 "🏆 **Mais sobre o time** — Conheça a equipe\n"
-                "🔧 **Problemas Técnicos** — Bugs e erros"
+                "🔧 **Problemas Técnicos** — Bugs e erros\n"
+                "💻 **Desenvolvimento** — Assunto interno da equipe de dev"
             ),
             color=0x2B2D31
         )
