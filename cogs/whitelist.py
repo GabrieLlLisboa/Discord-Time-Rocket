@@ -20,6 +20,12 @@ INCENTIVO_ESPERA_INICIAL_SEGUNDOS = 15 * 60
 INCENTIVO_INTERVALO_MIN = 10
 INCENTIVO_INTERVALO_MAX = 15
 
+# Timeout automático: se passar esse tempo desde a criação do canal sem a
+# whitelist ser concluída, o bot fecha o canal sozinho (arquiva = apaga,
+# já que canais recusados/aprovados também são apagados nesse bot).
+WHITELIST_TIMEOUT_DIAS = 3
+WHITELIST_TIMEOUT_SEGUNDOS = WHITELIST_TIMEOUT_DIAS * 24 * 60 * 60
+
 # Pra quem ainda nem começou a responder nada.
 INCENTIVO_NAO_COMECOU = [
     "{mention} bora começar? 👀",
@@ -32,6 +38,20 @@ INCENTIVO_NAO_COMECOU = [
     "{mention} bora lá, não deixa isso esfriar! Começa a whitelist! 🔥",
     "E aí {mention}, vamos começar a whitelist? Tá bem rápido! ⏱️",
     "{mention} ainda dá tempo, bora começar sua whitelist agora! ✅",
+    "{mention} tá fazendo o quê que não começa a whitelist? Bora! 😄",
+    "{mention} a whitelist tá aberta esperando você, só clicar aí! 🎯",
+    "Oi {mention}, vamos começar? A whitelist é rapidinha! ⚡",
+    "{mention} sua vaga tá te esperando, começa a whitelist logo! 🎟️",
+    "{mention} bora, não deixa passar essa oportunidade! Começa a whitelist! 🏁",
+    "E aí {mention}, esqueceu de começar a whitelist? Vem aqui! 🤔",
+    "{mention} tá difícil clicar num botão? Bora começar a whitelist! 😂",
+    "{mention} sua whitelist tá com ciúmes de você, vem dar atenção pra ela! 💌",
+    "{mention} não enrola não, vem começar a whitelist de uma vez! 🚦",
+    "{mention} bora logo, o servidor tá na torcida por você! 📣",
+    "{mention} isso aqui não morde, pode começar a whitelist sem medo! 😅",
+    "{mention} respondendo rápido você já tá dentro, bora começar! 🔓",
+    "{mention} eu sei que você tá vendo essa mensagem, começa logo! 👁️",
+    "{mention} vamos nessa? Sua whitelist não vai se preencher sozinha! 📋",
 ]
 
 # Pra quem já começou mas parou no meio do caminho.
@@ -41,6 +61,16 @@ INCENTIVO_PAROU_NO_MEIO = [
     "Ei {mention}, você tava indo bem! Bora acabar a whitelist? 👀",
     "{mention} falta só um pouquinho, vem finalizar! 🚀",
     "{mention} volta aí e termina sua whitelist, já foi metade do caminho! 🙌",
+    "{mention} não desiste agora, a reta final tá logo ali! 🏆",
+    "{mention} cadê você? Volta pra terminar sua whitelist! 🔍",
+    "{mention} já passou da metade, não vai parar bem aqui não! 😤",
+    "{mention} termina isso hoje, depois você me agradece! ✅",
+    "{mention} tá quase lá, só faltam algumas perguntinhas! 📝",
+    "{mention} deu uma pausa? Bora voltar e fechar a whitelist! ⏸️➡️▶️",
+    "{mention} sua whitelist ficou pela metade, vem completar! 🧩",
+    "{mention} não deixa esfriar, volta e termina agora! 🔥",
+    "{mention} tá tão perto do fim, vem finalizar de uma vez! 🎯",
+    "{mention} o servidor já quase te aprovou, só falta você terminar! 🙏",
 ]
 
 
@@ -75,6 +105,7 @@ STATUS_LABELS = {
     "visualizada": ("👀 Em análise", 0x5865F2),
     "aprovada":    ("✅ Aprovada",   0x57F287),
     "recusada":    ("❌ Recusada",   0xED4245),
+    "cancelada":   ("🚫 Cancelada",  0x99AAB5),
 }
 
 # Cargo "membro da equipe" — quem tem esse cargo pode usar /perfil-whitelist
@@ -207,10 +238,23 @@ class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
 # ─────────────────────────────────────────────
 #  View: botão que abre o modal de perguntas abertas
 # ─────────────────────────────────────────────
+class DesistirButton(discord.ui.Button):
+    """Botão reutilizável de 'desistir', adicionado nas etapas intermediárias
+    da whitelist (depois da primeira tela) pra pessoa poder desistir a
+    qualquer momento, não só no início."""
+    def __init__(self):
+        super().__init__(label="🚫 Desistir", style=discord.ButtonStyle.secondary, custom_id="wl_desistir_etapa", row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        await cog.pedir_confirmacao_desistencia(interaction)
+
+
 class AbrirPerguntasView(discord.ui.View):
     def __init__(self, cog: "Whitelist"):
         super().__init__(timeout=None)
         self.cog = cog
+        self.add_item(DesistirButton())
 
     @discord.ui.button(label="📝 Responder Perguntas", style=discord.ButtonStyle.primary, custom_id="wl_perguntas_abertas")
     async def responder(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -297,6 +341,7 @@ class EscolhaView(discord.ui.View):
     def __init__(self, cog: "Whitelist", step: str, opcoes: list[str], placeholder: str, prox_step: str | None, emojis: dict | None = None):
         super().__init__(timeout=None)
         self.add_item(EscolhaSelect(cog, step, opcoes, placeholder, prox_step, emojis))
+        self.add_item(DesistirButton())
 
 
 # ─────────────────────────────────────────────
@@ -315,15 +360,38 @@ class ComecarWhitelistView(discord.ui.View):
             return
         await interaction.response.send_modal(NickModal(cog))
 
+    @discord.ui.button(label="🚫 Desistir", style=discord.ButtonStyle.secondary, custom_id="wl_desistir")
+    async def desistir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        await cog.pedir_confirmacao_desistencia(interaction)
+
     @discord.ui.button(label="🗑️ Cancelar/Fechar (staff)", style=discord.ButtonStyle.danger, custom_id="wl_cancelar")
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
         cargos = {r.id for r in interaction.user.roles}
         if not (interaction.user.guild_permissions.administrator or cargos & CARGOS_QUE_VEEM_WHITELIST):
             await interaction.response.send_message("❌ Apenas staff pode fechar.", ephemeral=True)
             return
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        cog.marcar_cancelada(interaction.channel.id, motivo="staff")
         await interaction.response.send_message("🔒 Fechando canal em 3 segundos...")
         await asyncio.sleep(3)
         await interaction.channel.delete(reason=f"Whitelist cancelada por {interaction.user}")
+
+
+class ConfirmarDesistenciaView(discord.ui.View):
+    """Confirmação antes de fechar o canal pra evitar clique acidental."""
+    def __init__(self, membro_id: int):
+        super().__init__(timeout=60)
+        self.membro_id = membro_id
+
+    @discord.ui.button(label="✅ Sim, desistir", style=discord.ButtonStyle.danger, custom_id="wl_desistir_confirmar")
+    async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        await cog.confirmar_desistencia(interaction, self.membro_id)
+
+    @discord.ui.button(label="↩️ Voltar", style=discord.ButtonStyle.secondary, custom_id="wl_desistir_voltar")
+    async def voltar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Beleza, sua whitelist continua normalmente! 👍", view=None)
 
 
 # ─────────────────────────────────────────────
@@ -420,6 +488,27 @@ class Whitelist(commands.Cog):
             if agora - criado_ts < INCENTIVO_ESPERA_INICIAL_SEGUNDOS:
                 continue
 
+            # ── Timeout automático: fecha sozinho se passar dias demais ──
+            if agora - criado_ts >= WHITELIST_TIMEOUT_SEGUNDOS:
+                canal = self.bot.get_channel(canal_id)
+                if canal is not None:
+                    try:
+                        dias = WHITELIST_TIMEOUT_SEGUNDOS // 86400
+                        await canal.send(
+                            f"⏰ Já se passaram **{dias} dias** e essa whitelist não foi concluída, "
+                            f"então vou fechar este canal automaticamente. Se quiser tentar de novo, "
+                            f"entre em contato com a staff. 👋"
+                        )
+                        await asyncio.sleep(5)
+                        await canal.delete(reason="Whitelist expirada por timeout automático")
+                    except discord.HTTPException:
+                        pass
+                registro["status"] = "cancelada"
+                registro["cancelado_motivo"] = "timeout"
+                registro["cancelado_em"] = agora
+                mudou = True
+                continue
+
             proximo_ts = registro.get("proximo_incentivo_ts")
             if not proximo_ts:
                 registro["proximo_incentivo_ts"] = agora
@@ -466,7 +555,11 @@ class Whitelist(commands.Cog):
         agora = time.time()
         mudou = False
         for uid_str, registro in list(self.dados.items()):
-            if registro.get("status") != "aprovada" or registro.get("canal_apagado"):
+            # BUG corrigido: antes só limpava canais "aprovada", então canais
+            # de whitelist "recusada" (que também agendam deletar_em) nunca
+            # eram apagados por aqui — só sumiam de carona quando o membro
+            # recusado era expulso (on_member_remove). Agora cobre os dois.
+            if registro.get("status") not in ("aprovada", "recusada") or registro.get("canal_apagado"):
                 continue
             deletar_em = registro.get("deletar_em")
             if not deletar_em or agora < deletar_em:
@@ -629,7 +722,12 @@ class Whitelist(commands.Cog):
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
         registro = self.dados.get(str(member.id))
-        if not registro or registro.get("status") == "concluido":
+        # Bug corrigido: o status "concluido" nunca existia de verdade (os
+        # status reais são em_andamento/pendente/aprovada/recusada/cancelada).
+        # Só faz sentido apagar o canal automaticamente se a whitelist ainda
+        # não tinha sido decidida — se já foi aprovada/recusada, deixa o
+        # fluxo normal (limpeza_canais / staff) cuidar disso.
+        if not registro or registro.get("status") in ("aprovada", "recusada", "cancelada"):
             return
         canal_id = registro.get("canal_id")
         canal = self.bot.get_channel(canal_id) if canal_id else None
@@ -638,6 +736,10 @@ class Whitelist(commands.Cog):
                 await canal.delete(reason="Membro saiu antes de terminar a whitelist")
             except discord.HTTPException:
                 pass
+        registro["status"] = "cancelada"
+        registro["cancelado_motivo"] = "saiu_do_servidor"
+        registro["cancelado_em"] = time.time()
+        salvar("whitelist", self.dados)
 
     # ── Dá o cargo de rank (remove outros ranks antes) — só na aprovação ──
     async def dar_cargo_rank(self, guild: discord.Guild, membro: discord.Member, rank_nome: str) -> str | None:
@@ -926,6 +1028,63 @@ class Whitelist(commands.Cog):
             if registro.get("canal_id") == canal_id:
                 return int(membro_id_str)
         return None
+
+    # ── Marca um registro como cancelado (staff, timeout, ou membro saiu) ──
+    def marcar_cancelada(self, canal_id: int, motivo: str) -> None:
+        membro_id = self._membro_id_do_canal(canal_id)
+        if membro_id is None:
+            return
+        registro = self.dados.get(str(membro_id))
+        if not registro:
+            return
+        registro["status"] = "cancelada"
+        registro["cancelado_motivo"] = motivo
+        registro["cancelado_em"] = time.time()
+        salvar("whitelist", self.dados)
+
+    # ── Fluxo de "desistir" iniciado pelo próprio membro ─────────────────
+    async def pedir_confirmacao_desistencia(self, interaction: discord.Interaction):
+        membro_id = self._membro_id_do_canal(interaction.channel.id)
+        if membro_id is None or membro_id != interaction.user.id:
+            await interaction.response.send_message(
+                "❌ Só quem tá fazendo essa whitelist pode desistir dela.", ephemeral=True
+            )
+            return
+
+        registro = self.dados.get(str(membro_id))
+        if not registro or registro.get("status") != "em_andamento":
+            await interaction.response.send_message(
+                "⚠️ Essa whitelist já não tá mais em andamento.", ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            "⚠️ **Tem certeza que quer desistir?** Isso vai fechar e apagar seu canal de whitelist.",
+            view=ConfirmarDesistenciaView(membro_id),
+            ephemeral=True,
+        )
+
+    async def confirmar_desistencia(self, interaction: discord.Interaction, membro_id: int):
+        registro = self.dados.get(str(membro_id))
+        if not registro:
+            await interaction.response.edit_message(content="⚠️ Não encontrei mais essa whitelist.", view=None)
+            return
+
+        registro["status"] = "cancelada"
+        registro["cancelado_motivo"] = "membro"
+        registro["cancelado_em"] = time.time()
+        salvar("whitelist", self.dados)
+
+        await interaction.response.edit_message(content="🔒 Ok, fechando seu canal em 3 segundos...", view=None)
+
+        canal_id = registro.get("canal_id")
+        canal = self.bot.get_channel(canal_id) if canal_id else None
+        if canal:
+            await asyncio.sleep(3)
+            try:
+                await canal.delete(reason=f"Whitelist cancelada pelo próprio membro ({interaction.user})")
+            except discord.HTTPException:
+                pass
 
     # ── Comando manual pra staff criar/recriar o canal de alguém ────
     @commands.command(name="whitelist")

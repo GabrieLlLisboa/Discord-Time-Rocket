@@ -1,9 +1,60 @@
+import re
+import time
+from datetime import datetime, timedelta, timezone
+
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
+
+FUSO_BRASILIA = timezone(timedelta(hours=-3))
+
+# Aceita formatos tipo "15/06 às 20h00", "15/06 20:00", "15/06 as 21h",
+# "15/06/2026 19h30" — dia/mês (com ano opcional) e hora com "h" ou ":".
+_PADRAO_DATA_HORA = re.compile(
+    r"(?P<dia>\d{1,2})[/\-](?P<mes>\d{1,2})(?:[/\-](?P<ano>\d{2,4}))?"
+    r".*?"
+    r"(?P<hora>\d{1,2})[:h](?P<minuto>\d{2})?"
+)
+
+
+def _parse_data_hora(texto: str, agora_local: datetime | None = None) -> float | None:
+    """Tenta extrair um timestamp real de um texto livre de data/hora, pra
+    dar pra agendar os lembretes do amistoso. Retorna None se não conseguir
+    reconhecer o formato — nesse caso o amistoso é criado normalmente, só
+    que sem lembretes automáticos."""
+    m = _PADRAO_DATA_HORA.search(texto)
+    if not m:
+        return None
+    try:
+        dia = int(m.group("dia"))
+        mes = int(m.group("mes"))
+        hora = int(m.group("hora"))
+        minuto = int(m.group("minuto") or 0)
+        if not (1 <= dia <= 31 and 1 <= mes <= 12 and 0 <= hora <= 23 and 0 <= minuto <= 59):
+            return None
+
+        agora_local = agora_local or datetime.now(FUSO_BRASILIA)
+        ano_str = m.group("ano")
+        if ano_str:
+            ano = int(ano_str)
+            if ano < 100:
+                ano += 2000
+        else:
+            ano = agora_local.year
+
+        dt = datetime(ano, mes, dia, hora, minuto, tzinfo=FUSO_BRASILIA)
+
+        # Sem ano explícito e a data já passou há mais de 1 dia — assume que
+        # é ano que vem (ex: criar em dezembro um amistoso de janeiro).
+        if not ano_str and dt < agora_local - timedelta(days=1):
+            dt = dt.replace(year=ano + 1)
+
+        return dt.timestamp()
+    except ValueError:
+        return None
 
 # Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
 # pelo sistema de coaches — ver cogs/coach_config.py). Antes havia apenas
@@ -257,6 +308,7 @@ async def criar_amistoso(
         cog.registrar(msg_anuncio.id, canal_amistoso.id)
 
     amistosos = ler("amistosos")
+    data_hora_ts = _parse_data_hora(data_hora)
     amistosos.append({
         "id": len(amistosos) + 1, "adversario": adversario, "data": data_hora,
         "rank": rank_salvo, "resultado": None, "placar": "", "confirmados": [],
@@ -264,6 +316,8 @@ async def criar_amistoso(
         "msg_anuncio_id": msg_anuncio.id,
         "rank_id": ranks_ids[0],
         "rank_ids_extras": ranks_ids,
+        "data_hora_ts": data_hora_ts,
+        "lembretes_enviados": [],
     })
     salvar("amistosos", amistosos)
 
@@ -279,8 +333,36 @@ async def criar_amistoso(
         color=0xD4A843
     )
     await canal_amistoso.send(embed=embed_canal, view=SairAmistosoView())
-    await interaction.response.send_message(f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}", ephemeral=True)
+
+    if data_hora_ts is None:
+        aviso_lembretes = (
+            "\n⚠️ Não consegui reconhecer a data/horário pra agendar os lembretes automáticos "
+            "(use algo tipo `15/06 às 20h00`). O amistoso foi criado normalmente, só sem os avisos automáticos."
+        )
+    else:
+        aviso_lembretes = ""
+
+    await interaction.response.send_message(
+        f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}{aviso_lembretes}", ephemeral=True
+    )
     print(f"[AMISTOSO] ✅ {interaction.user} anunciou amistoso vs {adversario} — {rank_salvo}")
+
+
+# Marcos de lembrete: (segundos antes do horário, chave única, destino)
+# destino: "canal" | "dm" | "ambos"
+_MARCOS_LEMBRETE = [
+    (5 * 3600, "5h_canal", "canal"),
+    (1 * 3600, "1h_dm", "dm"),
+    (30 * 60, "30min_ambos", "ambos"),
+    (10 * 60, "10min_ambos", "ambos"),
+]
+
+_TEXTO_TEMPO = {
+    "5h_canal": "5 horas",
+    "1h_dm": "1 hora",
+    "30min_ambos": "30 minutos",
+    "10min_ambos": "10 minutos",
+}
 
 
 # ── Cog ───────────────────────────────────────────────────────────────────────
@@ -319,8 +401,101 @@ class Friendly(commands.Cog):
             self.bot.add_view(view, message_id=msg_id)
             self.amistoso_map[msg_id] = canal_id
 
+        self.lembretes_amistoso.start()
+
+    def cog_unload(self):
+        self.lembretes_amistoso.cancel()
+
     def registrar(self, message_id: int, canal_id: int):
         self.amistoso_map[message_id] = canal_id
+
+    # ── Lembretes automáticos pra quem confirmou presença ────────────────
+    @tasks.loop(minutes=1)
+    async def lembretes_amistoso(self):
+        await self.bot.wait_until_ready()
+        agora_ts = time.time()
+        amistosos = ler("amistosos")
+        mudou = False
+
+        for amistoso in amistosos:
+            if amistoso.get("resultado") is not None:
+                continue  # amistoso já finalizado
+
+            ts = amistoso.get("data_hora_ts")
+            if not ts or agora_ts >= ts:
+                # Sem data reconhecida, ou o horário do amistoso já passou —
+                # nada mais pra lembrar.
+                continue
+
+            confirmados = amistoso.get("confirmados") or []
+            if not confirmados:
+                continue
+
+            enviados = amistoso.setdefault("lembretes_enviados", [])
+
+            for segundos, chave, destino in _MARCOS_LEMBRETE:
+                if chave in enviados:
+                    continue
+
+                tempo_restante = ts - agora_ts
+                if tempo_restante > segundos:
+                    continue  # ainda não chegou a hora desse lembrete específico
+
+                # Se o bot ficou off e perdeu a janela por mais de 15 min,
+                # pula esse marco em vez de mandar um aviso "atrasado" que
+                # não bate mais com o tempo real que falta (ex: mandar
+                # "faltam 5 horas" quando na real só falta 1h).
+                if tempo_restante < segundos - (15 * 60):
+                    enviados.append(chave)
+                    mudou = True
+                    continue
+
+                await self._enviar_lembrete(amistoso, destino, chave)
+                enviados.append(chave)
+                mudou = True
+
+        if mudou:
+            salvar("amistosos", amistosos)
+
+    @lembretes_amistoso.before_loop
+    async def antes_lembretes_amistoso(self):
+        await self.bot.wait_until_ready()
+
+    async def _enviar_lembrete(self, amistoso: dict, destino: str, chave: str):
+        tempo_texto = _TEXTO_TEMPO.get(chave, "pouco tempo")
+        adversario  = amistoso.get("adversario", "adversário")
+        data_hora   = amistoso.get("data", "")
+        confirmados = amistoso.get("confirmados") or []
+        canal_id    = amistoso.get("canal_id")
+
+        if destino in ("canal", "ambos"):
+            canal = self.bot.get_channel(canal_id) if canal_id else None
+            if canal is not None:
+                mencoes = " ".join(f"<@{uid}>" for uid in confirmados)
+                try:
+                    await canal.send(
+                        f"⏰ **Faltam {tempo_texto} pro amistoso vs {adversario}!** ({data_hora})\n{mencoes}"
+                    )
+                except discord.HTTPException as e:
+                    print(f"[AMISTOSO] ⚠️ Erro ao mandar lembrete no canal: {e}")
+
+        if destino in ("dm", "ambos"):
+            for uid in confirmados:
+                usuario = self.bot.get_user(uid)
+                if usuario is None:
+                    try:
+                        usuario = await self.bot.fetch_user(uid)
+                    except discord.HTTPException:
+                        continue
+                try:
+                    await usuario.send(
+                        f"⏰ **Faltam {tempo_texto} pro seu amistoso vs {adversario}!** ({data_hora})\n"
+                        f"Não esquece de aparecer! 🚀"
+                    )
+                except discord.Forbidden:
+                    pass  # DM fechada — nada a fazer
+                except discord.HTTPException as e:
+                    print(f"[AMISTOSO] ⚠️ Erro ao mandar lembrete por DM pra {uid}: {e}")
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):

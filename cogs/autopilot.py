@@ -4,27 +4,46 @@ from discord import app_commands
 import os
 import random
 import time
+from datetime import datetime, timezone, timedelta
 from cogs.json_store import ler_json, salvar_json
 
 # ─────────────────────────────────────────────
 #  Cog: Autopilot
 #  Arquivo: cogs/autopilot.py
-#  O bot manda mensagens automáticas sozinho, de tempos em tempos, em dois
-#  canais fixos e independentes:
-#   - CANAL_GERAL_ID -> só curiosidades aleatórias (assuntos gerais)
-#   - CANAL_RL_ID    -> só curiosidades de Rocket League
-#  Cada canal tem seu próprio agendamento (3h a 5h, sorteado).
+#  O bot manda mensagens automáticas sozinho, de tempos em tempos, tudo no
+#  mesmo canal, alternando entre dois tipos de conteúdo independentes:
+#   - "geral"         -> curiosidades aleatórias (assuntos gerais)
+#   - "rocket_league" -> curiosidades de Rocket League
+#  Cada tipo tem seu próprio agendamento (sorteado dentro do intervalo dele).
+#
+#  Regras extras:
+#   - O autopilot fica pausado das 22:00 às 12:00 (horário de Brasília).
+#   - Se tiver gente conversando no canal (mensagem humana recente), o bot
+#     não corta o papo — ele espera a conversa esfriar e checa de novo.
 # ─────────────────────────────────────────────
 
 CONFIG_PATH = "data/autopilot.json"
 
-# Canal só de curiosidades de Rocket League — intervalo de 30 a 60 minutos.
-CANAL_RL_ID = 1511898323840405655
-INTERVALO_RL_MIN = 30
-INTERVALO_RL_MAX = 60
+# Fuso horário de Brasília (fixo, o Brasil não usa mais horário de verão).
+BR_TZ = timezone(timedelta(hours=-3))
 
-# Canal só de curiosidades aleatórias (assuntos gerais) — intervalo de 3h a 4h.
-CANAL_GERAL_ID = 1511910275618443314
+# Janela em que o autopilot fica pausado (não manda nada nesse intervalo).
+PAUSA_INICIO_HORA = 22  # a partir das 22:00
+PAUSA_FIM_HORA = 12     # até as 12:00 do dia seguinte
+
+# Se alguém mandou mensagem no canal há menos tempo que isso, o bot segura
+# o envio automático pra não cortar a conversa. Ele vai checando de novo a
+# cada minuto até a conversa esfriar.
+ESPERA_CONVERSA_SEGUNDOS = 5 * 60  # 5 minutos
+
+# Canal único onde tudo é enviado (curiosidades gerais e de Rocket League).
+CANAL_ID = 1511898323840405655
+
+# Tipo "rocket_league" — intervalo de 2 a 3 horas.
+INTERVALO_RL_MIN = 120
+INTERVALO_RL_MAX = 180
+
+# Tipo "geral" — intervalo de 3 a 4 horas.
 INTERVALO_GERAL_MIN = 180
 INTERVALO_GERAL_MAX = 240
 
@@ -208,10 +227,40 @@ CURIOSIDADES_GERAIS = [
     "🐝 Você sabia? Uma colmeia pode ter dezenas de milhares de abelhas trabalhando de forma extremamente organizada.",
 ]
 
-# Configuração de cada canal fixo do autopilot.
+# ── Enquetes rápidas (terceiro tipo de mensagem) ────────────────────────────
+# Em vez de só mandar uma curiosidade pra leitura passiva, de vez em quando o
+# bot manda uma enquete com reações, pra gerar interação de verdade.
+# Chance de qualquer envio ser uma enquete em vez de curiosidade.
+CHANCE_ENQUETE = 0.2
+
+ENQUETES_RL = [
+    {"pergunta": "Qual seu rank atual?", "opcoes": [("🥉", "Bronze / Prata"), ("🥈", "Ouro / Platina"), ("💎", "Diamante / Champion"), ("🏆", "GC ou acima")]},
+    {"pergunta": "Qual sua posição favorita?", "opcoes": [("🛡️", "Defesa"), ("⚙️", "Meio"), ("⚔️", "Ataque")]},
+    {"pergunta": "Qual carro você mais usa?", "opcoes": [("🚗", "Octane"), ("🏎️", "Dominus"), ("🚙", "Fennec"), ("🛻", "Outro")]},
+    {"pergunta": "Qual modo você prefere jogar?", "opcoes": [("⚽", "Padrão (Soccer)"), ("🏀", "Hoops"), ("🏒", "Snow Day"), ("🕳️", "Dropshot")]},
+    {"pergunta": "1v1, 2v2 ou 3v3?", "opcoes": [("1️⃣", "1v1"), ("2️⃣", "2v2"), ("3️⃣", "3v3")]},
+    {"pergunta": "Qual mecânica você mais quer aprender?", "opcoes": [("🌀", "Flip reset"), ("🎯", "Air dribble"), ("🔺", "Ceiling shot"), ("↩️", "Half-flip")]},
+    {"pergunta": "Você joga mais no controle ou teclado?", "opcoes": [("🎮", "Controle"), ("⌨️", "Teclado/Mouse")]},
+    {"pergunta": "Qual time você torce no RLCS?", "opcoes": [("🌎", "Time das Américas"), ("🌍", "Time da Europa"), ("🌏", "Time da Ásia/Oceania"), ("🤷", "Não acompanho")]},
+]
+
+ENQUETES_GERAIS = [
+    {"pergunta": "Doce ou salgado?", "opcoes": [("🍫", "Doce"), ("🧂", "Salgado")]},
+    {"pergunta": "Praia ou montanha?", "opcoes": [("🏖️", "Praia"), ("⛰️", "Montanha")]},
+    {"pergunta": "Café ou energético?", "opcoes": [("☕", "Café"), ("⚡", "Energético")]},
+    {"pergunta": "Prefere calor ou frio?", "opcoes": [("🔥", "Calor"), ("❄️", "Frio")]},
+    {"pergunta": "Voar ou ficar invisível?", "opcoes": [("🕊️", "Voar"), ("👻", "Invisível")]},
+    {"pergunta": "Filme ou série?", "opcoes": [("🎬", "Filme"), ("📺", "Série")]},
+    {"pergunta": "Você é mais dia ou noite?", "opcoes": [("☀️", "Dia"), ("🌙", "Noite")]},
+    {"pergunta": "Pizza com ou sem borda recheada?", "opcoes": [("🧀", "Com borda"), ("🍕", "Sem borda")]},
+]
+
+# Configuração de cada tipo de mensagem do autopilot.
+# Os dois tipos mandam mensagem no mesmo canal (CANAL_ID), cada um com seu
+# próprio agendamento independente.
 CANAIS = {
-    CANAL_GERAL_ID: {"nome": "geral", "mensagens": CURIOSIDADES_GERAIS, "intervalo_min": INTERVALO_GERAL_MIN, "intervalo_max": INTERVALO_GERAL_MAX},
-    CANAL_RL_ID: {"nome": "rocket_league", "mensagens": CURIOSIDADES_RL, "intervalo_min": INTERVALO_RL_MIN, "intervalo_max": INTERVALO_RL_MAX},
+    "geral": {"nome": "geral", "canal_id": CANAL_ID, "mensagens": CURIOSIDADES_GERAIS, "enquetes": ENQUETES_GERAIS, "intervalo_min": INTERVALO_GERAL_MIN, "intervalo_max": INTERVALO_GERAL_MAX},
+    "rocket_league": {"nome": "rocket_league", "canal_id": CANAL_ID, "mensagens": CURIOSIDADES_RL, "enquetes": ENQUETES_RL, "intervalo_min": INTERVALO_RL_MIN, "intervalo_max": INTERVALO_RL_MAX},
 }
 
 
@@ -220,7 +269,8 @@ def ler_config() -> dict:
     {
       "ativo": True,
       "canais": {
-         "<canal_id>": {"proximo_envio_ts": 123456.0}
+         "geral": {"proximo_envio_ts": 123456.0},
+         "rocket_league": {"proximo_envio_ts": 123456.0}
       }
     }
     """
@@ -247,40 +297,76 @@ class Autopilot(commands.Cog):
         if not config.get("ativo", True):
             return
 
+        if self._em_pausa():
+            # Dentro da janela 22:00–12:00 (horário de Brasília): não manda
+            # nada. Os agendamentos continuam parados até a janela acabar.
+            return
+
         canais_cfg = config.setdefault("canais", {})
         agora = time.time()
         precisa_salvar = False
 
-        for canal_id in CANAIS:
-            chave = str(canal_id)
+        for chave in CANAIS:
             estado = canais_cfg.setdefault(chave, {})
             proximo_ts = estado.get("proximo_envio_ts")
 
             if not proximo_ts:
-                # Primeira vez rodando pra esse canal — agenda e segue.
-                self._agendar_proximo(canal_id, estado)
+                # Primeira vez rodando pra esse tipo — agenda e segue.
+                self._agendar_proximo(chave, estado)
                 precisa_salvar = True
                 continue
 
             if agora >= proximo_ts:
+                if await self._conversa_recente(chave):
+                    # Tem gente conversando no canal — não corta o papo.
+                    # Espera um pouco e checa de novo no próximo minuto.
+                    estado["proximo_envio_ts"] = agora + 60
+                    precisa_salvar = True
+                    continue
+
                 try:
-                    await self._enviar_mensagem(canal_id)
+                    await self._enviar_mensagem(chave)
                 except Exception as e:
                     # Uma falha pontual (canal deletado, sem permissão, etc.)
                     # não pode derrubar o loop pro resto da vida do processo.
-                    print(f"[AUTOPILOT] ⚠️ Erro ao enviar mensagem no canal {canal_id}: {e}")
+                    print(f"[AUTOPILOT] ⚠️ Erro ao enviar mensagem do tipo {chave}: {e}")
                 finally:
-                    self._agendar_proximo(canal_id, estado)
+                    self._agendar_proximo(chave, estado)
                     precisa_salvar = True
 
         if precisa_salvar:
             salvar_config(config)
 
-    def _agendar_proximo(self, canal_id: int, estado: dict) -> None:
-        """Sorteia o intervalo (específico de cada canal) até a próxima
+    def _em_pausa(self) -> bool:
+        """True se agora estiver dentro da janela de pausa do autopilot
+        (22:00 até 12:00 do dia seguinte, horário de Brasília)."""
+        hora_atual = datetime.now(BR_TZ).hour
+        return hora_atual >= PAUSA_INICIO_HORA or hora_atual < PAUSA_FIM_HORA
+
+    async def _conversa_recente(self, chave: str) -> bool:
+        """True se a última mensagem humana no canal foi recente demais pra
+        o bot interromper com uma mensagem automática."""
+        cfg_canal = CANAIS[chave]
+        canal = self.bot.get_channel(cfg_canal["canal_id"])
+        if canal is None:
+            return False
+
+        try:
+            async for msg in canal.history(limit=5):
+                if msg.author.bot:
+                    continue
+                idade_segundos = (datetime.now(timezone.utc) - msg.created_at).total_seconds()
+                return idade_segundos < ESPERA_CONVERSA_SEGUNDOS
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+
+        return False
+
+    def _agendar_proximo(self, chave: str, estado: dict) -> None:
+        """Sorteia o intervalo (específico de cada tipo) até a próxima
         mensagem e salva o timestamp absoluto, pra sobreviver a reinícios
         do bot."""
-        cfg_canal = CANAIS[canal_id]
+        cfg_canal = CANAIS[chave]
         intervalo_minutos = random.randint(cfg_canal["intervalo_min"], cfg_canal["intervalo_max"])
         estado["proximo_envio_ts"] = time.time() + (intervalo_minutos * 60)
 
@@ -290,24 +376,50 @@ class Autopilot(commands.Cog):
         config = ler_config()
         canais_cfg = config.setdefault("canais", {})
         mudou = False
-        for canal_id in CANAIS:
-            chave = str(canal_id)
+        for chave in CANAIS:
             estado = canais_cfg.setdefault(chave, {})
             if not estado.get("proximo_envio_ts"):
-                self._agendar_proximo(canal_id, estado)
+                self._agendar_proximo(chave, estado)
                 mudou = True
         if mudou:
             salvar_config(config)
 
-    async def _enviar_mensagem(self, canal_id: int):
-        canal = self.bot.get_channel(canal_id)
+    async def _enviar_mensagem(self, chave: str):
+        cfg_canal = CANAIS[chave]
+        canal = self.bot.get_channel(cfg_canal["canal_id"])
         if canal is None:
-            print(f"[AUTOPILOT] ⚠️ Canal {canal_id} não encontrado.")
+            print(f"[AUTOPILOT] ⚠️ Canal {cfg_canal['canal_id']} não encontrado.")
             return
 
-        mensagens = CANAIS[canal_id]["mensagens"]
-        mensagem = random.choice(mensagens)
+        enquetes = cfg_canal.get("enquetes")
+
+        if enquetes and random.random() < CHANCE_ENQUETE:
+            await self._enviar_enquete(canal, random.choice(enquetes))
+            return
+
+        mensagem = random.choice(cfg_canal["mensagens"])
         await canal.send(mensagem)
+
+    async def _enviar_enquete(self, canal: discord.abc.Messageable, enquete: dict):
+        opcoes_texto = "\n".join(f"{emoji}  {texto}" for emoji, texto in enquete["opcoes"])
+        embed = discord.Embed(
+            title="📊 Enquete rápida!",
+            description=f"**{enquete['pergunta']}**\n\n{opcoes_texto}",
+            color=0xEB459E,
+        )
+        embed.set_footer(text="Reage aí com um dos emojis pra votar!")
+
+        try:
+            msg = await canal.send(embed=embed)
+        except discord.HTTPException as e:
+            print(f"[AUTOPILOT] ⚠️ Erro ao enviar enquete: {e}")
+            return
+
+        for emoji, _ in enquete["opcoes"]:
+            try:
+                await msg.add_reaction(emoji)
+            except discord.HTTPException:
+                pass
 
     # ── Comandos de administração ───────────────────────────────────────
     @app_commands.command(name="autopilot_toggle", description="[Staff] Liga ou desliga as mensagens automáticas do bot.")
@@ -321,21 +433,21 @@ class Autopilot(commands.Cog):
         await interaction.response.send_message(f"Autopilot {estado}.", ephemeral=True)
 
     @app_commands.command(name="autopilot_testar", description="[Staff] Força o envio de uma mensagem automática agora, pra testar.")
-    @app_commands.describe(canal="Qual dos dois canais do autopilot testar")
+    @app_commands.describe(canal="Qual dos dois tipos de mensagem do autopilot testar")
     @app_commands.choices(canal=[
         app_commands.Choice(name="Curiosidades gerais", value="geral"),
         app_commands.Choice(name="Curiosidades de Rocket League", value="rl"),
     ])
     @app_commands.checks.has_permissions(administrator=True)
     async def autopilot_testar(self, interaction: discord.Interaction, canal: app_commands.Choice[str]):
-        canal_id = CANAL_GERAL_ID if canal.value == "geral" else CANAL_RL_ID
+        chave = "geral" if canal.value == "geral" else "rocket_league"
 
-        await self._enviar_mensagem(canal_id)
+        await self._enviar_mensagem(chave)
 
         config = ler_config()
         canais_cfg = config.setdefault("canais", {})
-        estado = canais_cfg.setdefault(str(canal_id), {})
-        self._agendar_proximo(canal_id, estado)
+        estado = canais_cfg.setdefault(chave, {})
+        self._agendar_proximo(chave, estado)
         salvar_config(config)
 
         await interaction.response.send_message("✅ Mensagem de teste enviada!", ephemeral=True)
