@@ -11,7 +11,7 @@ AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
 # Categoria onde os canais de voz dos amistosos são criados (separada da
 # categoria do canal de texto).
-CATEGORIA_VOZ_AMISTOSOS_ID = 1532853494317449337
+CATEGORIA_VOZ_AMISTOSOS_ID = 1511912206055506001
 
 FUSO_BRASILIA = timezone(timedelta(hours=-3))
 
