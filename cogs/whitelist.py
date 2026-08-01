@@ -8,6 +8,7 @@ import time
 
 from cogs.backup import ler, salvar
 from cogs.players import CARGOS as PLAYER_CARGOS
+from cogs import mod_utils as mu
 
 # {"Ouro": id, "Platina": id, ...} — montado a partir dos cargos de rank já existentes
 CARGO_RANKS = {c["nome"]: c["id"] for c in PLAYER_CARGOS if c["secao"] == "rank"}
@@ -368,7 +369,7 @@ class ComecarWhitelistView(discord.ui.View):
     @discord.ui.button(label="🗑️ Cancelar/Fechar (staff)", style=discord.ButtonStyle.danger, custom_id="wl_cancelar")
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
         cargos = {r.id for r in interaction.user.roles}
-        if not (interaction.user.guild_permissions.administrator or cargos & CARGOS_QUE_VEEM_WHITELIST):
+        if not (mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator or cargos & CARGOS_QUE_VEEM_WHITELIST):
             await interaction.response.send_message("❌ Apenas staff pode fechar.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
@@ -411,7 +412,7 @@ class FinalizarWhitelistView(discord.ui.View):
 #  View de revisão: só admin pode usar
 # ─────────────────────────────────────────────
 def _checar_admin(interaction: discord.Interaction) -> bool:
-    return interaction.user.guild_permissions.administrator
+    return mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator
 
 
 class RevisaoWhitelistView(discord.ui.View):

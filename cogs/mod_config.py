@@ -43,6 +43,8 @@ class PainelConfigView(discord.ui.View):
         self.autor_id = autor_id
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if mu.eh_super_admin(interaction.user.id):
+            return True
         if interaction.user.id != self.autor_id and not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ Só quem abriu o painel (ou um admin) pode usá-lo.", ephemeral=True)
             return False

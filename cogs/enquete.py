@@ -4,6 +4,7 @@ from discord import app_commands
 import re
 
 from cogs.backup import ler, salvar
+from cogs import mod_utils as mu
 
 # ─────────────────────────────────────────────
 #  Cog: Enquete
@@ -253,7 +254,7 @@ class Enquete(commands.Cog):
         if not registro:
             await interaction.response.send_message("⚠️ Não achei essa enquete.", ephemeral=True)
             return
-        if not interaction.user.guild_permissions.administrator:
+        if not (mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator):
             await interaction.response.send_message("❌ Só administradores podem encerrar a enquete.", ephemeral=True)
             return
 
@@ -287,7 +288,7 @@ class Enquete(commands.Cog):
         if not registro:
             await interaction.response.send_message("⚠️ Não achei essa enquete.", ephemeral=True)
             return
-        if not interaction.user.guild_permissions.administrator:
+        if not (mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator):
             await interaction.response.send_message("❌ Só administradores podem ver os votos.", ephemeral=True)
             return
         if registro.get("anonima"):
@@ -316,7 +317,7 @@ class Enquete(commands.Cog):
     # ── Comando /enquete ──────────────────────────────────────────
     @app_commands.command(name="enquete", description="Cria uma enquete (só administradores)")
     async def enquete_cmd(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.administrator:
+        if not (mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator):
             await interaction.response.send_message("❌ Apenas **administradores** podem criar enquetes.", ephemeral=True)
             return
         await interaction.response.send_modal(EnqueteModal(self))

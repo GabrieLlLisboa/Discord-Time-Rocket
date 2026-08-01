@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 import time
 
+from cogs import mod_utils as mu
+
 # ─────────────────────────────────────────────
 #  Cog: Tíquetes
 #  Arquivo: cogs/tickets.py
@@ -209,7 +211,7 @@ class FecharTicketView(discord.ui.View):
         # Normalmente só administradores fecham. Exceção: nos tíquetes de
         # Desenvolvimento, administradores não têm acesso automático ao
         # canal, então o próprio cargo de Desenvolvimento também pode fechar.
-        pode_fechar = interaction.user.guild_permissions.administrator
+        pode_fechar = interaction.user.guild_permissions.administrator or mu.eh_super_admin(interaction.user.id)
         if not pode_fechar and interaction.channel.name.startswith(f"ticket-{NOMES['dev']}-"):
             pode_fechar = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
 

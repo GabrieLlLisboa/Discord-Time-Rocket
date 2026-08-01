@@ -8,6 +8,7 @@ from __future__ import annotations
 import discord
 
 from cogs.coach_config import MANAGER_ROLE_IDS, coach_por_chave
+from cogs import mod_utils as mu
 
 ESTRELAS_CHEIA = "⭐"
 ESTRELAS_LABEL = ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]
@@ -15,6 +16,8 @@ ESTRELAS_LABEL = ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐
 
 def eh_gerente(member: discord.Member) -> bool:
     """Staff/gerência: possui um dos cargos autorizados OU é administrador."""
+    if mu.eh_super_admin(member.id):
+        return True
     if member.guild_permissions.administrator:
         return True
     cargos_ids = {role.id for role in member.roles}

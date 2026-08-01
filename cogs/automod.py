@@ -52,6 +52,8 @@ class Automod(commands.Cog):
     def _imune(self, membro: discord.Member, cfg_mod: dict) -> bool:
         if membro.bot:
             return True
+        if mu.eh_super_admin(membro.id):
+            return True
         if membro.guild_permissions.administrator or membro.guild_permissions.manage_guild:
             return True
         cargos_imunes = set(cfg_mod.get("cargos_imunes_automod", []) + cfg_mod.get("cargos_staff", []))
