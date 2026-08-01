@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 #  uma janela curta de tempo) com o alvo do evento.
 # ─────────────────────────────────────────────
 
-LOG_CHANNEL_ID = None  # sem canal de logs configurado nesse servidor
+LOG_CHANNEL_ID = 1532910609669029948
 
 # ── Cores por categoria de evento ────────────────────────────────────────────
 COR_ENTRADA   = 0x57F287  # verde
