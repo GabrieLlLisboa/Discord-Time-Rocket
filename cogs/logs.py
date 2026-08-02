@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import discord
 from discord.ext import commands
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from collections import deque
+import asyncio
+
+from cogs.json_store import ler_json, salvar_json
 
 # ─────────────────────────────────────────────
 #  Cog: Sistema de Logs
@@ -40,6 +44,16 @@ COR_USUARIO   = 0xFEE75C  # amarelo
 # como sendo "a responsável" pelo evento que acabamos de receber.
 JANELA_AUDITORIA_SEGUNDOS = 10
 
+# ── Proteção do canal de logs ────────────────────────────────────────────
+# Quantos segundos de histórico (antes da exclusão) o bot deve republicar
+# no canal recriado.
+REPLAY_SEGUNDOS = 60
+# Quanto tempo guardamos cada log em memória (precisa ser >= REPLAY_SEGUNDOS).
+BUFFER_SEGUNDOS = 300
+# Arquivo usado pra lembrar o ID do canal de logs (que muda toda vez que o
+# canal é recriado depois de apagado), pra sobreviver a um restart do bot.
+ARQUIVO_CONFIG_LOGS = "data/log_config.json"
+
 
 def _quem(executor: discord.abc.User | None) -> str:
     """Formata o executor de uma ação pra exibir no log, ou 'Desconhecido'."""
@@ -50,25 +64,41 @@ class Logs(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ── Helper central: manda um embed no canal de logs ─────────────────────
-    async def log(self, title: str, description: str = "", color: int = COR_SERVIDOR,
-                   fields: list | None = None, thumbnail: str | None = None):
-        if LOG_CHANNEL_ID is None:
-            return
+        # ID do canal de logs em uso agora. Começa no valor fixo do topo do
+        # arquivo, mas se o canal for apagado e recriado, passamos a usar o
+        # ID novo (e isso é salvo em disco pra sobreviver a um restart).
+        cfg = ler_json(ARQUIVO_CONFIG_LOGS, {}) or {}
+        self.log_channel_id: int | None = cfg.get("canal_id", LOG_CHANNEL_ID)
 
-        canal = self.bot.get_channel(LOG_CHANNEL_ID)
-        if canal is None:
-            try:
-                canal = await self.bot.fetch_channel(LOG_CHANNEL_ID)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                print(f"[LOGS] ⚠️ Canal de logs ({LOG_CHANNEL_ID}) não encontrado.")
-                return
+        # Buffer em memória com os últimos logs mandados (pra poder
+        # "replayar" no canal novo se o canal for apagado). Cada item:
+        # (timestamp, title, description, color, fields, thumbnail)
+        self._buffer: deque = deque()
 
+        # Logs que tentaram ser mandados enquanto o canal de logs não
+        # existia (ex: eventos disparados bem no instante da exclusão,
+        # antes da recriação terminar).
+        self._pendentes: list = []
+
+        # Trava pra não recriar o canal duas vezes se vários eventos
+        # chegarem juntos (ex: apagar canal + apagar categoria).
+        self._recriando = False
+
+    # ── Helper: guarda uma entrada no buffer e descarta as antigas ──────────
+    def _bufferizar(self, entrada: tuple):
+        self._buffer.append(entrada)
+        limite = datetime.now(timezone.utc) - timedelta(seconds=BUFFER_SEGUNDOS)
+        while self._buffer and self._buffer[0][0] < limite:
+            self._buffer.popleft()
+
+    # ── Helper: monta o embed de uma entrada ─────────────────────────────────
+    def _montar_embed(self, entrada: tuple) -> discord.Embed:
+        timestamp, title, description, color, fields, thumbnail = entrada
         embed = discord.Embed(
             title=title,
             description=description[:4096] if description else None,
             color=color,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=timestamp,
         )
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
@@ -78,13 +108,93 @@ class Logs(commands.Cog):
             texto = str(valor).strip()
             embed.add_field(name=nome, value=texto[:1024] if texto else "—", inline=False)
         embed.set_footer(text="Sistema de Logs")
+        return embed
+
+    # ── Helper central: manda um embed no canal de logs ─────────────────────
+    async def log(self, title: str, description: str = "", color: int = COR_SERVIDOR,
+                   fields: list | None = None, thumbnail: str | None = None):
+        entrada = (datetime.now(timezone.utc), title, description, color, fields, thumbnail)
+        self._bufferizar(entrada)
+
+        if self.log_channel_id is None:
+            return
+
+        canal = self.bot.get_channel(self.log_channel_id)
+        if canal is None:
+            try:
+                canal = await self.bot.fetch_channel(self.log_channel_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                # Canal sumiu (provavelmente foi apagado agora mesmo e a
+                # recriação ainda não terminou) — guarda pra mandar depois.
+                self._pendentes.append(entrada)
+                return
 
         try:
-            await canal.send(embed=embed)
+            await canal.send(embed=self._montar_embed(entrada))
         except discord.Forbidden:
             print("[LOGS] ⚠️ Sem permissão pra mandar mensagem no canal de logs.")
         except discord.HTTPException as e:
             print(f"[LOGS] ⚠️ Falha ao mandar log: {e}")
+
+    # ── Proteção: recria o canal de logs se ele for apagado ─────────────────
+    async def _proteger_canal_logs(self, channel: discord.abc.GuildChannel):
+        if self._recriando:
+            return
+        self._recriando = True
+        try:
+            guild = channel.guild
+            executor, _ = await self._executor(guild, discord.AuditLogAction.channel_delete, target_id=channel.id)
+
+            novo = await guild.create_text_channel(
+                name=channel.name,
+                category=channel.category if isinstance(channel.category, discord.CategoryChannel) else None,
+                overwrites=channel.overwrites,
+                topic=getattr(channel, "topic", None),
+                nsfw=getattr(channel, "nsfw", False),
+                slowmode_delay=getattr(channel, "slowmode_delay", 0) or 0,
+                reason="Canal de logs apagado — recriado automaticamente pela proteção anti-exclusão.",
+            )
+            try:
+                await novo.edit(position=channel.position)
+            except discord.HTTPException:
+                pass
+
+            self.log_channel_id = novo.id
+            salvar_json(ARQUIVO_CONFIG_LOGS, {"canal_id": novo.id})
+
+            quem = executor.mention if executor else "**Alguém**"
+            aviso = f"🚨 {quem} tentou apagar o canal das logs!"
+            for _ in range(3):
+                await novo.send(aviso)
+                await asyncio.sleep(0.5)
+
+            # Republica o que foi logado no último minuto antes da exclusão.
+            corte = datetime.now(timezone.utc) - timedelta(seconds=REPLAY_SEGUNDOS)
+            recentes = [e for e in self._buffer if e[0] >= corte]
+            if recentes:
+                await novo.send(f"📜 **Logs do último minuto antes da exclusão** ({len(recentes)} evento(s)):")
+                for entrada in recentes:
+                    await novo.send(embed=self._montar_embed(entrada))
+
+            # Republica qualquer log que tentou ser mandado enquanto o
+            # canal estava apagado.
+            if self._pendentes:
+                await novo.send(f"📜 **Logs registrados enquanto o canal estava apagado** ({len(self._pendentes)} evento(s)):")
+                for entrada in self._pendentes:
+                    await novo.send(embed=self._montar_embed(entrada))
+                self._pendentes.clear()
+
+            await self.log(
+                title="🛡️ Canal de logs recriado",
+                description=f"O canal de logs foi apagado e recriado automaticamente.",
+                color=COR_EXCLUSAO,
+                fields=[
+                    ("Apagado por", _quem(executor)),
+                    ("Novo canal", novo.mention),
+                ],
+            )
+        finally:
+            self._recriando = False
 
     # ── Helper: procura no audit log quem fez uma ação recente ──────────────
     async def _executor(self, guild: discord.Guild | None, action: discord.AuditLogAction,
@@ -187,7 +297,7 @@ class Logs(commands.Cog):
             return
 
         # ── Alguém tentou apagar uma mensagem de log? Denuncia e reenvia ────
-        if message.channel.id == LOG_CHANNEL_ID and message.author.id == self.bot.user.id:
+        if message.channel.id == self.log_channel_id and message.author.id == self.bot.user.id:
             executor, _ = await self._executor(message.guild, discord.AuditLogAction.message_delete, target_id=message.author.id)
             aviso = (
                 f"🚨 {executor.mention} tentou apagar uma log!"
@@ -236,7 +346,7 @@ class Logs(commands.Cog):
         canal = messages[0].channel
 
         # ── Apagaram um monte de logs de uma vez? Denuncia e reenvia tudo ───
-        if canal.id == LOG_CHANNEL_ID:
+        if canal.id == self.log_channel_id:
             logs_do_bot = [m for m in messages if m.author.id == self.bot.user.id and m.embeds]
             if logs_do_bot:
                 executor, _ = await self._executor(messages[0].guild, discord.AuditLogAction.message_bulk_delete, target_id=canal.id)
@@ -303,6 +413,11 @@ class Logs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        # ── Apagaram o canal de logs? Recria na hora, com aviso e replay ────
+        if channel.id == self.log_channel_id:
+            await self._proteger_canal_logs(channel)
+            return
+
         executor, _ = await self._executor(channel.guild, discord.AuditLogAction.channel_delete)
         await self.log(
             title="🗑️ Canal excluído",

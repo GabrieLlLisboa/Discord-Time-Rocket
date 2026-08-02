@@ -632,6 +632,8 @@ class Whitelist(commands.Cog):
         nome = membro.mention if membro else f"<@{membro_id}>"
 
         embed = discord.Embed(description=f"{nome} — **{label}**", color=cor)
+        if membro:
+            embed.set_thumbnail(url=membro.display_avatar.url)
 
         if status in ("aprovada", "recusada"):
             decidido_por_id = registro.get("decidido_por_id")
@@ -642,6 +644,19 @@ class Whitelist(commands.Cog):
             elif decidido_por_nome:
                 verbo = "Aprovado" if status == "aprovada" else "Recusado"
                 embed.add_field(name="Responsável", value=f"{verbo} por **{decidido_por_nome}**", inline=False)
+
+        # ── Respostas da whitelist (mesmas exibidas em /perfil-whitelist) ──
+        r = registro.get("respostas", {})
+        if r:
+            embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
+            embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
+            embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
+            embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
+            embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
+            embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
+            embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
+            embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
+            embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
 
         msg_id = registro.get("status_msg_id")
         if msg_id:
