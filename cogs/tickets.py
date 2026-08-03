@@ -491,6 +491,38 @@ class FecharTicketView(discord.ui.View):
         )
 
 
+# ── Botão de reabrir tíquete (aparece na mensagem de fechamento) ────────────
+class ReabrirTicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔓 Reabrir Tíquete", style=discord.ButtonStyle.success, custom_id="reabrir_ticket")
+    async def reabrir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        canal = interaction.channel
+
+        # Mesma regra de permissão do botão de fechar: administradores, staff
+        # (cargo de equipe) e, nos tíquetes de Desenvolvimento, o próprio
+        # cargo de Desenvolvimento também pode reabrir.
+        pode_reabrir = (
+            interaction.user.guild_permissions.administrator
+            or mu.eh_super_admin(interaction.user.id)
+            or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
+        )
+        if not pode_reabrir and canal.name.startswith(f"ticket-{NOMES['dev']}-"):
+            pode_reabrir = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+
+        if not pode_reabrir:
+            await interaction.response.send_message(
+                "❌ Você não tem permissão para reabrir este tíquete.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        cog: "Tickets" = interaction.client.get_cog("Tickets")
+        await cog.reabrir_ticket(interaction)
+
+
 # ── Escolha: fechar (mantém o canal) ou deletar de vez ──────────────────────
 class EscolhaFecharView(discord.ui.View):
     def __init__(self):
@@ -748,7 +780,12 @@ class Tickets(commands.Cog):
             except discord.Forbidden:
                 pass
             try:
-                await canal.send("🔒 Este tíquete foi **fechado** (canal mantido para consulta). A transcrição foi enviada na sua DM.")
+                await canal.send(
+                    "🔒 Este tíquete foi **fechado** (canal mantido para consulta). "
+                    "A transcrição foi enviada na sua DM.\n"
+                    "Se precisar continuar o atendimento, clique em **Reabrir Tíquete** abaixo.",
+                    view=ReabrirTicketView(),
+                )
             except discord.HTTPException:
                 pass
             try:
@@ -756,6 +793,59 @@ class Tickets(commands.Cog):
             except discord.HTTPException:
                 pass
             print(f"[TICKET] 🔒 Canal {canal.name} fechado (não deletado) por {interaction.user}.")
+
+    # ── Reabre um tíquete previamente fechado (canal mantido) ───────────────
+    async def reabrir_ticket(self, interaction: discord.Interaction):
+        canal = interaction.channel
+        guild = interaction.guild
+
+        dono_id = self._extrair_dono_id(canal.name)
+        dono = guild.get_member(dono_id) if dono_id else None
+        if dono is None and dono_id:
+            try:
+                dono = await self.bot.fetch_user(dono_id)
+            except discord.HTTPException:
+                dono = None
+
+        # Devolve a permissão de escrever pro dono do tíquete
+        if isinstance(dono, discord.Member):
+            try:
+                await canal.set_permissions(dono, view_channel=True, send_messages=True)
+            except discord.Forbidden:
+                pass
+
+        # Volta a contar o tempo de resposta como se o tíquete tivesse
+        # acabado de ser aberto de novo (senão a métrica de tempo médio de
+        # resposta ficaria com um tíquete "fechado" preso pra sempre).
+        registro_abertos = _ler_abertos()
+        registro_abertos[str(canal.id)] = {"criado_em": time.time(), "respondido": False}
+        _salvar_abertos(registro_abertos)
+
+        # Remove o botão "Reabrir" da mensagem antiga de fechamento
+        try:
+            await interaction.message.edit(view=None)
+        except discord.HTTPException:
+            pass
+
+        embed = discord.Embed(
+            title="🔓 Tíquete Reaberto",
+            description=(
+                f"Este tíquete foi **reaberto** por {interaction.user.mention}.\n"
+                + (f"{dono.mention} já pode enviar mensagens novamente." if dono else "")
+            ),
+            color=0x57F287,
+        )
+        try:
+            await canal.send(embed=embed, view=FecharTicketView())
+        except discord.HTTPException:
+            pass
+
+        try:
+            await interaction.followup.send("🔓 Tíquete reaberto com sucesso!", ephemeral=True)
+        except discord.HTTPException:
+            pass
+
+        print(f"[TICKET] 🔓 Canal {canal.name} reaberto por {interaction.user}.")
 
     @commands.command(name="setup")
     @commands.has_permissions(administrator=True)
