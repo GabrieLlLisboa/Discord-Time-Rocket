@@ -170,6 +170,9 @@ DIVISOES = ["Divisão 1", "Divisão 2", "Divisão 3"]
 
 TEMPOS_JOGANDO = ["Menos de 1 ano", "1 a 2 anos", "2 a 4 anos", "Mais de 4 anos"]
 
+# Habilidades extras — pergunta opcional, feita na mesma etapa do TikTok.
+HABILIDADES = ["Programação", "Designer", "Roteiro", "Editor de vídeo", "Administração"]
+
 
 def _slug(nome: str) -> str:
     nome = nome.lower().strip()
@@ -328,10 +331,11 @@ class EscolhaSelect(discord.ui.Select):
             await self.cog.enviar_pergunta(interaction.channel, membro, "tempo")
             return
 
-        # Quem não tem TikTok pula o formulário de link e vai direto pras dúvidas
+        # Quem não tem TikTok pula o formulário de link e vai pra pergunta
+        # opcional de habilidades (mesma etapa da pergunta do TikTok).
         if self.step == "tem_tiktok" and valor == "Não":
             self.cog.salvar_resposta(membro.id, "tiktok", "Não possui")
-            await self.cog.enviar_pergunta(interaction.channel, membro, "duvidas")
+            await self.cog.enviar_pergunta(interaction.channel, membro, "habilidades")
             return
 
         if self.prox_step:
@@ -343,6 +347,43 @@ class EscolhaView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(EscolhaSelect(cog, step, opcoes, placeholder, prox_step, emojis))
         self.add_item(DesistirButton())
+
+
+# ─────────────────────────────────────────────
+#  Habilidades — pergunta opcional (multi-seleção), mesma etapa do TikTok
+# ─────────────────────────────────────────────
+class HabilidadesSelect(discord.ui.Select):
+    def __init__(self):
+        options = [discord.SelectOption(label=h) for h in HABILIDADES]
+        super().__init__(
+            placeholder="Escolha uma ou mais habilidades (opcional)...",
+            options=options,
+            min_values=1,
+            max_values=len(options),
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cog: "Whitelist" = interaction.client.get_cog("Whitelist")
+        membro = interaction.user
+        valor = ", ".join(self.values)
+        cog.salvar_resposta(membro.id, "habilidades", valor)
+        await interaction.response.send_message(f"✅ Habilidade(s) registrada(s): **{valor}**")
+        await cog.prosseguir_apos_habilidades(interaction.channel, membro)
+
+
+class HabilidadesView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(HabilidadesSelect())
+        self.add_item(DesistirButton())
+
+    @discord.ui.button(label="⏭️ Pular", style=discord.ButtonStyle.secondary, custom_id="wl_pular_habilidades", row=1)
+    async def pular(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog: "Whitelist" = interaction.client.get_cog("Whitelist")
+        membro = interaction.user
+        cog.salvar_resposta(membro.id, "habilidades", "Nenhuma")
+        await interaction.response.send_message("⏭️ Pergunta pulada — nenhuma habilidade registrada.")
+        await cog.prosseguir_apos_habilidades(interaction.channel, membro)
 
 
 # ─────────────────────────────────────────────
@@ -657,6 +698,7 @@ class Whitelist(commands.Cog):
             embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
             embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
             embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
+            embed.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
 
         msg_id = registro.get("status_msg_id")
         if msg_id:
@@ -772,6 +814,16 @@ class Whitelist(commands.Cog):
             return "⚠️ Não tenho permissão pra dar o cargo de rank."
         return None
 
+    # ── Depois da pergunta opcional de habilidades, retoma o fluxo normal:
+    # quem tem TikTok vai preencher o link, quem não tem já vai pras dúvidas ──
+    async def prosseguir_apos_habilidades(self, canal: discord.TextChannel, membro: discord.Member):
+        registro = self.dados.get(str(membro.id), {})
+        tem_tiktok = registro.get("respostas", {}).get("tem_tiktok")
+        if tem_tiktok == "Sim":
+            await self.enviar_pergunta(canal, membro, "perguntas_abertas")
+        else:
+            await self.enviar_pergunta(canal, membro, "duvidas")
+
     # ── Envia a pergunta correspondente ao passo ────────────────────
     async def enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str):
         if step == "idioma":
@@ -807,8 +859,19 @@ class Whitelist(commands.Cog):
             await canal.send("📈 **Você pretende ser um membro ativo na equipe?**", view=view)
 
         elif step == "tem_tiktok":
-            view = EscolhaView(self, "tem_tiktok", ["Sim", "Não"], "Você tem TikTok?", "perguntas_abertas")
+            view = EscolhaView(self, "tem_tiktok", ["Sim", "Não"], "Você tem TikTok?", "habilidades")
             await canal.send("🎵 **Você tem conta no TikTok?**", view=view)
+
+        elif step == "habilidades":
+            embed = discord.Embed(
+                title="🛠️ Alguma habilidade extra?",
+                description=(
+                    "Você tem alguma dessas habilidades? **(opcional, pode selecionar mais de uma ou pular)**\n\n"
+                    + "\n".join(f"• {h}" for h in HABILIDADES)
+                ),
+                color=0x5865F2,
+            )
+            await canal.send(embed=embed, view=HabilidadesView())
 
         elif step == "perguntas_abertas":
             embed = discord.Embed(
@@ -876,6 +939,7 @@ class Whitelist(commands.Cog):
         embed_resumo.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed_resumo.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
         embed_resumo.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
+        embed_resumo.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
         embed_resumo.set_footer(text=f"ID: {membro.id}")
         await interaction.channel.send(embed=embed_resumo)
 
@@ -1180,6 +1244,7 @@ class Whitelist(commands.Cog):
         embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
         embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
+        embed.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
         embed.set_footer(text=f"ID: {membro.id}")
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
