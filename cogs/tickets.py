@@ -147,6 +147,11 @@ CORES = {
 # NÃO são adicionados automaticamente aqui.
 CARGO_DESENVOLVIMENTO_ID = 1525540085112770746
 
+# Cargo da equipe: quem tem esse cargo é considerado "staff" pra tudo
+# relacionado a tíquetes — vê todos os tíquetes (inclusive os de
+# Desenvolvimento) e pode fechar/deletar qualquer um, igual administrador.
+CARGO_EQUIPE_ID = 1532184563491541164
+
 
 # ── Helpers de tempo médio de resposta (imagem) ─────────────────────────────
 _FONTES_CANDIDATAS = [
@@ -382,18 +387,29 @@ class TicketSelect(discord.ui.Select):
         }
 
         if valor == "dev":
-            # Categoria restrita: só quem abriu e o cargo de Desenvolvimento
-            # enxergam esse tíquete. Administradores não entram automaticamente.
+            # Categoria restrita: só quem abriu, o cargo de Desenvolvimento e
+            # o cargo da equipe enxergam esse tíquete. Administradores não
+            # entram automaticamente aqui (só via cargo da equipe, se tiverem).
             cargo_dev = guild.get_role(CARGO_DESENVOLVIMENTO_ID)
             if cargo_dev is not None:
                 overwrites[cargo_dev] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
             else:
                 print(f"[TICKET] ⚠️ Cargo de Desenvolvimento ({CARGO_DESENVOLVIMENTO_ID}) não encontrado no servidor.")
+
+            cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
+            if cargo_equipe is not None:
+                overwrites[cargo_equipe] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
         else:
             # Administradores também veem
             for role in guild.roles:
                 if role.permissions.administrator:
                     overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+
+            cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
+            if cargo_equipe is not None:
+                overwrites[cargo_equipe] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+            else:
+                print(f"[TICKET] ⚠️ Cargo da equipe ({CARGO_EQUIPE_ID}) não encontrado no servidor.")
 
         # Cria o canal
         canal = await guild.create_text_channel(
@@ -453,7 +469,11 @@ class FecharTicketView(discord.ui.View):
         # Normalmente só administradores fecham. Exceção: nos tíquetes de
         # Desenvolvimento, administradores não têm acesso automático ao
         # canal, então o próprio cargo de Desenvolvimento também pode fechar.
-        pode_fechar = interaction.user.guild_permissions.administrator or mu.eh_super_admin(interaction.user.id)
+        pode_fechar = (
+            interaction.user.guild_permissions.administrator
+            or mu.eh_super_admin(interaction.user.id)
+            or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
+        )
         if not pode_fechar and interaction.channel.name.startswith(f"ticket-{NOMES['dev']}-"):
             pode_fechar = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
 
