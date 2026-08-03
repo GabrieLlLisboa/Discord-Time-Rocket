@@ -212,16 +212,6 @@ class Resultados(commands.Cog):
                     perfis[sid]["derrotas"] += 1
             salvar("perfis", perfis)
 
-            # Confere se alguém desbloqueou uma medalha nova com esse resultado
-            # (ex: "Estreante", "Vencedor"...). Feito depois de salvar o perfil
-            # pra já considerar os números atualizados.
-            medalhas_cog = interaction.client.get_cog("Medalhas")
-            if medalhas_cog:
-                for mid in confirmados_ids:
-                    membro_alvo = interaction.guild.get_member(mid)
-                    if membro_alvo:
-                        await medalhas_cog.verificar_membro(membro_alvo, interaction.guild)
-
         resultados_lista = resultados if isinstance(resultados, list) else []
         resultados_lista.append({
             "adversario":     adversario,

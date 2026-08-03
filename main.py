@@ -134,7 +134,6 @@ COGS = [
     "cogs.tracker",
     "cogs.atividade",
     "cogs.mais_ativo",
-    "cogs.medalhas",
     "cogs.campeonato",
     "cogs.logs",
     "cogs.convites",
