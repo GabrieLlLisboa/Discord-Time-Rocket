@@ -87,6 +87,7 @@ COGS = [
     "cogs.autopilot",
     "cogs.conversar",
     "cogs.aleatory",
+    "cogs.webterminal",
 
     # ── Sistema de Moderação ──
     "cogs.mod_config",
