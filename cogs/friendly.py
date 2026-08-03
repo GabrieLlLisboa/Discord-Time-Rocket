@@ -13,6 +13,11 @@ AMISTOSOS_CHANNEL_ID = 1514778555970621531
 # categoria do canal de texto).
 CATEGORIA_VOZ_AMISTOSOS_ID = 1511912206055506001
 
+# Canais de voz pra onde os membros são movidos quando o amistoso acaba e o
+# canal de voz do amistoso vai ser apagado. Prioridade pro que estiver vazio;
+# se os dois já tiverem gente, usa o primeiro da lista.
+CANAIS_VOZ_POS_AMISTOSO = [1514777010293964830, 1532926276464279563]
+
 FUSO_BRASILIA = timezone(timedelta(hours=-3))
 
 # Aceita formatos tipo "15/06 às 20h00", "15/06 20:00", "15/06 as 21h",
@@ -566,6 +571,31 @@ class Friendly(commands.Cog):
                 except discord.HTTPException as e:
                     print(f"[AMISTOSO] ⚠️ Erro ao mandar lembrete por DM pra {uid}: {e}")
 
+    # ── Move quem estava na call do amistoso pra uma das calls fixas ────────
+    async def _mover_membros_pos_amistoso(self, canal_voz: discord.VoiceChannel):
+        membros = list(canal_voz.members)
+        if not membros:
+            return
+
+        guild = canal_voz.guild
+        destinos = [guild.get_channel(cid) for cid in CANAIS_VOZ_POS_AMISTOSO]
+        destinos = [c for c in destinos if isinstance(c, discord.VoiceChannel)]
+        if not destinos:
+            print("[AMISTOSO] ⚠️ Nenhum dos canais de voz de destino foi encontrado.")
+            return
+
+        # Prioridade pro canal que estiver vazio; se nenhum estiver vazio
+        # (ou os dois estiverem), pega o primeiro da lista.
+        destino = next((c for c in destinos if len(c.members) == 0), destinos[0])
+
+        for membro in membros:
+            try:
+                await membro.move_to(destino, reason="Fim do amistoso — realocado da call do amistoso.")
+            except discord.Forbidden:
+                print(f"[AMISTOSO] ⚠️ Sem permissão pra mover {membro} pra {destino.name}.")
+            except discord.HTTPException as e:
+                print(f"[AMISTOSO] ⚠️ Erro ao mover {membro} pra {destino.name}: {e}")
+
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         if message.channel.id != AMISTOSOS_CHANNEL_ID:
@@ -583,6 +613,7 @@ class Friendly(commands.Cog):
         if canal_voz_id:
             canal_voz = self.bot.get_channel(canal_voz_id)
             if canal_voz:
+                await self._mover_membros_pos_amistoso(canal_voz)
                 await canal_voz.delete(reason="Mensagem do amistoso deletada — canal de voz removido automaticamente.")
                 print(f"[AMISTOSO] 🗑️ Canal de voz {canal_voz.name} deletado junto com o anúncio.")
 
