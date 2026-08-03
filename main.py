@@ -1,10 +1,70 @@
+import importlib.util
+import os
+import subprocess
+import sys
+
+
+def _garantir_dependencias():
+    """Confere se tudo que está em requirements.txt já está instalado ANTES
+    de importar discord/dotenv/etc. Se faltar algo (ex: alguém deu 'git pull'
+    e um requirement novo entrou, ou o venv foi criado do zero), instala tudo
+    sozinho — presume que já está rodando dentro do venv certo, então usa o
+    mesmo python/pip do processo atual (sys.executable)."""
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    caminho_requirements = os.path.join(raiz, "requirements.txt")
+    if not os.path.isfile(caminho_requirements):
+        return
+
+    # Nome do pacote no requirements.txt nem sempre bate com o nome do
+    # módulo Python que se importa (ex: "discord.py" -> "discord").
+    MAPA_NOMES = {
+        "discord.py": "discord",
+        "python-dotenv": "dotenv",
+        "pillow": "PIL",
+    }
+
+    faltando = []
+    with open(caminho_requirements, "r", encoding="utf-8") as f:
+        for linha in f:
+            linha = linha.strip()
+            if not linha or linha.startswith("#"):
+                continue
+            nome_pacote = linha.split("==")[0].split(">=")[0].split("<=")[0].split("~=")[0].strip()
+            nome_modulo = MAPA_NOMES.get(nome_pacote.lower(), nome_pacote.replace("-", "_"))
+            try:
+                encontrado = importlib.util.find_spec(nome_modulo) is not None
+            except (ImportError, ValueError, ModuleNotFoundError):
+                encontrado = False
+            if not encontrado:
+                faltando.append(linha)
+
+    if not faltando:
+        return
+
+    print(f"[SETUP] ⚠️ Dependência(s) faltando no venv: {', '.join(faltando)}")
+    print("[SETUP] 📦 Instalando tudo do requirements.txt automaticamente...")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", caminho_requirements],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"[SETUP] ❌ Falha ao instalar dependências automaticamente: {e}")
+        print("[SETUP]    Roda manualmente: pip install -r requirements.txt")
+        raise SystemExit(1)
+
+    importlib.invalidate_caches()
+    print("[SETUP] ✅ Dependências instaladas. Continuando a inicialização...")
+
+
+_garantir_dependencias()
+
 import asyncio
 import inspect
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-import os
 
 from cogs.mod_utils import SUPER_ADMIN_IDS
 
