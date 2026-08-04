@@ -138,11 +138,21 @@ class MaisAtivo(commands.Cog):
         if controle.get("ultimo_dia_anunciado") == ontem:
             return  # já anunciou o dia de ontem, nada a fazer
 
-        for guild in self.bot.guilds:
-            try:
-                await self._anunciar_mais_ativo(guild, ontem)
-            except Exception as e:
-                print(f"[MAIS_ATIVO] ⚠️ Erro ao anunciar em {guild}: {e}")
+        # Manda só UMA vez, pro servidor dono do canal de anúncio — antes o
+        # código percorria todos os servidores em que o bot está (self.bot.guilds)
+        # chamando get_channel(CANAL_RANKING_ID), que é uma busca GLOBAL (não por
+        # servidor). Se o bot estiver em mais de um servidor, isso repetia o
+        # mesmo anúncio, um por servidor, sempre no mesmo canal — daí a
+        # mensagem duplicada.
+        canal = self.bot.get_channel(CANAL_RANKING_ID)
+        if canal is None:
+            print(f"[MAIS_ATIVO] ⚠️ Canal {CANAL_RANKING_ID} não encontrado.")
+            return
+
+        try:
+            await self._anunciar_mais_ativo(canal.guild, ontem)
+        except Exception as e:
+            print(f"[MAIS_ATIVO] ⚠️ Erro ao anunciar em {canal.guild}: {e}")
 
         controle["ultimo_dia_anunciado"] = ontem
         _salvar_controle(controle)

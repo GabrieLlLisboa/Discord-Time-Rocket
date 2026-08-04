@@ -114,7 +114,7 @@ AUTOMOD_PADRAO = {
     "anti_caps": True,
     "anti_caps_percentual": 70,     # % de maiúsculas pra acionar (msg com 8+ caracteres)
     "anti_mencoes": True,
-    "anti_mencoes_limite": 5,       # nº de menções numa única mensagem
+    "anti_mencoes_limite": 8,       # nº de menções ÚNICAS (usuário+cargo) numa única mensagem
     "anti_emojis": True,
     "anti_emojis_limite": 10,       # nº de emojis numa única mensagem
     "anti_phishing": True,

@@ -159,10 +159,21 @@ class Automod(commands.Cog):
                     return
 
         # ── Menções em massa ──────────────────────────────────────────────
+        # @everyone/@here de quem não deveria conseguir pingar geral é sempre
+        # suspeito, então isso conta separado (e mais grave) do que só juntar
+        # um grupo de gente — cargos_staff/administradores já ficam imunes
+        # (ver _imune acima), então isso só pega quem realmente não deveria.
+        if cfg.get("anti_mencoes") and message.mention_everyone:
+            await self._acao(message, "Menção a @everyone/@here por quem não é staff", conteudo, cfg)
+            return
+
         if cfg.get("anti_mencoes"):
-            total_mencoes = len(message.mentions) + len(message.role_mentions)
-            if total_mencoes >= cfg.get("anti_mencoes_limite", 5):
-                await self._acao(message, "Menções em massa", f"{total_mencoes} menções", cfg)
+            # Deduplica: mencionar a mesma pessoa 2x na mesma mensagem (ex:
+            # "@fulano vem, @fulano confirma") não deveria contar em dobro.
+            usuarios_unicos = {m.id for m in message.mentions}
+            total_mencoes = len(usuarios_unicos) + len(cargos_unicos)
+            if total_mencoes >= cfg.get("anti_mencoes_limite", 8):
+                await self._acao(message, "Menções em massa", f"{total_mencoes} menções únicas", cfg)
                 return
 
         # ── Excesso de emojis ─────────────────────────────────────────────
