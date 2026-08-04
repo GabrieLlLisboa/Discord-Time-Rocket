@@ -171,6 +171,7 @@ class Automod(commands.Cog):
             # Deduplica: mencionar a mesma pessoa 2x na mesma mensagem (ex:
             # "@fulano vem, @fulano confirma") não deveria contar em dobro.
             usuarios_unicos = {m.id for m in message.mentions}
+            cargos_unicos = {r.id for r in message.role_mentions}
             total_mencoes = len(usuarios_unicos) + len(cargos_unicos)
             if total_mencoes >= cfg.get("anti_mencoes_limite", 8):
                 await self._acao(message, "Menções em massa", f"{total_mencoes} menções únicas", cfg)
