@@ -22,7 +22,7 @@ import console as console_local
 #      é o mesmo código de console.py.
 # ─────────────────────────────────────────────
 
-CANAL_TERMINAL_ID = 1533963932853604496
+CANAL_TERMINAL_ID = 1534197342922735679
 
 # De quanto em quanto tempo o buffer acumulado é mandado pro Discord.
 INTERVALO_FLUSH_SEGUNDOS = 1.5
