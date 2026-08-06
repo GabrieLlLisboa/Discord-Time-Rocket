@@ -180,6 +180,9 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
 
 
 class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
+    # pra add uma pergunta nova de texto livre é só criar outro TextInput
+    # aqui embaixo, tipo o do tiktok, só troca label/placeholder/max_length
+    # modal aceita até 5 campos, então dá de sobra
     tiktok = discord.ui.TextInput(
         label="Qual o link da sua conta do TikTok?",
         placeholder="Ex: https://www.tiktok.com/@seuusuario",
@@ -195,6 +198,9 @@ class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
     async def on_submit(self, interaction: discord.Interaction):
         membro = interaction.user
         self.cog.salvar_resposta(membro.id, "tiktok", self.tiktok.value.strip())
+        # e aqui salva a resposta do campo novo, mesma ideia, só troca a
+        # chave (o nome que fica salvo no json, tipo "tiktok") e o valor
+        # pra pegar do campo que vc criou lá em cima
 
         await interaction.response.send_message("✅ Respostas registradas!")
         await self.cog.enviar_pergunta(interaction.channel, membro, "duvidas")
@@ -633,6 +639,9 @@ class Whitelist(commands.Cog):
             embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
             embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
             embed.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
+            # pergunta nova entra aqui tb, mais um add_field igual esses de cima
+            # (tem mais uns 2 lugares no arquivo que montam esse mesmo resumo,
+            # procura por "TikTok" que acha todos)
 
         msg_id = registro.get("status_msg_id")
         if msg_id:
@@ -809,6 +818,8 @@ class Whitelist(commands.Cog):
                 description=(
                     "Só falta mais uma coisa. Clica no botão abaixo pra abrir o formulário:\n\n"
                     "• Qual o link da sua conta do TikTok?"
+                    # se add pergunta nova no modal, bota ela aqui também
+                    # nessa listinha, só copia o padrão de cima
                 ),
                 color=0x5865F2,
             )
@@ -870,6 +881,7 @@ class Whitelist(commands.Cog):
         embed_resumo.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
         embed_resumo.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
         embed_resumo.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
+        # add_field da pergunta nova entra aqui tb, mesmo esquema
         embed_resumo.set_footer(text=f"ID: {membro.id}")
         await interaction.channel.send(embed=embed_resumo)
 
@@ -895,6 +907,9 @@ class Whitelist(commands.Cog):
                 embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
                 embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
                 embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
+                # esse aqui (log) nem tem os campos de tiktok/habilidades ainda
+                # se for add a pergunta nova, bota ela junto com esses dois que
+                # tão faltando, mesmo padrão dos outros embeds
                 embed.set_footer(text=f"ID: {membro.id}")
                 await canal_log.send(embed=embed)
 
@@ -1160,6 +1175,8 @@ class Whitelist(commands.Cog):
         embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
         embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
         embed.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
+        # e o add_field da pergunta nova aqui tb, esse aqui é o resumo
+        # que aparece no comando de consulta manual
         embed.set_footer(text=f"ID: {membro.id}")
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
