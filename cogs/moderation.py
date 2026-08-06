@@ -7,19 +7,6 @@ from datetime import datetime, timezone, timedelta
 
 from cogs import mod_utils as mu
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Cog: Moderação
-#  Arquivo: cogs/moderation.py
-#
-#  Todos os comandos de moderação em Slash Command:
-#   warn, avisos, timeout, untimeout, kick, ban, tempban, unban, softban,
-#   clear, slowmode, nick, lock, unlock, cargo (add/remove), canal
-#   (criar/deletar/renomear), thread (trancar/destrancar/arquivar), historico
-#
-#  Todas as ações perigosas pedem confirmação (configurável) e tudo é
-#  registrado no histórico de punições + no canal de logs de moderação.
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 def _exige_confirmacao(guild_id: int) -> bool:
     return mu.get_config(guild_id).get("exigir_confirmacao", True)
@@ -33,7 +20,7 @@ class Moderation(commands.Cog):
     def cog_unload(self):
         self.checar_temporarias.cancel()
 
-    # ── Loop: expira tempbans/timeouts vencidos automaticamente ─────────────
+
     @tasks.loop(minutes=1)
     async def checar_temporarias(self):
         await self.bot.wait_until_ready()
@@ -55,7 +42,7 @@ class Moderation(commands.Cog):
                                            f"<@{registro['user_id']}> (`{registro['user_id']}`) foi desbanido automaticamente.",
                                            mu.COR_SUCESSO)
                     await mu.enviar_log_moderacao(self.bot, guild, embed)
-                # timeouts expiram sozinhos pelo próprio Discord — só limpamos o registro
+
                 elif registro["tipo"] == "timeout":
                     mu.remover_punicao(guild.id, registro["id"])
 
@@ -63,7 +50,7 @@ class Moderation(commands.Cog):
     async def _antes(self):
         await self.bot.wait_until_ready()
 
-    # ── /warn ─────────────────────────────────────────────────────────────
+
     @app_commands.command(name="warn", description="Aplica uma advertência a um membro.")
     @app_commands.describe(membro="Membro a ser advertido", motivo="Motivo da advertência")
     @app_commands.default_permissions(moderate_members=True)
@@ -88,7 +75,7 @@ class Moderation(commands.Cog):
 
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /avisos ───────────────────────────────────────────────────────────
+
     @app_commands.command(name="avisos", description="Lista os avisos ativos de um membro.")
     @app_commands.describe(membro="Membro a consultar")
     @app_commands.default_permissions(moderate_members=True)
@@ -107,7 +94,7 @@ class Moderation(commands.Cog):
         embed.set_thumbnail(url=membro.display_avatar.url)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # ── /removeraviso ─────────────────────────────────────────────────────
+
     @app_commands.command(name="removeraviso", description="Remove (invalida) um aviso pelo número do caso.")
     @app_commands.describe(caso_id="Número do caso (veja em /avisos ou /historico)")
     @app_commands.default_permissions(moderate_members=True)
@@ -118,7 +105,7 @@ class Moderation(commands.Cog):
         else:
             await interaction.response.send_message(embed=mu.embed_erro(f"Caso `#{caso_id}` não encontrado."), ephemeral=True)
 
-    # ── /historico-punicoes ──────────────────────────────────────────────
+
     @app_commands.command(name="historico-punicoes", description="Mostra o histórico completo de punições de um membro.")
     @app_commands.describe(membro="Membro a consultar")
     @app_commands.default_permissions(moderate_members=True)
@@ -140,7 +127,7 @@ class Moderation(commands.Cog):
         embed.set_footer(text=f"Mostrando os {len(regs)} casos mais recentes")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # ── /timeout ──────────────────────────────────────────────────────────
+
     @app_commands.command(name="timeout", description="Aplica timeout (silenciar temporariamente) em um membro.")
     @app_commands.describe(membro="Membro", duracao="Ex: 10m, 1h, 1h30m, 7d (máx 28d)", motivo="Motivo")
     @app_commands.default_permissions(moderate_members=True)
@@ -172,7 +159,7 @@ class Moderation(commands.Cog):
                                         f"**Servidor:** {interaction.guild.name}\n**Duração:** {dur_txt}\n**Motivo:** {motivo}", mu.COR_ALERTA))
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /untimeout ────────────────────────────────────────────────────────
+
     @app_commands.command(name="untimeout", description="Remove o timeout de um membro.")
     @app_commands.describe(membro="Membro", motivo="Motivo")
     @app_commands.default_permissions(moderate_members=True)
@@ -185,7 +172,7 @@ class Moderation(commands.Cog):
         await interaction.response.send_message(embed=embed)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /kick ─────────────────────────────────────────────────────────────
+
     @app_commands.command(name="kick", description="Expulsa um membro do servidor.")
     @app_commands.describe(membro="Membro", motivo="Motivo")
     @app_commands.default_permissions(kick_members=True)
@@ -216,7 +203,7 @@ class Moderation(commands.Cog):
         await _responder(interaction, embed)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /ban ──────────────────────────────────────────────────────────────
+
     @app_commands.command(name="ban", description="Bane um membro/usuário permanentemente.")
     @app_commands.describe(usuario="Usuário (pode ser ID de quem não está no servidor)", motivo="Motivo",
                             apagar_mensagens="Apagar mensagens dos últimos X dias (0-7)")
@@ -250,7 +237,7 @@ class Moderation(commands.Cog):
         await _responder(interaction, embed)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /tempban ──────────────────────────────────────────────────────────
+
     @app_commands.command(name="tempban", description="Bane um usuário temporariamente (desbane sozinho ao expirar).")
     @app_commands.describe(usuario="Usuário", duracao="Ex: 1d, 7d, 12h", motivo="Motivo")
     @app_commands.default_permissions(ban_members=True)
@@ -287,7 +274,7 @@ class Moderation(commands.Cog):
         await _responder(interaction, embed)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /unban ────────────────────────────────────────────────────────────
+
     @app_commands.command(name="unban", description="Remove o banimento de um usuário pelo ID.")
     @app_commands.describe(user_id="ID do usuário banido", motivo="Motivo")
     @app_commands.default_permissions(ban_members=True)
@@ -310,7 +297,7 @@ class Moderation(commands.Cog):
         await interaction.response.send_message(embed=embed)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /softban ──────────────────────────────────────────────────────────
+
     @app_commands.command(name="softban", description="Bane e desbane na hora, apagando as mensagens recentes do membro.")
     @app_commands.describe(membro="Membro", motivo="Motivo", apagar_dias="Dias de mensagens a apagar (1-7)")
     @app_commands.default_permissions(ban_members=True)
@@ -342,7 +329,7 @@ class Moderation(commands.Cog):
         await _responder(interaction, embed)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /clear ────────────────────────────────────────────────────────────
+
     @app_commands.command(name="clear", description="Apaga mensagens do canal.")
     @app_commands.describe(quantidade="Número de mensagens (1-1000)", membro="Apagar só mensagens desse membro (opcional)")
     @app_commands.default_permissions(manage_messages=True)
@@ -367,7 +354,7 @@ class Moderation(commands.Cog):
         await _responder(interaction, embed, ephemeral=True)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /slowmode ─────────────────────────────────────────────────────────
+
     @app_commands.command(name="slowmode", description="Define o modo lento do canal atual.")
     @app_commands.describe(segundos="Intervalo em segundos (0 pra desativar, máx 21600)")
     @app_commands.default_permissions(manage_channels=True)
@@ -382,7 +369,7 @@ class Moderation(commands.Cog):
         await interaction.response.send_message(embed=embed)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /nick ─────────────────────────────────────────────────────────────
+
     @app_commands.command(name="nick", description="Altera o apelido de um membro.")
     @app_commands.describe(membro="Membro", novo_nick="Novo apelido (vazio pra resetar)")
     @app_commands.default_permissions(manage_nicknames=True)
@@ -399,7 +386,7 @@ class Moderation(commands.Cog):
         embed = mu.embed_sucesso(f"✏️ {texto}")
         await interaction.response.send_message(embed=embed)
 
-    # ── /lock e /unlock ───────────────────────────────────────────────────
+
     @app_commands.command(name="lock", description="Tranca o canal atual (impede @everyone de enviar mensagens).")
     @app_commands.describe(motivo="Motivo (opcional)")
     @app_commands.default_permissions(manage_channels=True)
@@ -427,7 +414,7 @@ class Moderation(commands.Cog):
         await interaction.response.send_message(embed=embed)
         await mu.enviar_log_moderacao(self.bot, interaction.guild, embed)
 
-    # ── /cargo (grupo) ────────────────────────────────────────────────────
+
     cargo_group = app_commands.Group(name="cargo", description="Gerenciamento de cargos de membros.",
                                       default_permissions=discord.Permissions(manage_roles=True))
 
@@ -453,7 +440,7 @@ class Moderation(commands.Cog):
             return await interaction.response.send_message(embed=mu.embed_erro("Sem permissão pra remover esse cargo."), ephemeral=True)
         await interaction.response.send_message(embed=mu.embed_sucesso(f"Cargo {cargo.mention} removido de {membro.mention}."))
 
-    # ── /canal (grupo) ────────────────────────────────────────────────────
+
     canal_group = app_commands.Group(name="canal", description="Gerenciamento de canais.",
                                       default_permissions=discord.Permissions(manage_channels=True))
 
@@ -488,7 +475,7 @@ class Moderation(commands.Cog):
             return await interaction.response.send_message(embed=mu.embed_erro("Sem permissão pra renomear esse canal."), ephemeral=True)
         await interaction.response.send_message(embed=mu.embed_sucesso(f"Canal renomeado para **#{novo_nome}**."))
 
-    # ── /thread (grupo) ───────────────────────────────────────────────────
+
     thread_group = app_commands.Group(name="thread", description="Gerenciamento de threads.",
                                        default_permissions=discord.Permissions(manage_threads=True))
 
@@ -526,7 +513,6 @@ async def _responder(interaction: discord.Interaction, embed: discord.Embed, eph
 
 
 async def setup(bot: commands.Bot):
-    # Os grupos (cargo/canal/thread) são atributos de classe do Cog e o
-    # discord.py já os registra automaticamente na árvore de slash commands
-    # dentro de add_cog — não é necessário (nem permitido) adicioná-los de novo.
+
+
     await bot.add_cog(Moderation(bot))

@@ -8,50 +8,32 @@ import asyncio
 
 from cogs.json_store import ler_json, salvar_json
 
-# ─────────────────────────────────────────────
-#  Cog: Sistema de Logs
-#  Arquivo: cogs/logs.py
-#
-#  Registra praticamente tudo que acontece no servidor num único
-#  canal de logs: entradas/saídas, moderação (kick/ban/timeout),
-#  mensagens apagadas/editadas (com quem apagou), canais, cargos,
-#  emojis, figurinhas, threads, canais de voz, convites, mudanças
-#  de nome/avatar de usuário e alterações gerais do servidor.
-#
-#  A maioria dos eventos do Discord não informa quem fez a ação
-#  diretamente — por isso usamos o Audit Log do servidor pra achar
-#  o responsável, sempre casando a entrada mais recente (dentro de
-#  uma janela curta de tempo) com o alvo do evento.
-# ─────────────────────────────────────────────
 
 LOG_CHANNEL_ID = 1532910609669029948
 
-# ── Cores por categoria de evento ────────────────────────────────────────────
-COR_ENTRADA   = 0x57F287  # verde
-COR_SAIDA     = 0x99AAB5  # cinza
-COR_MODERACAO = 0xED4245  # vermelho
-COR_EDICAO    = 0xFEE75C  # amarelo
-COR_EXCLUSAO  = 0xED4245  # vermelho
-COR_CRIACAO   = 0x57F287  # verde
-COR_CARGO     = 0xEB459E  # rosa
-COR_SERVIDOR  = 0x5865F2  # azul blurple
-COR_CONVITE   = 0x5865F2  # azul blurple
-COR_VOZ       = 0x5865F2  # azul blurple
-COR_THREAD    = 0x57F287  # verde
-COR_USUARIO   = 0xFEE75C  # amarelo
 
-# Janela de tempo (em segundos) pra considerar uma entrada do audit log
-# como sendo "a responsável" pelo evento que acabamos de receber.
+COR_ENTRADA   = 0x57F287
+COR_SAIDA     = 0x99AAB5
+COR_MODERACAO = 0xED4245
+COR_EDICAO    = 0xFEE75C
+COR_EXCLUSAO  = 0xED4245
+COR_CRIACAO   = 0x57F287
+COR_CARGO     = 0xEB459E
+COR_SERVIDOR  = 0x5865F2
+COR_CONVITE   = 0x5865F2
+COR_VOZ       = 0x5865F2
+COR_THREAD    = 0x57F287
+COR_USUARIO   = 0xFEE75C
+
+
 JANELA_AUDITORIA_SEGUNDOS = 10
 
-# ── Proteção do canal de logs ────────────────────────────────────────────
-# Quantos segundos de histórico (antes da exclusão) o bot deve republicar
-# no canal recriado.
+
 REPLAY_SEGUNDOS = 60
-# Quanto tempo guardamos cada log em memória (precisa ser >= REPLAY_SEGUNDOS).
+
 BUFFER_SEGUNDOS = 300
-# Arquivo usado pra lembrar o ID do canal de logs (que muda toda vez que o
-# canal é recriado depois de apagado), pra sobreviver a um restart do bot.
+
+
 ARQUIVO_CONFIG_LOGS = "data/log_config.json"
 
 
@@ -64,34 +46,27 @@ class Logs(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-        # ID do canal de logs em uso agora. Começa no valor fixo do topo do
-        # arquivo, mas se o canal for apagado e recriado, passamos a usar o
-        # ID novo (e isso é salvo em disco pra sobreviver a um restart).
+
         cfg = ler_json(ARQUIVO_CONFIG_LOGS, {}) or {}
         self.log_channel_id: int | None = cfg.get("canal_id", LOG_CHANNEL_ID)
 
-        # Buffer em memória com os últimos logs mandados (pra poder
-        # "replayar" no canal novo se o canal for apagado). Cada item:
-        # (timestamp, title, description, color, fields, thumbnail)
+
         self._buffer: deque = deque()
 
-        # Logs que tentaram ser mandados enquanto o canal de logs não
-        # existia (ex: eventos disparados bem no instante da exclusão,
-        # antes da recriação terminar).
+
         self._pendentes: list = []
 
-        # Trava pra não recriar o canal duas vezes se vários eventos
-        # chegarem juntos (ex: apagar canal + apagar categoria).
+
         self._recriando = False
 
-    # ── Helper: guarda uma entrada no buffer e descarta as antigas ──────────
+
     def _bufferizar(self, entrada: tuple):
         self._buffer.append(entrada)
         limite = datetime.now(timezone.utc) - timedelta(seconds=BUFFER_SEGUNDOS)
         while self._buffer and self._buffer[0][0] < limite:
             self._buffer.popleft()
 
-    # ── Helper: monta o embed de uma entrada ─────────────────────────────────
+
     def _montar_embed(self, entrada: tuple) -> discord.Embed:
         timestamp, title, description, color, fields, thumbnail = entrada
         embed = discord.Embed(
@@ -110,7 +85,7 @@ class Logs(commands.Cog):
         embed.set_footer(text="Sistema de Logs")
         return embed
 
-    # ── Helper central: manda um embed no canal de logs ─────────────────────
+
     async def log(self, title: str, description: str = "", color: int = COR_SERVIDOR,
                    fields: list | None = None, thumbnail: str | None = None):
         entrada = (datetime.now(timezone.utc), title, description, color, fields, thumbnail)
@@ -124,8 +99,8 @@ class Logs(commands.Cog):
             try:
                 canal = await self.bot.fetch_channel(self.log_channel_id)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                # Canal sumiu (provavelmente foi apagado agora mesmo e a
-                # recriação ainda não terminou) — guarda pra mandar depois.
+
+
                 self._pendentes.append(entrada)
                 return
 
@@ -136,7 +111,7 @@ class Logs(commands.Cog):
         except discord.HTTPException as e:
             print(f"[LOGS] ⚠️ Falha ao mandar log: {e}")
 
-    # ── Proteção: recria o canal de logs se ele for apagado ─────────────────
+
     async def _proteger_canal_logs(self, channel: discord.abc.GuildChannel):
         if self._recriando:
             return
@@ -168,7 +143,7 @@ class Logs(commands.Cog):
                 await novo.send(aviso)
                 await asyncio.sleep(0.5)
 
-            # Republica o que foi logado no último minuto antes da exclusão.
+
             corte = datetime.now(timezone.utc) - timedelta(seconds=REPLAY_SEGUNDOS)
             recentes = [e for e in self._buffer if e[0] >= corte]
             if recentes:
@@ -176,8 +151,7 @@ class Logs(commands.Cog):
                 for entrada in recentes:
                     await novo.send(embed=self._montar_embed(entrada))
 
-            # Republica qualquer log que tentou ser mandado enquanto o
-            # canal estava apagado.
+
             if self._pendentes:
                 await novo.send(f"📜 **Logs registrados enquanto o canal estava apagado** ({len(self._pendentes)} evento(s)):")
                 for entrada in self._pendentes:
@@ -196,7 +170,7 @@ class Logs(commands.Cog):
         finally:
             self._recriando = False
 
-    # ── Helper: procura no audit log quem fez uma ação recente ──────────────
+
     async def _executor(self, guild: discord.Guild | None, action: discord.AuditLogAction,
                          target_id: int | None = None):
         """Retorna (executor, motivo) da entrada mais recente do audit log que bate
@@ -208,7 +182,7 @@ class Logs(commands.Cog):
             async for entry in guild.audit_logs(limit=8, action=action):
                 delta = (datetime.now(timezone.utc) - entry.created_at).total_seconds()
                 if delta > JANELA_AUDITORIA_SEGUNDOS:
-                    break  # entradas vêm da mais recente pra mais antiga — pode parar de procurar
+                    break
                 if target_id is not None and getattr(entry.target, "id", None) != target_id:
                     continue
                 return entry.user, entry.reason
@@ -218,7 +192,6 @@ class Logs(commands.Cog):
             pass
         return None, None
 
-    # ═════════════════════════ ENTRADA / SAÍDA DE MEMBROS ═══════════════════
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -257,7 +230,6 @@ class Logs(commands.Cog):
                 thumbnail=member.display_avatar.url,
             )
 
-    # ═════════════════════════ BAN / UNBAN ═══════════════════════════════════
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
@@ -289,14 +261,13 @@ class Logs(commands.Cog):
             thumbnail=user.display_avatar.url,
         )
 
-    # ═════════════════════════ MENSAGENS ═════════════════════════════════════
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         if message.guild is None:
             return
 
-        # ── Alguém tentou apagar uma mensagem de log? Denuncia e reenvia ────
+
         if message.channel.id == self.log_channel_id and message.author.id == self.bot.user.id:
             executor, _ = await self._executor(message.guild, discord.AuditLogAction.message_delete, target_id=message.author.id)
             aviso = (
@@ -315,11 +286,11 @@ class Logs(commands.Cog):
                     await message.channel.send(embed=message.embeds[0])
                 except discord.Forbidden:
                     print("[LOGS] ⚠️ Sem permissão pra reenviar a log apagada.")
-            return  # não precisa cair no log genérico de "mensagem apagada" abaixo
+            return
 
         conteudo = message.content or "*(sem texto — anexo, embed ou imagem)*"
 
-        # Tenta descobrir se foi um moderador quem apagou (senão, foi o próprio autor).
+
         executor, _ = await self._executor(message.guild, discord.AuditLogAction.message_delete, target_id=message.author.id)
         quem_apagou = _quem(executor) if executor and executor.id != message.author.id else "O(a) próprio(a) autor(a)"
 
@@ -345,7 +316,7 @@ class Logs(commands.Cog):
             return
         canal = messages[0].channel
 
-        # ── Apagaram um monte de logs de uma vez? Denuncia e reenvia tudo ───
+
         if canal.id == self.log_channel_id:
             logs_do_bot = [m for m in messages if m.author.id == self.bot.user.id and m.embeds]
             if logs_do_bot:
@@ -362,7 +333,7 @@ class Logs(commands.Cog):
                         await canal.send(embed=m.embeds[0])
                 except discord.Forbidden:
                     print("[LOGS] ⚠️ Sem permissão pra avisar/reenviar logs apagadas em massa.")
-                return  # não precisa do log genérico de "apagadas em massa" abaixo
+                return
 
         executor, _ = await self._executor(messages[0].guild, discord.AuditLogAction.message_bulk_delete, target_id=canal.id)
         await self.log(
@@ -379,7 +350,7 @@ class Logs(commands.Cog):
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
         if before.guild is None or before.content == after.content:
-            return  # sem guild (DM) ou nenhuma mudança real de texto (ex: só um embed carregou)
+            return
         await self.log(
             title="✏️ Mensagem editada",
             description=(
@@ -395,7 +366,6 @@ class Logs(commands.Cog):
             ],
         )
 
-    # ═════════════════════════ CANAIS ═════════════════════════════════════════
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
@@ -413,7 +383,7 @@ class Logs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
-        # ── Apagaram o canal de logs? Recria na hora, com aviso e replay ────
+
         if channel.id == self.log_channel_id:
             await self._proteger_canal_logs(channel)
             return
@@ -447,7 +417,7 @@ class Logs(commands.Cog):
             mudancas.append(("Permissões", "As permissões do canal foram alteradas."))
 
         if not mudancas:
-            return  # mudança irrelevante pro log (ex: posição na lista de canais)
+            return
 
         executor, _ = await self._executor(after.guild, discord.AuditLogAction.channel_update, target_id=after.id)
         await self.log(
@@ -457,7 +427,6 @@ class Logs(commands.Cog):
             fields=[*mudancas, ("Editado por", _quem(executor))],
         )
 
-    # ═════════════════════════ CARGOS ═════════════════════════════════════════
 
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
@@ -494,7 +463,7 @@ class Logs(commands.Cog):
             mudancas.append(("Permissões", "As permissões do cargo foram alteradas."))
 
         if not mudancas:
-            return  # mudança irrelevante (ex: só a posição na lista mudou)
+            return
 
         executor, _ = await self._executor(after.guild, discord.AuditLogAction.role_update, target_id=after.id)
         await self.log(
@@ -504,13 +473,12 @@ class Logs(commands.Cog):
             fields=[*mudancas, ("Editado por", _quem(executor))],
         )
 
-    # ═════════════════════════ MEMBROS: APELIDO, CARGOS E TIMEOUT ═════════════
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         guild = after.guild
 
-        # ── Apelido ──
+
         if before.nick != after.nick:
             executor, _ = await self._executor(guild, discord.AuditLogAction.member_update, target_id=after.id)
             await self.log(
@@ -524,7 +492,7 @@ class Logs(commands.Cog):
                 ],
             )
 
-        # ── Cargos ──
+
         cargos_antes = set(before.roles)
         cargos_depois = set(after.roles)
         if cargos_antes != cargos_depois:
@@ -546,7 +514,7 @@ class Logs(commands.Cog):
                 fields=campos,
             )
 
-        # ── Timeout ──
+
         if before.timed_out_until != after.timed_out_until:
             executor, motivo = await self._executor(guild, discord.AuditLogAction.member_update, target_id=after.id)
             aplicado = after.timed_out_until is not None and after.timed_out_until > datetime.now(timezone.utc)
@@ -569,7 +537,6 @@ class Logs(commands.Cog):
                     fields=[("Removido por", _quem(executor))],
                 )
 
-    # ═════════════════════════ EMOJIS ═════════════════════════════════════════
 
     @commands.Cog.listener()
     async def on_guild_emojis_update(self, guild: discord.Guild, before: list, after: list):
@@ -612,7 +579,6 @@ class Logs(commands.Cog):
                     fields=[("Excluído por", _quem(executor))],
                 )
 
-    # ═════════════════════════ SERVIDOR ═══════════════════════════════════════
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
@@ -640,7 +606,6 @@ class Logs(commands.Cog):
             thumbnail=after.icon.url if after.icon else None,
         )
 
-    # ═════════════════════════ CONVITES ═══════════════════════════════════════
 
     @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite):
@@ -666,8 +631,6 @@ class Logs(commands.Cog):
             fields=[("Canal", invite.channel.mention if invite.channel else "Desconhecido")],
         )
 
-
-    # ═════════════════════════ STICKERS ════════════════════════════════════════
 
     @commands.Cog.listener()
     async def on_guild_stickers_update(self, guild: discord.Guild, before: list, after: list):
@@ -711,12 +674,11 @@ class Logs(commands.Cog):
                     fields=[("Excluída por", _quem(executor))],
                 )
 
-    # ═════════════════════════ THREADS ═════════════════════════════════════════
 
     @commands.Cog.listener()
     async def on_thread_join(self, thread: discord.Thread):
-        # on_thread_join dispara tanto quando alguém cria quanto quando o bot entra
-        # numa thread já existente — usamos o audit log pra distinguir uma criação real.
+
+
         executor, _ = await self._executor(thread.guild, discord.AuditLogAction.thread_create, target_id=thread.id)
         if executor is None:
             return
@@ -758,11 +720,10 @@ class Logs(commands.Cog):
             fields=[*mudancas, ("Editada por", _quem(executor))],
         )
 
-    # ═════════════════════════ CANAIS DE VOZ ═══════════════════════════════════
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-        # ── Entrou em um canal de voz ──
+
         if before.channel is None and after.channel is not None:
             await self.log(
                 title="🔊 Entrou em canal de voz",
@@ -771,7 +732,7 @@ class Logs(commands.Cog):
                 fields=[("Usuário", f"`{member}` (`{member.id}`)")],
             )
 
-        # ── Saiu de um canal de voz ──
+
         elif before.channel is not None and after.channel is None:
             await self.log(
                 title="🔇 Saiu de canal de voz",
@@ -780,7 +741,7 @@ class Logs(commands.Cog):
                 fields=[("Usuário", f"`{member}` (`{member.id}`)")],
             )
 
-        # ── Trocou de canal de voz ──
+
         elif before.channel is not None and after.channel is not None and before.channel.id != after.channel.id:
             executor, _ = await self._executor(member.guild, discord.AuditLogAction.member_move, target_id=member.id)
             await self.log(
@@ -795,7 +756,7 @@ class Logs(commands.Cog):
                 ],
             )
 
-        # ── Mutado/desmutado ou ensurdecido/desensurdecido pelo servidor ──
+
         if before.mute != after.mute or before.deaf != after.deaf:
             executor, _ = await self._executor(member.guild, discord.AuditLogAction.member_update, target_id=member.id)
             mudancas = []
@@ -810,11 +771,10 @@ class Logs(commands.Cog):
                 fields=[*mudancas, ("Alterado por", _quem(executor))],
             )
 
-    # ═════════════════════════ USUÁRIO (NOME/AVATAR GLOBAL) ════════════════════
 
     @commands.Cog.listener()
     async def on_user_update(self, before: discord.User, after: discord.User):
-        # Evento global do Discord (não é por servidor) — filtramos só o que interessa.
+
         if before.name == after.name and before.discriminator == after.discriminator and before.avatar == after.avatar:
             return
 

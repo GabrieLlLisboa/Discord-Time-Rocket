@@ -6,41 +6,27 @@ import os
 import re
 from datetime import datetime, timezone, timedelta
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Módulo: Núcleo do Sistema de Moderação
-#  Arquivo: cogs/mod_utils.py
-#
-#  Tudo que os cogs de moderação (moderation.py, automod.py, antiraid.py,
-#  mod_config.py, mod_setup.py) usam em comum:
-#   • "Banco de dados" em JSON (config por servidor, punições, automod, anti-raid)
-#   • Checagem de hierarquia de cargos
-#   • Embeds padronizados
-#   • Envio pro canal de log de moderação configurável
-#   • View de confirmação genérica pra ações perigosas
-#   • Parser de duração ("10m", "1h30m", "7d" etc.)
-# ─────────────────────────────────────────────────────────────────────────────
 
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
 ARQUIVOS = {
-    "mod_config":     f"{DATA_DIR}/mod_config.json",      # {guild_id: {...config...}}
-    "punicoes":       f"{DATA_DIR}/mod_punicoes.json",    # {guild_id: [ {...}, ... ]}
-    "automod":        f"{DATA_DIR}/mod_automod.json",     # {guild_id: {...config...}}
-    "antiraid":       f"{DATA_DIR}/mod_antiraid.json",    # {guild_id: {...config...}}
-    "antinuke":       f"{DATA_DIR}/mod_antinuke.json",    # {guild_id: {...config...}}
+    "mod_config":     f"{DATA_DIR}/mod_config.json",
+    "punicoes":       f"{DATA_DIR}/mod_punicoes.json",
+    "automod":        f"{DATA_DIR}/mod_automod.json",
+    "antiraid":       f"{DATA_DIR}/mod_antiraid.json",
+    "antinuke":       f"{DATA_DIR}/mod_antinuke.json",
 }
 
-# ── Cores padrão (Discord brand colors, mesmo padrão usado em cogs/logs.py) ──
-COR_SUCESSO   = 0x57F287  # verde
-COR_ERRO      = 0xED4245  # vermelho
-COR_ALERTA    = 0xFEE75C  # amarelo
-COR_INFO      = 0x5865F2  # azul blurple
-COR_MODERACAO = 0xED4245  # vermelho
-COR_NEUTRO    = 0x2B2D31  # cinza escuro (dark theme)
+
+COR_SUCESSO   = 0x57F287
+COR_ERRO      = 0xED4245
+COR_ALERTA    = 0xFEE75C
+COR_INFO      = 0x5865F2
+COR_MODERACAO = 0xED4245
+COR_NEUTRO    = 0x2B2D31
 
 
-# ── Leitura / escrita genérica ───────────────────────────────────────────────
 def _ler_raw(chave: str) -> dict:
     path = ARQUIVOS[chave]
     if os.path.exists(path):
@@ -65,16 +51,15 @@ for _chave in ARQUIVOS:
         _salvar_raw(_chave, {})
 
 
-# ── Configuração por servidor ────────────────────────────────────────────────
 CONFIG_PADRAO = {
-    "canal_logs_mod": None,       # canal onde vão os logs de moderação
-    "canal_logs_automod": None,   # canal onde vão os logs do automod
-    "canal_logs_antiraid": None,  # canal onde vão os logs do anti-raid
-    "cargo_mute": None,           # cargo usado como "silenciado" (softban/backup de timeout)
-    "cargos_staff": [],           # cargos que têm imunidade a automod/anti-raid e podem moderar
-    "cargos_imunes_automod": [],  # cargos que não sofrem ação do automod
-    "dm_ao_punir": True,          # manda DM pro usuário avisando da punição
-    "exigir_confirmacao": True,   # exige confirmação em ban/kick/clear/softban/tempban
+    "canal_logs_mod": None,
+    "canal_logs_automod": None,
+    "canal_logs_antiraid": None,
+    "cargo_mute": None,
+    "cargos_staff": [],
+    "cargos_imunes_automod": [],
+    "dm_ao_punir": True,
+    "exigir_confirmacao": True,
     "mensagem_boas_vindas_regras": None,
 }
 
@@ -99,26 +84,25 @@ def atualizar_config(guild_id: int, **kwargs) -> dict:
     return cfg
 
 
-# ── AutoMod: configuração por servidor ───────────────────────────────────────
 AUTOMOD_PADRAO = {
     "ativo": True,
     "anti_spam": True,
-    "anti_spam_limite": 5,          # nº de mensagens
-    "anti_spam_intervalo": 5,       # em segundos
+    "anti_spam_limite": 5,
+    "anti_spam_intervalo": 5,
     "anti_flood": True,
-    "anti_flood_limite": 3,         # mensagens idênticas seguidas
-    "anti_links": False,            # bloqueia qualquer link
-    "anti_convites": True,          # bloqueia convites de outros servidores
-    "links_whitelist": [],          # domínios liberados quando anti_links = True
+    "anti_flood_limite": 3,
+    "anti_links": False,
+    "anti_convites": True,
+    "links_whitelist": [],
     "palavras_proibidas": [],
     "anti_caps": True,
-    "anti_caps_percentual": 70,     # % de maiúsculas pra acionar (msg com 8+ caracteres)
+    "anti_caps_percentual": 70,
     "anti_mencoes": True,
-    "anti_mencoes_limite": 8,       # nº de menções ÚNICAS (usuário+cargo) numa única mensagem
+    "anti_mencoes_limite": 8,
     "anti_emojis": True,
-    "anti_emojis_limite": 10,       # nº de emojis numa única mensagem
+    "anti_emojis_limite": 10,
     "anti_phishing": True,
-    "acao_padrao": "apagar_avisar",  # apagar_avisar | timeout | kick
+    "acao_padrao": "apagar_avisar",
     "timeout_segundos": 600,
     "log_apenas": False,
 }
@@ -144,15 +128,14 @@ def atualizar_automod(guild_id: int, **kwargs) -> dict:
     return cfg
 
 
-# ── Anti-Raid: configuração por servidor ─────────────────────────────────────
 ANTIRAID_PADRAO = {
     "ativo": True,
-    "janela_segundos": 10,        # janela de tempo pra contar entradas
-    "limite_entradas": 8,         # nº de entradas na janela pra considerar raid
-    "conta_nova_dias": 7,         # conta com menos que isso é "suspeita"
-    "acao": "kick",               # kick | ban | quarentena
+    "janela_segundos": 10,
+    "limite_entradas": 8,
+    "conta_nova_dias": 7,
+    "acao": "kick",
     "cargo_quarentena": None,
-    "modo_emergencia": False,     # trava entrada de novos membros (verification / lockdown manual)
+    "modo_emergencia": False,
     "bloquear_conta_sem_avatar": False,
 }
 
@@ -177,21 +160,16 @@ def atualizar_antiraid(guild_id: int, **kwargs) -> dict:
     return cfg
 
 
-# ── Anti-Nuke: configuração por servidor ─────────────────────────────────────
-# Protege o servidor contra staff comprometido/mal-intencionado que sai
-# deletando canais, cargos ou banindo membros em massa. Quando detecta,
-# remove imediatamente os cargos perigosos de quem estiver fazendo isso
-# (kick/ban do bot não bastam se a conta ainda tem cargo de admin).
 ANTINUKE_PADRAO = {
     "ativo": True,
-    "janela_segundos": 20,          # janela de tempo pra contar ações
-    "limite_canais": 3,             # nº de canais criados/deletados na janela pra acionar
-    "limite_cargos": 3,             # nº de cargos criados/deletados na janela pra acionar
-    "limite_banimentos": 4,         # nº de banimentos na janela pra acionar
-    "limite_expulsoes": 5,          # nº de expulsões (kicks) na janela pra acionar
-    "acao": "remover_cargos",       # remover_cargos | quarentena | ban
+    "janela_segundos": 20,
+    "limite_canais": 3,
+    "limite_cargos": 3,
+    "limite_banimentos": 4,
+    "limite_expulsoes": 5,
+    "acao": "remover_cargos",
     "cargo_quarentena": None,
-    "whitelist_ids": [],            # IDs de usuários/bots confiáveis, imunes ao anti-nuke
+    "whitelist_ids": [],
     "punir_bots_nao_whitelistados": True,
 }
 
@@ -216,7 +194,6 @@ def atualizar_antinuke(guild_id: int, **kwargs) -> dict:
     return cfg
 
 
-# ── Punições: histórico permanente por servidor ──────────────────────────────
 def _proximo_id(registros: list) -> int:
     return (max((r["id"] for r in registros), default=0)) + 1
 
@@ -236,7 +213,7 @@ def registrar_punicao(guild_id: int, user_id: int, moderador_id: int, tipo: str,
         "id": _proximo_id(registros),
         "user_id": user_id,
         "moderador_id": moderador_id,
-        "tipo": tipo,          # warn | timeout | kick | ban | tempban | softban | unban
+        "tipo": tipo,
         "motivo": motivo,
         "criado_em": agora.isoformat(),
         "expira_em": expira_em,
@@ -280,10 +257,6 @@ def punicoes_ativas_temporarias(guild_id: int) -> list:
     return [r for r in registros if r.get("ativo") and r.get("expira_em")]
 
 
-# ── Super administradores ─────────────────────────────────────────────────────
-# IDs que têm acesso liberado a QUALQUER comando do bot, em qualquer servidor,
-# independente de cargo/permissão do Discord. Usado pelo patch global de
-# permissões em main.py (liberar_super_admins) e pela checagem de staff abaixo.
 SUPER_ADMIN_IDS = {1487452210605588592}
 
 
@@ -291,7 +264,6 @@ def eh_super_admin(user_id: int) -> bool:
     return user_id in SUPER_ADMIN_IDS
 
 
-# ── Hierarquia de permissões ─────────────────────────────────────────────────
 def eh_staff(member: discord.Member, guild_id: int) -> bool:
     """Considera staff quem tem permissão de moderar OU tem um dos cargos configurados."""
     if eh_super_admin(member.id):
@@ -322,7 +294,6 @@ def pode_moderar(moderador: discord.Member, alvo: discord.Member) -> tuple[bool,
     return True, ""
 
 
-# ── Embeds padronizados ──────────────────────────────────────────────────────
 def embed_base(titulo: str, descricao: str = "", cor: int = COR_INFO) -> discord.Embed:
     e = discord.Embed(title=titulo, description=descricao, color=cor, timestamp=datetime.now(timezone.utc))
     return e
@@ -440,7 +411,6 @@ async def notificar_usuario(usuario: discord.abc.User, embed: discord.Embed):
         pass
 
 
-# ── Parser de duração: "10m", "1h30m", "7d", "45s" ───────────────────────────
 UNIDADES = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 REGEX_DURACAO = re.compile(r"(\d+)\s*([smhdw])", re.IGNORECASE)
 
@@ -469,7 +439,6 @@ def formatar_duracao(segundos: int) -> str:
     return " ".join(partes) if partes else "0s"
 
 
-# ── View de confirmação genérica pra ações perigosas ─────────────────────────
 class ConfirmarView(discord.ui.View):
     """
     View reutilizável de confirmação (Sim/Não). Só quem invocou o comando

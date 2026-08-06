@@ -9,39 +9,18 @@ from collections import defaultdict, deque
 
 from cogs import mod_utils as mu
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Cog: Anti-Nuke
-#  Arquivo: cogs/antinuke.py
-#
-#  Diferente do Anti-Raid (que olha pra ENTRADA de membros), esse aqui olha
-#  pra AÇÕES destrutivas de quem já está dentro do servidor — inclusive
-#  staff/admin com cargo legítimo, caso a conta seja comprometida ou alguém
-#  enlouqueça e resolva deletar tudo.
-#
-#  Monitora, via audit log, quem está:
-#   • deletando ou criando canais em massa
-#   • deletando ou criando cargos em massa
-#   • banindo membros em massa
-#   • expulsando membros em massa
-#
-#  Se algum usuário passar do limite configurado numa janela de tempo curta,
-#  o bot AUTOMATICAMENTE remove todos os cargos dele (tirando o poder de
-#  continuar destruindo o servidor), podendo também colocar em quarentena
-#  ou banir, dependendo da configuração.
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 class AntiNuke(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # guild_id -> user_id -> {evento: deque[timestamps]}
+
         self.eventos: dict[int, dict[int, dict[str, deque]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(lambda: deque(maxlen=50)))
         )
-        # trava simples pra não punir o mesmo usuário duas vezes em paralelo
+
         self._punindo: set[tuple[int, int]] = set()
 
-    # ── Helpers ───────────────────────────────────────────────────────────
+
     def _imune(self, guild: discord.Guild, user_id: int, cfg: dict) -> bool:
         if user_id == guild.owner_id:
             return True
@@ -57,7 +36,7 @@ class AntiNuke(commands.Cog):
         try:
             async for entry in guild.audit_logs(limit=5, action=action):
                 if alvo_id is None or (entry.target and getattr(entry.target, "id", None) == alvo_id):
-                    # só considera entradas bem recentes (últimos 10s) pra evitar falso positivo
+
                     if (discord.utils.utcnow() - entry.created_at).total_seconds() <= 10:
                         return entry.user
         except (discord.Forbidden, discord.HTTPException):
@@ -148,10 +127,10 @@ class AntiNuke(commands.Cog):
             janela = cfg.get("janela_segundos", 20)
             motivo = f"{descricao}: {qtd} ações em {janela}s (limite: {limite})"
             await self._punir(guild, executor.id, cfg, motivo)
-            # zera o contador desse evento pra não ficar punindo repetido a cada novo hit
+
             self.eventos[guild.id][executor.id][evento].clear()
 
-    # ── Listeners ─────────────────────────────────────────────────────────
+
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         await self._checar(channel.guild, discord.AuditLogAction.channel_delete,
@@ -179,12 +158,12 @@ class AntiNuke(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
-        # on_member_remove dispara em qualquer saída (kick ou o próprio membro saindo).
-        # Só contamos se o audit log confirmar que foi um kick de fato.
+
+
         await self._checar(member.guild, discord.AuditLogAction.kick,
                             "kick", "limite_expulsoes", "Expulsando membros em massa", alvo_id=member.id)
 
-    # ── /antinuke (grupo de configuração) ────────────────────────────────
+
     antinuke_group = app_commands.Group(name="antinuke", description="Configurações do sistema Anti-Nuke.",
                                          default_permissions=discord.Permissions(administrator=True))
 

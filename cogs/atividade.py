@@ -8,21 +8,12 @@ from cogs.json_store import ler_json, salvar_json
 RANKS_ORDENADOS = [c for c in _CARGOS_JOGADORES if c["secao"] == "rank"]
 RANK_IDS_SET = {c["id"] for c in RANKS_ORDENADOS}
 
-# ─────────────────────────────────────────────
-#  Cog: Rastreador de Atividade
-#  Arquivo: cogs/atividade.py
-#
-#  Monitora, num período fixo, quem manda mais de
-#  10 mensagens OU fica mais de 15 minutos em call.
-#  Assim que a pessoa bate a meta, o bot anuncia
-#  no canal configurado (só uma vez por pessoa).
-# ─────────────────────────────────────────────
 
 CANAL_ANUNCIO_ID = 1521708231620034600
 
 BR_TZ = timezone(timedelta(hours=-3))
 
-# Único usuário que pode rodar o !ativar (marcar alguém como ativo manualmente)
+
 IDS_AUTORIZADOS = {1487452210605588592, 1421693641184772147}
 
 DATA_PATH = "data/atividade.json"
@@ -46,13 +37,11 @@ def _salvar_config(config: dict):
     salvar_json(CONFIG_PATH, config)
 
 
-# Config carregada uma vez na importação do módulo. Depois disso, só é alterada
-# via aplicar_novo_periodo() (chamado pelo botão "Recomeçar Período de Avaliação").
 _config_inicial = _ler_config()
 INICIO_PERIODO = datetime.fromisoformat(_config_inicial["inicio"])
 FIM_PERIODO = datetime.fromisoformat(_config_inicial["fim"])
-MENSAGENS_MINIMAS = _config_inicial["mensagens_minimas"]          # precisa ser MAIOR que isso
-SEGUNDOS_CALL_MINIMO = _config_inicial["segundos_call_minimo"]    # precisa ser MAIOR que isso
+MENSAGENS_MINIMAS = _config_inicial["mensagens_minimas"]
+SEGUNDOS_CALL_MINIMO = _config_inicial["segundos_call_minimo"]
 
 
 def limites_atuais() -> tuple:
@@ -85,9 +74,6 @@ def _salvar(dados: dict):
     salvar_json(DATA_PATH, dados)
 
 
-# ─────────────────────────────────────────────
-#  Painel !setup-sistema-atividade
-# ─────────────────────────────────────────────
 class ConfirmarResetAtivosView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
@@ -148,17 +134,14 @@ class SetupAtividadeView(discord.ui.View):
 class Atividade(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.dados = _ler()  # { "user_id": {"mensagens": int, "voz_segundos": float, "anunciado": bool} }
-        self.voz_entrada = {}  # { user_id: datetime da última entrada em call (não persiste no restart) }
+        self.dados = _ler()
+        self.voz_entrada = {}
         self.verificar_fim_periodo.start()
 
     def cog_unload(self):
         self.verificar_fim_periodo.cancel()
 
-    # ── Helpers internos ─────────────────────────────────────────────────────
-    # OBS: "voz_segundos" é cumulativo — soma o tempo de TODAS as sessões de call
-    # da pessoa dentro do período (mesmo em dias diferentes). Nunca é resetado
-    # durante o período, então "5 min hoje + 20 min amanhã" vira 25 min total.
+
     def _registro(self, user_id: int) -> dict:
         chave = str(user_id)
         if chave not in self.dados:
@@ -206,7 +189,7 @@ class Atividade(commands.Cog):
         except discord.Forbidden:
             print(f"[ATIVIDADE] ⚠️ Sem permissão para mandar mensagem no canal {CANAL_ANUNCIO_ID}.")
 
-    # ── Mensagens ────────────────────────────────────────────────────────────
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:
@@ -220,10 +203,7 @@ class Atividade(commands.Cog):
 
         await self._checar_e_anunciar(message.author)
 
-    # ── Voz ──────────────────────────────────────────────────────────────────
-    # Regra: só conta tempo de call se a pessoa estiver acompanhada por pelo
-    # menos +1 humano no canal. Se ficar sozinha, o cronômetro dela para (mas
-    # não é perdido: quando alguém entra de novo no canal, volta a contar).
+
     async def _atualizar_canal(self, canal: discord.VoiceChannel, agora: datetime):
         humanos = [m for m in canal.members if not m.bot]
         acompanhado = len(humanos) >= 2
@@ -258,9 +238,9 @@ class Atividade(commands.Cog):
         depois_canal = depois.channel if (depois.channel is not None and depois.channel != canal_afk) else None
 
         if antes_canal == depois_canal:
-            return  # só mudou mute/deaf/etc — não trocou de canal, nada a recalcular
+            return
 
-        # Encerra a sessão de contagem do próprio membro (se estava rodando)
+
         if membro.id in self.voz_entrada:
             entrada = self.voz_entrada.pop(membro.id)
             if _periodo_ativo():
@@ -270,16 +250,15 @@ class Atividade(commands.Cog):
                 _salvar(self.dados)
                 await self._checar_e_anunciar(membro)
 
-        # Reavalia o canal antigo — quem ficou lá pode ter sobrado sozinho agora
+
         if antes_canal is not None:
             await self._atualizar_canal(antes_canal, agora)
 
-        # Reavalia o canal novo — o próprio membro entra na contagem se tiver
-        # companhia, e quem já estava lá sozinho passa a contar também
+
         if depois_canal is not None:
             await self._atualizar_canal(depois_canal, agora)
 
-    # ── Ao iniciar o bot: retoma contagem de quem já está em call ───────────────
+
     @commands.Cog.listener()
     async def on_ready(self):
         if not _periodo_ativo():
@@ -293,7 +272,7 @@ class Atividade(commands.Cog):
                 await self._atualizar_canal(canal, agora)
         print("[ATIVIDADE] ✅ Rastreador de atividade pronto.")
 
-    # ── Encerra a contagem de call pendente quando o período acabar ────────────
+
     @tasks.loop(minutes=1)
     async def verificar_fim_periodo(self):
         await self.bot.wait_until_ready()
@@ -302,7 +281,7 @@ class Atividade(commands.Cog):
             return
 
         try:
-            # Período encerrado: fecha o tempo de quem ainda estava em call
+
             if self.voz_entrada:
                 agora_utc = datetime.now(timezone.utc)
                 for user_id, entrada in list(self.voz_entrada.items()):
@@ -321,9 +300,8 @@ class Atividade(commands.Cog):
             print("[ATIVIDADE] 🏁 Período de verificação de atividade encerrado.")
             self.verificar_fim_periodo.cancel()
         except Exception as e:
-            # Se algo falhar aqui, NÃO cancela o loop — melhor tentar de novo
-            # no próximo minuto do que deixar o encerramento do período pela
-            # metade (gente com tempo de call não fechado) pra sempre.
+
+
             print(f"[ATIVIDADE] ⚠️ Erro ao encerrar período: {e}")
 
     @verificar_fim_periodo.before_loop
@@ -331,7 +309,6 @@ class Atividade(commands.Cog):
         await self.bot.wait_until_ready()
 
 
-    # ── Reinicia o progresso de todo mundo (mantém o período atual) ─────────
     async def reiniciar_ativos(self, interaction: discord.Interaction):
         self.dados = {}
         _salvar(self.dados)
@@ -341,7 +318,7 @@ class Atividade(commands.Cog):
         )
         print(f"[ATIVIDADE] 🔁 Ativos reiniciados por {interaction.user}.")
 
-    # ── Aplica um novo período de avaliação (chamado pelo modal) ────────────
+
     async def aplicar_novo_periodo(self, interaction: discord.Interaction, dias_str: str, msgs_str: str, call_min_str: str, reiniciar_str: str):
         try:
             dias = int(dias_str.strip())
@@ -374,8 +351,7 @@ class Atividade(commands.Cog):
             self.dados = {}
             _salvar(self.dados)
 
-        # Se o período anterior já tinha acabado, o loop de verificação tinha
-        # parado sozinho — reativa ele pro período novo.
+
         if not self.verificar_fim_periodo.is_running():
             self.verificar_fim_periodo.start()
 
@@ -392,7 +368,7 @@ class Atividade(commands.Cog):
         )
         print(f"[ATIVIDADE] 🔄 Novo período aplicado por {interaction.user}: {dias} dias, msgs>{msgs_min}, call>{call_min}min, reset={reiniciar}.")
 
-    # ── !setup-sistema-atividade — painel de controle (staff autorizada) ────
+
     @commands.command(name="setup-sistema-atividade", hidden=True)
     async def setup_sistema_atividade(self, ctx: commands.Context):
         if ctx.author.id not in IDS_AUTORIZADOS:
@@ -419,10 +395,10 @@ class Atividade(commands.Cog):
         if ctx.author.id in IDS_AUTORIZADOS:
             await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
 
-    # ── !ativar <id> — marca alguém como ativo manualmente ──────────────────
+
     @commands.command(name="ativar", hidden=True)
     async def marcar_ativo_manual(self, ctx: commands.Context, membro_id: str = None):
-        # Só o usuário autorizado pode usar — pra qualquer outra pessoa, o bot finge que o comando não existe
+
         if ctx.author.id not in IDS_AUTORIZADOS:
             return
 
@@ -463,7 +439,7 @@ class Atividade(commands.Cog):
             except discord.Forbidden:
                 print(f"[ATIVIDADE] ⚠️ Sem permissão para mandar mensagem no canal {CANAL_ANUNCIO_ID}.")
 
-        # Se a pessoa estiver em quarentena, tira ela automaticamente
+
         aviso_extra = ""
         demote_cog = self.bot.get_cog("Demote")
         if demote_cog is not None:
@@ -479,10 +455,10 @@ class Atividade(commands.Cog):
         if ctx.author.id in IDS_AUTORIZADOS:
             await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
 
-    # ── !listar-inativos — lista quem ainda não bateu a meta de atividade ────
+
     @commands.command(name="listar-inativos", hidden=True)
     async def listar_inativos(self, ctx: commands.Context):
-        # Só o usuário autorizado pode usar — pra qualquer outra pessoa, o bot finge que o comando não existe
+
         if ctx.author.id not in IDS_AUTORIZADOS:
             return
 
@@ -508,7 +484,7 @@ class Atividade(commands.Cog):
 
         inativos.sort(key=lambda m: m.display_name.lower())
 
-        # ── Top dos ranks com mais gente inativa ────────────────────────────
+
         contagem_por_rank = {c["id"]: 0 for c in RANKS_ORDENADOS}
         sem_rank = 0
         for membro in inativos:
@@ -538,7 +514,7 @@ class Atividade(commands.Cog):
                 f"{membro.mention} — 💬 {registro.get('mensagens', 0)} msgs • 🎙️ {minutos_call} min"
             )
 
-        # Quebra em blocos pra não estourar o limite de 1024 caracteres por campo
+
         BLOCO = 15
         blocos = [linhas[i:i + BLOCO] for i in range(0, len(linhas), BLOCO)]
 
@@ -557,7 +533,7 @@ class Atividade(commands.Cog):
             nome_campo = "Inativos" if len(blocos) == 1 else f"Inativos ({idx}/{len(blocos)})"
             embed.add_field(name=nome_campo, value="\n".join(bloco), inline=False)
 
-            # Limite de 25 campos por embed — se passar disso, manda e abre um novo embed
+
             if len(embed.fields) == 25 and idx != len(blocos):
                 await ctx.send(embed=embed)
                 embed = discord.Embed(color=0xED4245)

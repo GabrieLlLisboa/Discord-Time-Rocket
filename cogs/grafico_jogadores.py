@@ -16,16 +16,6 @@ except ImportError:
 from cogs.players import JOGADORES_CHANNEL_ID, _esta_oculto
 from cogs.atividade import _ler as ler_atividade, limites_atuais
 
-# ─────────────────────────────────────────────
-#  Cog: Gráfico de Novatos da Semana
-#  Arquivo: cogs/grafico_jogadores.py
-#
-#  Manda (e mantém atualizada) uma 2ª mensagem no mesmo canal da lista de
-#  jogadores, sempre LOGO ABAIXO dela — um gráfico mostrando quantas
-#  pessoas entraram no servidor nos últimos 7 dias e quantas dessas já
-#  batem a meta de atividade (mesma regra do cogs/atividade.py: mais de
-#  10 mensagens OU mais de 15 min em call).
-# ─────────────────────────────────────────────
 
 TITULO_EMBED = "📈 Novatos da Semana"
 
@@ -57,7 +47,7 @@ class GraficoJogadores(commands.Cog):
     async def antes_do_loop(self):
         await self.bot.wait_until_ready()
 
-    # ── Coleta os dados da última semana ─────────────────────────
+
     def _dados_semana(self, guild: discord.Guild):
         agora = datetime.now(timezone.utc)
         limite = agora - timedelta(days=7)
@@ -81,7 +71,7 @@ class GraficoJogadores(commands.Cog):
 
         return novatos, ativos
 
-    # ── Gera a imagem (barra + pizza) ────────────────────────────
+
     def _gerar_grafico(self, total: int, ativos: int, guild_name: str) -> io.BytesIO:
         inativos = total - ativos
 
@@ -99,7 +89,7 @@ class GraficoJogadores(commands.Cog):
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 4.2))
 
-        # ── Barra: total de entradas na semana ──
+
         ax1.bar(["Novos jogadores"], [total], color="#D4A843", width=0.5)
         ax1.set_ylim(0, max(total, 1) + 1)
         ax1.set_title("Entradas na última semana", fontsize=12, weight="bold")
@@ -107,13 +97,13 @@ class GraficoJogadores(commands.Cog):
         ax1.spines["top"].set_visible(False)
         ax1.spines["right"].set_visible(False)
 
-        # ── Pizza: % ativos entre os novatos ──
+
         ax2.set_title("% Ativos entre os novatos", fontsize=12, weight="bold")
         if total > 0:
             valores = [ativos, inativos]
             labels = [f"Ativos ({ativos})", f"Inativos ({inativos})"]
             cores = ["#57F287", "#ED4245"]
-            # remove fatias com valor 0 pra não quebrar o gráfico
+
             pares = [(v, l, c) for v, l, c in zip(valores, labels, cores) if v > 0]
             if pares:
                 valores, labels, cores = zip(*pares)
@@ -138,7 +128,7 @@ class GraficoJogadores(commands.Cog):
         buffer.seek(0)
         return buffer
 
-    # ── Monta o embed + imagem e edita/cria a mensagem ───────────
+
     async def _editar_ou_criar(self, channel: discord.TextChannel):
         guild = channel.guild
         novatos, ativos = self._dados_semana(guild)
@@ -179,7 +169,7 @@ class GraficoJogadores(commands.Cog):
         self.message_id = nova.id
         print(f"[GRAFICO] ✅ Gráfico criado no canal #{channel.name}.")
 
-    # ── Comando manual pra forçar atualização ────────────────────
+
     @commands.command(name="atualizargrafico")
     @commands.has_permissions(administrator=True)
     async def forcar_atualizacao(self, ctx: commands.Context):

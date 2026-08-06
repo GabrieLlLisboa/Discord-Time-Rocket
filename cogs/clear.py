@@ -1,10 +1,5 @@
 from discord.ext import commands
 
-# ─────────────────────────────────────────────
-#  Cog: Limpar mensagens
-#  Arquivo: cogs/clear.py
-#  Comandos: !clear all | !clear <número>
-# ─────────────────────────────────────────────
 
 class Clear(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -26,11 +21,11 @@ class Clear(commands.Cog):
             )
             return
 
-        # ── !clear all ─────────────────────────────────────────────────────────
+
         if quantidade.lower() == "all":
             deletadas = 0
             while True:
-                # purge apaga no máximo 100 por vez (limite do Discord)
+
                 apagadas = await ctx.channel.purge(limit=100)
                 deletadas += len(apagadas)
                 if len(apagadas) < 100:
@@ -41,7 +36,7 @@ class Clear(commands.Cog):
             print(f"[CLEAR] ✅ {deletadas} mensagens apagadas em #{ctx.channel.name} por {ctx.author}.")
             return
 
-        # ── !clear <número> ────────────────────────────────────────────────────
+
         try:
             numero = int(quantidade)
         except ValueError:

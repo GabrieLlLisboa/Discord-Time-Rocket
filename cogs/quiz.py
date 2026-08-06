@@ -5,23 +5,15 @@ import random
 
 from cogs.json_store import ler_json, salvar_json
 
-# ─────────────────────────────────────────────
-#  Cog: Quiz de Rocket League
-#  Arquivo: cogs/quiz.py
-#  /quiz            — pergunta aleatória (times, mapas, mecânicas)
-#  /quiz_ranking    — ranking de quem mais acerta
-#  /quiz_reset      — zera o ranking (admin)
-# ─────────────────────────────────────────────
 
 RANKING_PATH = "data/quiz_ranking.json"
 
-# Tempo (segundos) que a pergunta fica aberta pra responder
+
 TEMPO_RESPOSTA = 25
 
-# ── Banco de perguntas ──────────────────────────────────────────────────────
-# categoria: "times" | "mapas" | "mecanicas"
+
 PERGUNTAS = [
-    # ── Times ──
+
     {
         "categoria": "times",
         "pergunta": "Qual time venceu o Rocket League Championship (RLCS) World Championship de 2023?",
@@ -52,7 +44,7 @@ PERGUNTAS = [
         "opcoes": ["yanxnz", "CooL", "Aztral", "Kaydop"],
         "correta": 1,
     },
-    # ── Mapas ──
+
     {
         "categoria": "mapas",
         "pergunta": "Qual é o mapa padrão/clássico do Rocket League, usado desde o lançamento?",
@@ -83,7 +75,7 @@ PERGUNTAS = [
         "opcoes": ["Mannfield", "Urban Central", "Beckwith Park", "Neo Tokyo"],
         "correta": 0,
     },
-    # ── Mecânicas ──
+
     {
         "categoria": "mecanicas",
         "pergunta": "Como se chama a mecânica de bater a bola no ar usando o carro virado de cabeça para baixo?",
@@ -150,7 +142,6 @@ PERGUNTAS = [
 ]
 
 
-# ── Ranking (persistência) ──────────────────────────────────────────────────
 def ler_ranking() -> dict:
     return ler_json(RANKING_PATH, {})
 
@@ -165,7 +156,7 @@ def registrar_resposta(user_id: int, nome: str, acertou: bool) -> None:
     if sid not in ranking:
         ranking[sid] = {"nome": nome, "acertos": 0, "erros": 0}
 
-    ranking[sid]["nome"] = nome  # mantém o nome sempre atualizado
+    ranking[sid]["nome"] = nome
     if acertou:
         ranking[sid]["acertos"] += 1
     else:
@@ -174,7 +165,6 @@ def registrar_resposta(user_id: int, nome: str, acertou: bool) -> None:
     salvar_ranking(ranking)
 
 
-# ── View com os botões de resposta ──────────────────────────────────────────
 LETRAS = ["🇦", "🇧", "🇨", "🇩"]
 
 
@@ -182,8 +172,8 @@ class QuizView(discord.ui.View):
     def __init__(self, pergunta: dict, autor_id: int | None = None):
         super().__init__(timeout=TEMPO_RESPOSTA)
         self.pergunta = pergunta
-        self.respondidos: dict[int, int] = {}  # user_id -> índice escolhido
-        self.nomes: dict[int, str] = {}  # user_id -> nome de exibição (ordem de resposta)
+        self.respondidos: dict[int, int] = {}
+        self.nomes: dict[int, str] = {}
         self.message: discord.Message | None = None
 
         for i, opcao in enumerate(pergunta["opcoes"]):
@@ -238,8 +228,7 @@ class QuizView(discord.ui.View):
                 else:
                     linhas.append(f"❌ **{nome}** — Errou")
 
-            # Discord limita cada campo de embed a 1024 caracteres — se
-            # muita gente responder, mostra só os primeiros e resume o resto.
+
             LIMITE_EXIBIDO = 20
             if len(linhas) > LIMITE_EXIBIDO:
                 restantes = len(linhas) - LIMITE_EXIBIDO
@@ -289,7 +278,7 @@ class Quiz(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ── /quiz ────────────────────────────────────────────────────────────
+
     @app_commands.command(name="quiz", description="Responda uma pergunta sobre Rocket League (times, mapas, mecânicas).")
     @app_commands.describe(categoria="Filtrar por categoria (opcional)")
     @app_commands.choices(categoria=[
@@ -321,7 +310,7 @@ class Quiz(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view)
         view.message = await interaction.original_response()
 
-    # ── /quiz_ranking ────────────────────────────────────────────────────
+
     @app_commands.command(name="quiz_ranking", description="Veja o ranking de quem mais acerta no Quiz de Rocket League.")
     async def quiz_ranking(self, interaction: discord.Interaction):
         ranking = ler_ranking()
@@ -332,7 +321,7 @@ class Quiz(commands.Cog):
             )
             return
 
-        # Ordena por acertos (desc), depois por menor nº de erros
+
         colocados = sorted(
             ranking.items(),
             key=lambda item: (-item[1]["acertos"], item[1]["erros"]),
@@ -359,7 +348,7 @@ class Quiz(commands.Cog):
         embed.set_footer(text="Jogue mais partidas do quiz com /quiz")
         await interaction.response.send_message(embed=embed)
 
-    # ── /quiz_reset (staff) ──────────────────────────────────────────────
+
     @app_commands.command(name="quiz_reset", description="[Staff] Zera o ranking do quiz.")
     @app_commands.checks.has_permissions(administrator=True)
     async def quiz_reset(self, interaction: discord.Interaction):

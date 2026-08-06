@@ -28,10 +28,8 @@ class ComprarAtendimentoView(discord.ui.View):
     def __init__(self, coach_key: str):
         super().__init__(timeout=None)
         self.coach_key = coach_key
-        # custom_id só é conhecido em runtime (depende do coach) — por isso
-        # o botão é criado aqui no __init__ e adicionado manualmente, em vez
-        # de usar o decorator @discord.ui.button (que fixa o custom_id em
-        # tempo de definição da classe).
+
+
         botao = discord.ui.Button(
             label="🛒 Comprar Atendimento",
             style=discord.ButtonStyle.success,
@@ -41,8 +39,8 @@ class ComprarAtendimentoView(discord.ui.View):
         self.add_item(botao)
 
     async def _callback(self, interaction: discord.Interaction):
-        # Import local para evitar import circular (coach_manager importa
-        # coach_stats, que importa esta view de volta).
+
+
         from cogs.coach_manager import criar_ticket_atendimento
 
         await criar_ticket_atendimento(interaction, self.coach_key)
@@ -167,10 +165,7 @@ class AvaliarCoachView(discord.ui.View):
         coach = coach_por_chave(ticket["coach_key"])
         nome_coach = coach["nome"] if coach else ticket["coach_key"]
 
-        # A API do Discord não permite Select dentro de Modal nesta versão
-        # do discord.py — por isso a avaliação é feita em duas etapas:
-        # 1) o cliente escolhe a nota num Select (ephemeral); 2) ao
-        # selecionar, abrimos o Modal só com o campo de comentário.
+
         await interaction.response.send_message(
             f"Avaliando o atendimento com **{nome_coach}** — selecione a nota:",
             view=NotaSelectView(self.canal_ticket_id),

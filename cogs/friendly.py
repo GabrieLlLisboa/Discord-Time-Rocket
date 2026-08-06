@@ -9,19 +9,15 @@ from cogs.backup import ler, salvar, agora_str
 
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
-# Categoria onde os canais de voz dos amistosos são criados (separada da
-# categoria do canal de texto).
+
 CATEGORIA_VOZ_AMISTOSOS_ID = 1511912206055506001
 
-# Canais de voz pra onde os membros são movidos quando o amistoso acaba e o
-# canal de voz do amistoso vai ser apagado. Prioridade pro que estiver vazio;
-# se os dois já tiverem gente, usa o primeiro da lista.
+
 CANAIS_VOZ_POS_AMISTOSO = [1514777010293964830, 1532926276464279563]
 
 FUSO_BRASILIA = timezone(timedelta(hours=-3))
 
-# Aceita formatos tipo "15/06 às 20h00", "15/06 20:00", "15/06 as 21h",
-# "15/06/2026 19h30" — dia/mês (com ano opcional) e hora com "h" ou ":".
+
 _PADRAO_DATA_HORA = re.compile(
     r"(?P<dia>\d{1,2})[/\-](?P<mes>\d{1,2})(?:[/\-](?P<ano>\d{2,4}))?"
     r".*?"
@@ -56,8 +52,7 @@ def _parse_data_hora(texto: str, agora_local: datetime | None = None) -> float |
 
         dt = datetime(ano, mes, dia, hora, minuto, tzinfo=FUSO_BRASILIA)
 
-        # Sem ano explícito e a data já passou há mais de 1 dia — assume que
-        # é ano que vem (ex: criar em dezembro um amistoso de janeiro).
+
         if not ano_str and dt < agora_local - timedelta(days=1):
             dt = dt.replace(year=ano + 1)
 
@@ -65,9 +60,7 @@ def _parse_data_hora(texto: str, agora_local: datetime | None = None) -> float |
     except ValueError:
         return None
 
-# Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
-# pelo sistema de coaches — ver cogs/coach_config.py). Antes havia apenas
-# um ADMIN_ROLE_ID; agora são dois cargos, e qualquer um dos dois basta.
+
 ADMIN_ROLE_IDS = {
     1511895253777649704,
     1511894837790769204,
@@ -134,7 +127,6 @@ async def _atualizar_embed_confirmados(mensagem: discord.Message, guild: discord
         print(f"[AMISTOSO] ⚠️ Erro ao atualizar embed de confirmados: {e}")
 
 
-# ── Botão de sair ──────────────────────────────────────────────────────────────
 class SairAmistosoView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -156,7 +148,7 @@ class SairAmistosoView(discord.ui.View):
                 break
         salvar("amistosos", amistosos)
 
-        # Remove também o acesso ao canal de voz do amistoso, se existir.
+
         if amistoso_atual:
             canal_voz_id = amistoso_atual.get("canal_voz_id")
             if canal_voz_id:
@@ -167,10 +159,7 @@ class SairAmistosoView(discord.ui.View):
                     except discord.HTTPException as e:
                         print(f"[AMISTOSO] ⚠️ Erro ao remover acesso do canal de voz pra {membro}: {e}")
 
-        # Atualiza embed do anúncio a partir do JSON (fonte única de verdade
-        # — assim a próxima tentativa de confirmar presença desse membro,
-        # seja pela mesma view ou depois de um restart do bot, já vê que
-        # ele não está mais confirmado)
+
         if amistoso_atual and amistoso_atual.get("msg_anuncio_id"):
             canal_anuncio = interaction.client.get_channel(AMISTOSOS_CHANNEL_ID)
             if canal_anuncio:
@@ -185,7 +174,6 @@ class SairAmistosoView(discord.ui.View):
         print(f"[AMISTOSO] 🚪 {membro} saiu do amistoso no canal #{canal.name}.")
 
 
-# ── Botão de confirmar presença ────────────────────────────────────────────────
 class ConfirmarPresencaView(discord.ui.View):
     def __init__(self, rank_alvo: str, rank_id: int, canal_amistoso_id: int, rank_ids_extras: list = None):
         super().__init__(timeout=None)
@@ -193,11 +181,7 @@ class ConfirmarPresencaView(discord.ui.View):
         self.rank_id           = rank_id
         self.rank_ids_extras   = rank_ids_extras or [rank_id]
         self.canal_amistoso_id = canal_amistoso_id
-        # OBS: NÃO guarda mais a lista de confirmados aqui em memória.
-        # Isso era a causa do bug de "já confirmou presença" mesmo depois
-        # de sair — e também não sobrevivia a um restart do bot. Agora
-        # tudo lê/escreve direto no JSON (self.cog.dados / arquivo
-        # "amistosos"), que é a única fonte de verdade.
+
 
     def _buscar_amistoso(self, amistosos: list):
         for a in amistosos:
@@ -230,10 +214,10 @@ class ConfirmarPresencaView(discord.ui.View):
         amistoso["confirmados"].append(membro.id)
         salvar("amistosos", amistosos)
 
-        # Atualiza embed do anúncio a partir da lista canônica (JSON)
+
         await _atualizar_embed_confirmados(interaction.message, interaction.guild, amistoso["confirmados"])
 
-        # Libera acesso ao canal e notifica
+
         canal_amistoso = interaction.client.get_channel(self.canal_amistoso_id)
         if canal_amistoso:
             await canal_amistoso.set_permissions(
@@ -241,8 +225,7 @@ class ConfirmarPresencaView(discord.ui.View):
             )
             await canal_amistoso.send(f"✅ {membro.mention} confirmou presença!")
 
-        # Libera acesso ao canal de voz do amistoso também, se existir
-        # (amistosos criados antes dessa atualização não têm esse campo).
+
         canal_voz_id = amistoso.get("canal_voz_id")
         if canal_voz_id:
             canal_voz = interaction.client.get_channel(canal_voz_id)
@@ -259,7 +242,6 @@ class ConfirmarPresencaView(discord.ui.View):
         print(f"[AMISTOSO] ✅ {membro} confirmou presença.")
 
 
-# ── Lógica de criação do amistoso ─────────────────────────────────────────────
 async def criar_amistoso(
     interaction: discord.Interaction,
     adversario: str,
@@ -304,9 +286,7 @@ async def criar_amistoso(
         if admin_role:
             overwrites[admin_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
-    # Mesma regra de acesso do canal de texto, só que com permissões de voz
-    # (conectar/falar) em vez de mandar mensagem. Só a equipe (mesmos cargos
-    # acima) e quem confirmar presença conseguem entrar.
+
     overwrites_voz = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
         guild.me:           discord.PermissionOverwrite(view_channel=True, connect=True, speak=True),
@@ -404,8 +384,6 @@ async def criar_amistoso(
     print(f"[AMISTOSO] ✅ {interaction.user} anunciou amistoso vs {adversario} — {rank_salvo}")
 
 
-# Marcos de lembrete: (segundos antes do horário, chave única, destino)
-# destino: "canal" | "dm" | "ambos"
 _MARCOS_LEMBRETE = [
     (5 * 3600, "5h_canal", "canal"),
     (1 * 3600, "1h_dm", "dm"),
@@ -420,11 +398,7 @@ _TEXTO_TEMPO = {
     "10min_ambos": "10 minutos",
 }
 
-# Aviso extra que acompanha o lembrete, pedindo pra quem não vai poder
-# participar sair do amistoso — assim a lista de confirmados fica sempre
-# atualizada. No canal, o botão vai anexado na própria mensagem. Na DM não
-# dá pra anexar o botão (ele só funciona dentro do canal do amistoso), então
-# o texto pede pra clicar por lá.
+
 _AVISO_SAIR_CANAL = (
     "\n\n📌 Gostaríamos de lembrar que, se você não pode participar, aperte "
     "no botão de sair anexado a esta mensagem — isso torna tudo mais organizado."
@@ -435,32 +409,25 @@ _AVISO_SAIR_DM = (
 )
 
 
-# ── Cog ───────────────────────────────────────────────────────────────────────
 class Friendly(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.amistoso_map: dict[int, tuple[int, int | None]] = {}  # msg_id -> (canal_id, canal_voz_id)
+        self.amistoso_map: dict[int, tuple[int, int | None]] = {}
 
-        # Reconstrói os botões (✅ Confirmar Presença / 🚪 Sair do Amistoso)
-        # de todo amistoso que ainda não tem resultado registrado — assim,
-        # se o bot reiniciar no meio de um amistoso em andamento, os
-        # botões continuam funcionando normalmente (nada de "essa
-        # interação falhou" pro pessoal que for confirmar presença depois
-        # do restart).
-        self.bot.add_view(SairAmistosoView())  # custom_id fixo, serve pra qualquer canal de amistoso
+
+        self.bot.add_view(SairAmistosoView())
 
         for a in ler("amistosos"):
             if a.get("resultado") is not None:
-                continue  # já finalizado — não precisa mais reativar os botões dele
+                continue
 
             msg_id       = a.get("msg_anuncio_id")
             canal_id     = a.get("canal_id")
             canal_voz_id = a.get("canal_voz_id")
             rank_id      = a.get("rank_id")
             if msg_id is None or canal_id is None:
-                # Amistosos criados antes dessa atualização não têm esses
-                # dados salvos — sem eles não dá pra reconstruir a view
-                # com segurança, então só pula (não trava o bot).
+
+
                 continue
 
             view = ConfirmarPresencaView(
@@ -480,7 +447,7 @@ class Friendly(commands.Cog):
     def registrar(self, message_id: int, canal_id: int, canal_voz_id: int | None = None):
         self.amistoso_map[message_id] = (canal_id, canal_voz_id)
 
-    # ── Lembretes automáticos pra quem confirmou presença ────────────────
+
     @tasks.loop(minutes=1)
     async def lembretes_amistoso(self):
         await self.bot.wait_until_ready()
@@ -490,12 +457,12 @@ class Friendly(commands.Cog):
 
         for amistoso in amistosos:
             if amistoso.get("resultado") is not None:
-                continue  # amistoso já finalizado
+                continue
 
             ts = amistoso.get("data_hora_ts")
             if not ts or agora_ts >= ts:
-                # Sem data reconhecida, ou o horário do amistoso já passou —
-                # nada mais pra lembrar.
+
+
                 continue
 
             confirmados = amistoso.get("confirmados") or []
@@ -510,12 +477,9 @@ class Friendly(commands.Cog):
 
                 tempo_restante = ts - agora_ts
                 if tempo_restante > segundos:
-                    continue  # ainda não chegou a hora desse lembrete específico
+                    continue
 
-                # Se o bot ficou off e perdeu a janela por mais de 15 min,
-                # pula esse marco em vez de mandar um aviso "atrasado" que
-                # não bate mais com o tempo real que falta (ex: mandar
-                # "faltam 5 horas" quando na real só falta 1h).
+
                 if tempo_restante < segundos - (15 * 60):
                     enviados.append(chave)
                     mudou = True
@@ -567,11 +531,11 @@ class Friendly(commands.Cog):
                         f"{_AVISO_SAIR_DM}"
                     )
                 except discord.Forbidden:
-                    pass  # DM fechada — nada a fazer
+                    pass
                 except discord.HTTPException as e:
                     print(f"[AMISTOSO] ⚠️ Erro ao mandar lembrete por DM pra {uid}: {e}")
 
-    # ── Move quem estava na call do amistoso pra uma das calls fixas ────────
+
     async def _mover_membros_pos_amistoso(self, canal_voz: discord.VoiceChannel):
         membros = list(canal_voz.members)
         if not membros:
@@ -584,8 +548,7 @@ class Friendly(commands.Cog):
             print("[AMISTOSO] ⚠️ Nenhum dos canais de voz de destino foi encontrado.")
             return
 
-        # Prioridade pro canal que estiver vazio; se nenhum estiver vazio
-        # (ou os dois estiverem), pega o primeiro da lista.
+
         destino = next((c for c in destinos if len(c.members) == 0), destinos[0])
 
         for membro in membros:

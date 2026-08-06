@@ -16,8 +16,7 @@ from cogs.json_store import ler_json, salvar_json
 
 EXTRA_COACHES_FILE = "data/coaches_extra.json"
 
-# ── Coaches ──────────────────────────────────────────────────────────────────
-# chave interna -> { user_id do coach, channel_id do canal dele, nome de exibição }
+
 COACHES: dict[str, dict] = {
     "isaque": {
         "user_id": 1421693641184772147,
@@ -36,19 +35,17 @@ COACHES: dict[str, dict] = {
     },
 }
 
-# Carrega os coaches adicionados via /adicionar-coach (persistidos em disco)
-# e junta com os de fábrica acima.
+
 COACHES.update(ler_json(EXTRA_COACHES_FILE, dict))
 
-# ── Cargos autorizados a gerenciar/finalizar tudo relacionado a coaches ──────
-# (mesmos cargos usados para gerenciar/finalizar amistosos)
+
 MANAGER_ROLE_IDS: set[int] = {
     1511895253777649704,
     1511894837790769204,
     1523843469016043600,
 }
 
-# Categoria onde o canal de voz de cada atendimento é criado.
+
 CATEGORIA_VOZ_ID: int = 1525158787894218884
 
 

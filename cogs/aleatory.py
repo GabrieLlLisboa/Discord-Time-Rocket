@@ -8,25 +8,10 @@ import random
 import discord
 from discord.ext import commands
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Cog: Aleatory
-#  Arquivo: cogs/aleatory.py
-#  Comando: !aleatory
-#
-#  Faz o bot ficar mandando mensagens com "cara" de texto criptografado
-#  (strings aleatórias em base64/hex) de tempos em tempos no canal.
-#  É só visual/diversão — não é uma cifra reversível de verdade, é ruído
-#  aleatório gerado com os.urandom.
-#
-#  Uso:
-#   !aleatory                → começa a mandar no canal atual (intervalo padrão 10s)
-#   !aleatory <segundos>     → começa com intervalo customizado (mínimo 3s)
-#   !aleatory stop           → para de mandar no canal atual
-# ─────────────────────────────────────────────────────────────────────────────
 
 INTERVALO_PADRAO = 10
 INTERVALO_MINIMO = 3
-MAX_MENSAGENS_POR_EXECUCAO = 200  # trava de segurança pra não rodar pra sempre esquecido
+MAX_MENSAGENS_POR_EXECUCAO = 200
 
 PREFIXOS = ["🔒", "🔐", "🛡️", "📡", "🧩"]
 
@@ -41,7 +26,7 @@ def gerar_bloco_criptografado(tamanho: int = 24) -> str:
 class Aleatory(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.tarefas: dict[int, asyncio.Task] = {}  # channel_id -> task
+        self.tarefas: dict[int, asyncio.Task] = {}
 
     async def _loop_envio(self, channel: discord.abc.Messageable, intervalo: int):
         try:
@@ -66,7 +51,7 @@ class Aleatory(commands.Cog):
         """
         channel = ctx.channel
 
-        # ── parar ─────────────────────────────────────────────────────────
+
         if arg and arg.lower() == "stop":
             tarefa = self.tarefas.get(channel.id)
             if tarefa is None:
@@ -75,11 +60,11 @@ class Aleatory(commands.Cog):
             self.tarefas.pop(channel.id, None)
             return await ctx.send("⏹️ `!aleatory` parado neste canal.")
 
-        # ── já tem uma rodando aqui? ─────────────────────────────────────
+
         if channel.id in self.tarefas:
             return await ctx.send("⚠️ Já tem um `!aleatory` rodando neste canal. Use `!aleatory stop` pra parar antes de começar outro.")
 
-        # ── intervalo customizado ────────────────────────────────────────
+
         intervalo = INTERVALO_PADRAO
         if arg is not None:
             try:

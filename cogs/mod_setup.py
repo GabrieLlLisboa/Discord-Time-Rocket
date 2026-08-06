@@ -7,18 +7,6 @@ from datetime import timedelta
 
 from cogs import mod_utils as mu
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Cog: Painel Rápido de Moderação
-#  Arquivo: cogs/mod_setup.py
-#
-#  Comando de prefixo `!setup-moderacao`: manda um embed com um painel de
-#  botões cobrindo as principais ações de moderação. Cada botão abre um
-#  Modal pedindo os dados necessários (usuário, motivo, duração etc.) —
-#  já que um botão do Discord sozinho não recebe input de texto.
-#
-#  O painel é uma View persistente (custom_id fixo), então continua
-#  funcionando normalmente mesmo depois de reiniciar o bot.
-# ─────────────────────────────────────────────────────────────────────────────
 
 REGEX_ID = re.compile(r"\d{15,25}")
 
@@ -41,7 +29,6 @@ async def _resolver_membro(interaction: discord.Interaction, texto: str) -> disc
     return membro
 
 
-# ── Modal genérico usado por warn / kick / ban / tempban / timeout / softban / unban ──
 class AcaoModal(discord.ui.Modal):
     TITULOS = {
         "warn": "⚠️ Aplicar Advertência", "timeout": "🔇 Aplicar Timeout",
@@ -112,7 +99,7 @@ class AcaoModal(discord.ui.Modal):
             await mu.enviar_log_moderacao(interaction.client, guild, embed)
             return
 
-        # Ações que exigem o membro estar no servidor: warn, timeout, kick, tempban, softban
+
         membro = await _resolver_membro(interaction, str(self.usuario_input.value))
         if membro is None:
             return await interaction.response.send_message(embed=mu.embed_erro("Não encontrei esse membro no servidor. Confira o ID/menção."), ephemeral=True)
@@ -248,7 +235,6 @@ class NickModal(discord.ui.Modal, title="✏️ Alterar Apelido"):
         await interaction.response.send_message(embed=mu.embed_sucesso(f"✏️ {texto}"))
 
 
-# ── Painel principal (View persistente com custom_id fixo) ──────────────────
 class PainelModeracaoView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -259,7 +245,7 @@ class PainelModeracaoView(discord.ui.View):
             return False
         return True
 
-    # linha 0
+
     @discord.ui.button(label="Advertir", emoji="⚠️", style=discord.ButtonStyle.primary, custom_id="painel_mod:warn", row=0)
     async def btn_warn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self._checar_permissao(interaction):
@@ -280,7 +266,7 @@ class PainelModeracaoView(discord.ui.View):
         if await self._checar_permissao(interaction):
             await interaction.response.send_modal(AcaoModal("ban"))
 
-    # linha 1
+
     @discord.ui.button(label="Ban Temporário", emoji="⏳", style=discord.ButtonStyle.danger, custom_id="painel_mod:tempban", row=1)
     async def btn_tempban(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self._checar_permissao(interaction):
@@ -301,7 +287,7 @@ class PainelModeracaoView(discord.ui.View):
         if await self._checar_permissao(interaction):
             await interaction.response.send_modal(ClearModal())
 
-    # linha 2
+
     @discord.ui.button(label="Slowmode", emoji="🐌", style=discord.ButtonStyle.secondary, custom_id="painel_mod:slowmode", row=2)
     async def btn_slowmode(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self._checar_permissao(interaction):

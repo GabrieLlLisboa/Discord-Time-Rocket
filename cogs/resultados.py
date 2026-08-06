@@ -7,25 +7,17 @@ import os
 import re
 import uuid
 
-# ─────────────────────────────────────────────
-#  Cog: Resultados
-#  Arquivo: cogs/resultados.py
-#  /resultado — registra resultado, salva transcrição,
-#               DM nos jogadores e deleta canal
-#  /ranking   — placar geral acumulado
-# ─────────────────────────────────────────────
 
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
-# Cargos autorizados a gerenciar/finalizar amistosos (mesmos cargos usados
-# pelo sistema de coaches — ver cogs/coach_config.py).
+
 ADMIN_ROLE_IDS = {
     1511895253777649704,
     1511894837790769204,
     1523843469016043600,
 }
 
-# Diretório dedicado (dentro de data/) pra transcrições temporárias.
+
 TRANSCRICOES_DIR = "data/transcricoes"
 
 
@@ -99,7 +91,7 @@ class Resultados(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ── /resultado ────────────────────────────────────────────────────────────
+
     @app_commands.command(name="resultado", description="Registra o resultado de um amistoso.")
     @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     @app_commands.describe(
@@ -135,23 +127,7 @@ class Resultados(commands.Cog):
         frase_resultado = FRASES_RESULTADO[resultado.value]
         titulo_resultado = TITULOS[resultado.value]
 
-        # Encontra o amistoso mais recente com esse adversário que AINDA NÃO
-        # tenha um resultado registrado.
-        #
-        # ANTES: pegava o primeiro amistoso cujo nome batesse (substring) e
-        # nunca checava se ele já tinha "resultado" preenchido. Isso permitia
-        # rodar /resultado duas vezes pro mesmo amistoso (duplicando vitórias/
-        # derrotas/partidas nos perfis, reenviando DMs e tentando deletar de
-        # novo um canal que já tinha sido removido) e também escolher o
-        # amistoso errado quando dois adversários tinham nomes parecidos.
-        #
-        # AGORA: ao encontrar um amistoso com "resultado" já preenchido
-        # (inclusive cancelado), ele é ignorado e a busca continua por um
-        # amistoso mais antigo, ainda em aberto, com o mesmo adversário. Se
-        # só existirem amistosos já finalizados com esse nome, o comando é
-        # bloqueado (nada é processado de novo) — isso torna a operação
-        # idempotente: executar /resultado repetidas vezes para o mesmo
-        # amistoso não tem mais efeito duplicado.
+
         amistoso_idx  = None
         canal_amistoso = None
         canal_voz_amistoso = None
@@ -181,7 +157,7 @@ class Resultados(commands.Cog):
             )
             return
 
-        # ── Gera transcrição antes de deletar o canal ──────────────────────
+
         transcricao_texto = None
         transcricao_arquivo = None
 
@@ -195,7 +171,7 @@ class Resultados(commands.Cog):
             except Exception as e:
                 print(f"[RESULTADO] ⚠️ Erro ao gerar transcrição: {e}")
 
-        # ── Atualiza histórico e perfis ────────────────────────────────────
+
         if amistoso_idx is not None:
             amistosos[amistoso_idx]["resultado"] = emoji_resultado
             amistosos[amistoso_idx]["placar"]    = placar
@@ -222,7 +198,7 @@ class Resultados(commands.Cog):
         })
         salvar("resultados", resultados_lista)
 
-        # ── DM para cada jogador confirmado ────────────────────────────────
+
         placar_texto = f" — **{placar}**" if placar else ""
         dm_enviadas  = 0
         dm_falhas    = 0
@@ -232,7 +208,7 @@ class Resultados(commands.Cog):
             if membro is None:
                 continue
             try:
-                # Monta a mensagem no formato pedido
+
                 rank_amistoso = amistosos[amistoso_idx].get("rank", "") if amistoso_idx is not None else ""
 
                 embed_dm = discord.Embed(
@@ -274,7 +250,7 @@ class Resultados(commands.Cog):
                 dm_falhas += 1
                 print(f"[RESULTADO] ⚠️ Não foi possível enviar DM para {membro}.")
 
-        # ── Responde a mensagem do amistoso no canal ──────────────────────
+
         rank_amistoso = amistosos[amistoso_idx].get("rank", "") if amistoso_idx is not None else ""
 
         embed_pub = discord.Embed(
@@ -296,7 +272,7 @@ class Resultados(commands.Cog):
         canal_pub = self.bot.get_channel(AMISTOSOS_CHANNEL_ID)
         if canal_pub:
             msg_amistoso = None
-            # Extrai IDs do link: .../channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID
+
             try:
                 partes = link_mensagem.strip().split("/")
                 msg_id = int(partes[-1])
@@ -312,7 +288,7 @@ class Resultados(commands.Cog):
             else:
                 await canal_pub.send(embed=embed_pub)
 
-        # ── Deleta o canal do amistoso ─────────────────────────────────────
+
         if canal_amistoso:
             await asyncio.sleep(3)
             try:
@@ -328,7 +304,7 @@ class Resultados(commands.Cog):
             except Exception as e:
                 print(f"[RESULTADO] ⚠️ Erro ao deletar canal de voz: {e}")
 
-        # Limpa arquivo de transcrição temporário
+
         if transcricao_arquivo:
             try:
                 os.remove(transcricao_arquivo)
@@ -342,7 +318,7 @@ class Resultados(commands.Cog):
         )
         print(f"[RESULTADO] ✅ {resultado.value} vs {adversario} | DMs: {dm_enviadas}/{len(confirmados_ids)}")
 
-    # ── /finalizar-amistoso ───────────────────────────────────────────────────
+
     @app_commands.command(
         name="finalizar-amistoso",
         description="Encerra o amistoso deste canal: avisa os confirmados por DM e apaga os canais (texto e voz)."
@@ -390,18 +366,16 @@ class Resultados(commands.Cog):
         amistoso           = amistosos[amistoso_idx]
         adversario         = amistoso["adversario"]
         confirmados_ids    = amistoso.get("confirmados", [])
-        canal_amistoso     = interaction.channel  # o próprio canal onde o comando rodou
+        canal_amistoso     = interaction.channel
         canal_voz_id       = amistoso.get("canal_voz_id")
         canal_voz_amistoso = self.bot.get_channel(canal_voz_id) if canal_voz_id else None
 
-        # Marca como encerrado (se ainda não tinha resultado registrado por
-        # /resultado), só pra não ficar reaparecendo em lembretes/reconstrução
-        # de botões depois de o canal já ter sido apagado.
+
         if not amistoso.get("resultado"):
             amistoso["resultado"] = "🏁 Encerrado"
             salvar("amistosos", amistosos)
 
-        # ── DM pra cada jogador confirmado ─────────────────────────────────
+
         dm_enviadas = 0
         dm_falhas   = 0
         for mid in confirmados_ids:
@@ -424,7 +398,7 @@ class Resultados(commands.Cog):
                 dm_falhas += 1
                 print(f"[FINALIZAR] ⚠️ Não foi possível enviar DM para {membro}.")
 
-        # ── Avisa no canal de anúncios (reply na mensagem original) ────────
+
         canal_pub = self.bot.get_channel(AMISTOSOS_CHANNEL_ID)
         if canal_pub:
             embed_pub = discord.Embed(
@@ -449,7 +423,7 @@ class Resultados(commands.Cog):
             else:
                 await canal_pub.send(embed=embed_pub)
 
-        # ── Responde a interação (o canal ainda existe nesse momento) ──────
+
         await interaction.followup.send(
             f"✅ Amistoso vs **{adversario}** encerrado.\n"
             f"📬 DMs enviadas: `{dm_enviadas}` | ❌ Falhas: `{dm_falhas}`\n"
@@ -457,7 +431,7 @@ class Resultados(commands.Cog):
             ephemeral=True
         )
 
-        # ── Deleta o canal do amistoso e o de voz ──────────────────────────
+
         await asyncio.sleep(3)
         try:
             await canal_amistoso.delete(reason=f"Amistoso vs {adversario} encerrado via /finalizar-amistoso.")
@@ -488,7 +462,7 @@ class Resultados(commands.Cog):
                 "❌ Apenas **Administradores** podem registrar resultados.", ephemeral=True
             )
 
-    # ── /ranking ──────────────────────────────────────────────────────────────
+
     @app_commands.command(name="ranking", description="Placar acumulado de vitórias do time.")
     async def ranking(self, interaction: discord.Interaction):
         resultados = ler("resultados")
@@ -527,7 +501,7 @@ class Resultados(commands.Cog):
         else:
             from cogs.paginacao import paginar, PaginacaoView
 
-            # Embed de resumo (sempre página 1)
+
             embed_resumo = embed
 
             def montar_pagina(pagina, total, fatia, offset):
@@ -549,7 +523,6 @@ class Resultados(commands.Cog):
             await interaction.response.send_message(embed=embeds[0], view=view)
 
 
-    # ── /cancelar_amistoso ───────────────────────────────────────────────────
     @app_commands.command(name="cancelar_amistoso", description="Cancela um amistoso e notifica os jogadores.")
     @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     @app_commands.describe(
@@ -580,13 +553,13 @@ class Resultados(commands.Cog):
                     canal_amistoso = self.bot.get_channel(canal_id)
                 break
 
-        # Atualiza histórico
+
         if amistoso_idx is not None:
             amistosos[amistoso_idx]["resultado"] = "❌ Cancelado"
             amistosos[amistoso_idx]["placar"]    = ""
             salvar("amistosos", amistosos)
 
-        # Embed público respondendo ao anúncio
+
         embed_pub = discord.Embed(
             title="🚫  Amistoso Cancelado",
             color=0x808080,
@@ -614,7 +587,7 @@ class Resultados(commands.Cog):
             else:
                 await canal_pub.send(embed=embed_pub)
 
-        # DM para cada jogador confirmado
+
         dm_enviadas = 0
         for mid in confirmados_ids:
             membro = interaction.guild.get_member(mid)
@@ -634,7 +607,7 @@ class Resultados(commands.Cog):
             except discord.Forbidden:
                 print(f"[CANCELAR] ⚠️ Não foi possível enviar DM para {membro}.")
 
-        # Deleta o canal do amistoso
+
         if canal_amistoso:
             await asyncio.sleep(2)
             try:
@@ -657,7 +630,6 @@ class Resultados(commands.Cog):
             )
 
 
-    # ── /listar_resultados ───────────────────────────────────────────────────
     @app_commands.command(name="listar_resultados", description="Lista todos os resultados com número para deletar.")
     @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     async def listar_resultados(self, interaction: discord.Interaction):
@@ -691,7 +663,7 @@ class Resultados(commands.Cog):
         if isinstance(error, app_commands.MissingRole):
             await interaction.response.send_message("❌ Apenas **Administradores** podem usar este comando.", ephemeral=True)
 
-    # ── /deletar_resultado ────────────────────────────────────────────────────
+
     @app_commands.command(name="deletar_resultado", description="Deleta um resultado pelo número (use /listar_resultados primeiro).")
     @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     @app_commands.describe(numero="Número do resultado (veja com /listar_resultados)")

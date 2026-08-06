@@ -38,9 +38,7 @@ class NotaSelect(discord.ui.Select):
         from cogs.coach_modals import ComentarioModal
         from cogs.coach_storage import obter_ticket
 
-        # Revalida no momento da escolha — o cliente pode ter deixado essa
-        # mensagem ephemeral aberta e clicado em "Avaliar" em outra aba, ou
-        # o ticket pode ter sido avaliado por outro caminho nesse meio tempo.
+
         ticket = await obter_ticket(self.canal_ticket_id)
         if ticket is None or ticket.get("avaliado"):
             await interaction.response.send_message(
@@ -51,12 +49,6 @@ class NotaSelect(discord.ui.Select):
 
         nota = int(self.values[0])
         await interaction.response.send_modal(ComentarioModal(self.canal_ticket_id, nota))
-        # OBS: não dá pra desabilitar o select depois daqui — o send_modal
-        # já consumiu a resposta desta interação, então não existe mais
-        # "mensagem original" pra editar (interaction.edit_original_response
-        # sempre falharia). A proteção contra reenvio duplicado já é feita
-        # no início deste callback e em coach_manager.concluir_avaliacao
-        # (via TicketJaAvaliadoError), então não é necessário aqui.
 
 
 class NotaSelectView(discord.ui.View):

@@ -5,22 +5,6 @@ import sys
 
 import discord
 
-# ─────────────────────────────────────────────
-#  Terminal de comandos do bot
-#  Arquivo: console.py
-#
-#  Fica lendo o que você digita direto no terminal onde o bot tá rodando
-#  (sem precisar do Discord) e executa ações administrativas. Os mesmos
-#  comandos também podem ser digitados no canal "web terminal" no Discord
-#  (veja cogs/webterminal.py) — os dois usam exatamente essa mesma lógica.
-#
-#  Comandos disponíveis:
-#    update                       -> git pull + espera 2s + reinicia
-#    reiniciar / restart          -> reinicia o bot (mesmo processo)
-#    parar / desligar / shutdown  -> encerra o bot de vez
-#    status                       -> mostra info rápida (usuário, servidores, ping)
-#    ajuda / help                 -> lista os comandos
-# ─────────────────────────────────────────────
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -70,7 +54,6 @@ async def _antes_de_matar_o_processo():
     await asyncio.sleep(0.3)
 
 
-# ── Ações de cada comando (compartilhadas entre terminal local e Discord) ──
 async def cmd_status(bot: discord.Client):
     latencia = round(bot.latency * 1000) if bot.latency else "?"
     print(f"[CONSOLE] ✅ Online como {bot.user} | {len(bot.guilds)} servidor(es) | ping {latencia}ms")
@@ -136,8 +119,8 @@ async def executar_comando(bot: discord.Client, comando: str) -> bool:
 async def iniciar_console(bot: discord.Client):
     """Inicia o loop que lê comandos digitados no terminal. Roda em paralelo com o bot."""
     if not sys.stdin or not sys.stdin.isatty():
-        # Sem terminal interativo de verdade (ex: rodando via nohup/serviço sem tty)
-        # — não adianta ficar lendo stdin, então nem inicia.
+
+
         print("[CONSOLE] ℹ️  Sem terminal interativo detectado, comandos de console desativados.")
         return
 
@@ -146,7 +129,7 @@ async def iniciar_console(bot: discord.Client):
     while True:
         linha = await asyncio.to_thread(sys.stdin.readline)
         if not linha:
-            # EOF (ex: terminal fechou) — evita loop infinito consumindo CPU
+
             await asyncio.sleep(1)
             continue
 

@@ -15,8 +15,7 @@ def _garantir_dependencias():
     if not os.path.isfile(caminho_requirements):
         return
 
-    # Nome do pacote no requirements.txt nem sempre bate com o nome do
-    # módulo Python que se importa (ex: "discord.py" -> "discord").
+
     MAPA_NOMES = {
         "discord.py": "discord",
         "python-dotenv": "dotenv",
@@ -71,7 +70,7 @@ from cogs.mod_utils import SUPER_ADMIN_IDS
 load_dotenv()
 TOKEN    = os.getenv("DISCORD_TOKEN")
 PREFIX   = os.getenv("PREFIX", "!")
-GUILD_ID = os.getenv("GUILD_ID")  # opcional — se preencher, sincroniza slash commands na hora nesse servidor
+GUILD_ID = os.getenv("GUILD_ID")
 
 intents = discord.Intents.default()
 intents.members         = True
@@ -90,7 +89,7 @@ async def apagar_mensagem_do_comando(ctx: commands.Context):
     comando negado por falta de permissão não apaga a mensagem (o autor
     ainda vê o próprio comando e o aviso de erro)."""
     if ctx.guild is None:
-        # Em DM não existe permissão de gerenciar mensagens pra apagar.
+
         return
     try:
         await ctx.message.delete()
@@ -101,7 +100,7 @@ async def apagar_mensagem_do_comando(ctx: commands.Context):
 async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
     import traceback
 
-    # Loga o erro completo no console (é aqui que dá pra ver a causa real)
+
     print(f"[SLASH] ❌ Erro no comando '/{interaction.command.name if interaction.command else '?'}':")
     traceback.print_exception(type(error), error, error.__traceback__)
 
@@ -150,7 +149,7 @@ COGS = [
     "cogs.aleatory",
     "cogs.webterminal",
 
-    # ── Sistema de Moderação ──
+
     "cogs.mod_config",
     "cogs.mod_setup",
     "cogs.moderation",
@@ -189,7 +188,7 @@ def liberar_super_admins():
     OU libere manualmente em Configurações do Servidor → Integrações →
     TryHarders RL Bot → permissões do comando.
     """
-    # ── Comandos de prefixo (!comando) ──
+
     for command in bot.walk_commands():
         checks_originais = list(command.checks)
         if not checks_originais:
@@ -205,11 +204,11 @@ def liberar_super_admins():
 
         command.checks = [_check_liberado]
 
-    # ── Comandos de barra (/comando) ──
+
     for command in bot.tree.walk_commands():
         if not isinstance(command, discord.app_commands.Command):
-            # discord.app_commands.Group não tem lista de "checks" própria
-            # (cada subcomando dele já é percorrido separadamente aqui).
+
+
             continue
         checks_originais = list(command.checks)
         if not checks_originais:
@@ -259,7 +258,7 @@ async def registrar_views_persistentes():
     from cogs.whitelist import ComecarWhitelistView, FinalizarWhitelistView
     from cogs.atividade import SetupAtividadeView
 
-    # Views sem estado (não precisam de argumentos)
+
     bot.add_view(TicketSetupView())
     bot.add_view(FecharTicketView())
     bot.add_view(ReabrirTicketView())
@@ -270,8 +269,7 @@ async def registrar_views_persistentes():
     bot.add_view(FinalizarWhitelistView())
     bot.add_view(SetupAtividadeView())
 
-    # Views de campeonatos em aberto (o botão "Entrar no Torneio" precisa
-    # ser recriado com o custom_id certo pra continuar funcionando)
+
     try:
         from cogs.campeonato import EntrarTorneioView, ler_campeonatos
         campeonatos = ler_campeonatos()
@@ -285,9 +283,7 @@ async def registrar_views_persistentes():
     except Exception as e:
         print(f"[VIEWS] ⚠️  Erro ao recarregar views de campeonatos: {e}")
 
-    # Sistema de Coaches: um botão "Comprar Atendimento" por coach + um
-    # botão "Avaliar Coach" para cada ticket já finalizado mas ainda sem
-    # avaliação (senão o botão pararia de funcionar após um restart).
+
     try:
         from cogs.coach_config import COACHES
         from cogs.coach_views import ComprarAtendimentoView, AvaliarCoachView, CancelarCoachView
@@ -314,7 +310,7 @@ async def registrar_views_persistentes():
 
     print("[VIEWS] ✅ Views persistentes registradas.")
 
-    # Whitelists pendentes/em análise: recria os botões de revisão
+
     try:
         from cogs.whitelist import RevisaoWhitelistView
         from cogs.backup import ler as ler_backup
@@ -329,7 +325,7 @@ async def registrar_views_persistentes():
     except Exception as e:
         print(f"[VIEWS] ⚠️  Erro ao recarregar views de whitelist: {e}")
 
-    # Enquetes abertas: recria os botões de voto/encerrar
+
     try:
         from cogs.enquete import EnqueteView
         from cogs.backup import ler as ler_backup
@@ -360,11 +356,7 @@ async def on_ready():
     print(f"  Servidores: {len(bot.guilds)}")
     print(f"{'─'*40}\n")
 
-    # on_ready pode disparar mais de uma vez no mesmo processo (ex: o bot
-    # perde e recupera a conexão com o Discord — RESUME/reconnect). Sincronizar
-    # os slash commands globais toda vez que isso acontece é desnecessário e
-    # arriscado: syncs repetidos em pouco tempo podem esbarrar em rate limit
-    # da API do Discord. Por isso só sincronizamos na primeira vez.
+
     if not _pronto_uma_vez:
         _pronto_uma_vez = True
         try:

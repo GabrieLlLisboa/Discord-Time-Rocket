@@ -32,7 +32,6 @@ from cogs.coach_storage import (
 from cogs.coach_utils import montar_embed_ticket, montar_embed_avaliacao
 
 
-# ── Criação do ticket (botão "🛒 Comprar Atendimento") ──────────────────────
 async def criar_ticket_atendimento(interaction: discord.Interaction, coach_key: str) -> None:
     guild = interaction.guild
     cliente = interaction.user
@@ -46,7 +45,7 @@ async def criar_ticket_atendimento(interaction: discord.Interaction, coach_key: 
 
     coach_membro = guild.get_member(coach["user_id"])
 
-    # ── Permissões do canal de ticket ────────────────────────────────────
+
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
@@ -61,8 +60,7 @@ async def criar_ticket_atendimento(interaction: discord.Interaction, coach_key: 
 
     nome_canal = f"coach-{coach_key}-{cliente.id}"
 
-    # Responde a interação logo — a criação de canal pode levar um instante
-    # e o Discord exige resposta em até 3s.
+
     await interaction.response.defer(ephemeral=True, thinking=True)
 
     try:
@@ -83,8 +81,8 @@ async def criar_ticket_atendimento(interaction: discord.Interaction, coach_key: 
     try:
         await criar_ticket(cliente.id, coach_key, canal_ticket.id)
     except TicketJaAbertoError:
-        # Já existe um atendimento em andamento — desfaz o canal criado
-        # (evita canal "órfão" sem registro correspondente) e avisa.
+
+
         try:
             await canal_ticket.delete(reason="Ticket duplicado — cliente já possui atendimento em andamento.")
         except discord.HTTPException:
@@ -94,7 +92,7 @@ async def criar_ticket_atendimento(interaction: discord.Interaction, coach_key: 
         )
         return
 
-    # ── Canal de voz privado (só cliente + coach) ────────────────────────
+
     canal_voz = None
     categoria_voz = guild.get_channel(CATEGORIA_VOZ_ID)
     if categoria_voz is not None:
@@ -138,7 +136,6 @@ async def criar_ticket_atendimento(interaction: discord.Interaction, coach_key: 
     print(f"[COACH] ✅ Ticket {nome_canal} criado para {cliente} (coach: {coach_key}).")
 
 
-# ── Finalização (comando !finalizar-coach) ──────────────────────────────────
 async def finalizar_atendimento(channel: discord.TextChannel) -> dict:
     """
     Marca o ticket do canal informado como Concluído e envia o aviso ao
@@ -154,7 +151,7 @@ async def finalizar_atendimento(channel: discord.TextChannel) -> dict:
     if ticket_antes is None:
         raise TicketNaoEncontradoError()
 
-    ticket = await finalizar_ticket(channel.id)  # levanta TicketJaFinalizadoError se preciso
+    ticket = await finalizar_ticket(channel.id)
 
     canal_voz_id = ticket.get("canal_voz_id")
     if canal_voz_id:
@@ -181,7 +178,6 @@ async def finalizar_atendimento(channel: discord.TextChannel) -> dict:
     return ticket
 
 
-# ── Cancelamento (botão "🚫 Cancelar Atendimento") ───────────────────────────
 async def cancelar_atendimento(channel: discord.TextChannel) -> dict:
     """
     Marca o ticket do canal informado como Cancelado e apaga o canal de voz
@@ -196,7 +192,7 @@ async def cancelar_atendimento(channel: discord.TextChannel) -> dict:
     if ticket_antes is None:
         raise TicketNaoEncontradoError()
 
-    ticket = await cancelar_ticket(channel.id)  # levanta TicketJaFinalizadoError/TicketJaCanceladoError se preciso
+    ticket = await cancelar_ticket(channel.id)
 
     canal_voz_id = ticket.get("canal_voz_id")
     if canal_voz_id:
@@ -210,7 +206,6 @@ async def cancelar_atendimento(channel: discord.TextChannel) -> dict:
     return ticket
 
 
-# ── Avaliação (Modal de comentário) ──────────────────────────────────────────
 async def concluir_avaliacao(
     interaction: discord.Interaction,
     canal_ticket_id: int,
@@ -252,7 +247,7 @@ async def concluir_avaliacao(
                 canal_coach = None
                 print(f"[COACH] ⚠️ Não foi possível acessar o canal do coach '{ticket['coach_key']}': {e}")
 
-        # 1. Publica a avaliação
+
         if canal_coach is not None:
             try:
                 embed = montar_embed_avaliacao(interaction.user, nota, comentario)
@@ -261,12 +256,10 @@ async def concluir_avaliacao(
             except discord.HTTPException as e:
                 print(f"[COACH] ⚠️ Erro ao publicar avaliação do ticket {canal_ticket_id}: {e}")
 
-    # 2-5. Atualiza estatísticas e recria as duas mensagens fixas no final do canal
-    # (não faz nada se o coach não existir mais — seguro chamar sempre)
+
     await reordenar_mensagens_finais(interaction.client, ticket["coach_key"])
 
-    # 6. Apaga o canal do atendimento — o cliente já avaliou, não precisa mais dele.
-    # Isso roda sempre, mesmo se o coach não tiver sido encontrado acima.
+
     canal_ticket = interaction.client.get_channel(canal_ticket_id)
     if canal_ticket is None:
         try:

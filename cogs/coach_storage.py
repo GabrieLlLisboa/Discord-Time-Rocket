@@ -25,7 +25,7 @@ from cogs.json_store import ler_json, salvar_json
 
 DATA_FILE = "data/coaches.json"
 
-# Único lock do módulo — todas as operações de leitura+escrita passam por ele.
+
 _lock = asyncio.Lock()
 
 
@@ -35,8 +35,8 @@ def _agora() -> str:
 
 def _estrutura_padrao() -> dict:
     return {
-        "tickets": {},      # str(canal_ticket_id) -> dados do ticket
-        "coach_data": {},   # coach_key -> {stats_message_id, buy_message_id, notas}
+        "tickets": {},
+        "coach_data": {},
     }
 
 
@@ -50,7 +50,7 @@ def _coach_data_padrao() -> dict:
 
 def _ler() -> dict:
     dados = ler_json(DATA_FILE, _estrutura_padrao)
-    # Garante as chaves-base mesmo se o arquivo já existia de uma versão antiga
+
     dados.setdefault("tickets", {})
     dados.setdefault("coach_data", {})
     return dados
@@ -66,7 +66,6 @@ def _garantir_coach_data(dados: dict, coach_key: str) -> dict:
     return dados["coach_data"][coach_key]
 
 
-# ── Exceções específicas do domínio ─────────────────────────────────────────
 class TicketJaAbertoError(Exception):
     """Já existe um ticket 'Em andamento' desse cliente com esse coach."""
 
@@ -91,7 +90,6 @@ class TicketNaoFinalizadoError(Exception):
     """Tentativa de avaliar um ticket que ainda não foi finalizado."""
 
 
-# ── Leitura simples (sem necessidade de lock — apenas consulta) ─────────────
 async def obter_ticket(canal_ticket_id: int) -> Optional[dict]:
     async with _lock:
         return _ler()["tickets"].get(str(canal_ticket_id))
@@ -127,7 +125,6 @@ async def listar_tickets_em_andamento() -> list[dict]:
         return [t for t in dados["tickets"].values() if t.get("status") == "Em andamento"]
 
 
-# ── Operações atômicas de escrita ───────────────────────────────────────────
 async def criar_ticket(cliente_id: int, coach_key: str, canal_ticket_id: int) -> dict:
     """
     Cria o registro do ticket de forma atômica. Levanta TicketJaAbertoError

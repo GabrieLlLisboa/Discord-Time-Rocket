@@ -42,13 +42,8 @@ class Coaches(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        # cog_load() roda ANTES do bot se conectar ao Discord (main.py chama
-        # load_cogs() antes de bot.start()), então qualquer chamada à API
-        # feita ali (como buscar o canal do coach) falharia sempre. on_ready
-        # só dispara depois que o bot já está conectado e autenticado — por
-        # isso a criação das mensagens fixas mora aqui. A trava evita
-        # recriar tudo de novo caso on_ready dispare mais de uma vez
-        # (reconexão/RESUME).
+
+
         if self._mensagens_iniciais_ok:
             return
         self._mensagens_iniciais_ok = True
@@ -59,7 +54,7 @@ class Coaches(commands.Cog):
             except Exception as e:
                 print(f"[COACH] ⚠️ Erro ao garantir mensagens do coach '{coach_key}': {e}")
 
-    # ── Comando de cadastro de novo coach (staff/adm) ─────────────────────
+
     @app_commands.command(name="adicionar-coach", description="Cadastra um novo coach no sistema de atendimentos.")
     @app_commands.describe(
         coach="O usuário que vai ser o coach",
@@ -86,9 +81,7 @@ class Coaches(commands.Cog):
             ephemeral=True,
         )
 
-        # Cria as mensagens fixas (📊 Estatísticas / 🛒 Comprar Atendimento)
-        # no canal do coach novo, e registra a view do botão como
-        # persistente (senão ele para de funcionar após um restart).
+
         try:
             await garantir_mensagens_existem(self.bot, chave)
         except Exception as e:
@@ -107,7 +100,7 @@ class Coaches(commands.Cog):
         else:
             await interaction.response.send_message(f"❌ Erro ao cadastrar coach: {error}", ephemeral=True)
 
-    # ── Comando de finalização ───────────────────────────────────────────
+
     @commands.command(name="finalizar-coach")
     async def finalizar_coach(self, ctx: commands.Context):
         canal = ctx.channel
@@ -131,7 +124,7 @@ class Coaches(commands.Cog):
             await ctx.message.add_reaction("✅")
             print(f"[COACH] ✅ Ticket {canal.id} finalizado por {ctx.author}.")
 
-    # ── Comando de encerramento forçado (staff/adm) ──────────────────────
+
     @commands.command(name="acabar-coach")
     async def acabar_coach(self, ctx: commands.Context):
         """Uso: staff/adm digita !acabar-coach DENTRO do canal do
@@ -148,8 +141,7 @@ class Coaches(commands.Cog):
             await ctx.send("❌ Apenas staff/administração pode usar este comando.")
             return
 
-        # Mantém os dados do ticket consistentes (marca como concluído,
-        # se ainda não estava) antes de apagar os canais
+
         try:
             await finalizar_ticket(canal.id)
         except (TicketNaoEncontradoError, TicketJaFinalizadoError):
@@ -174,15 +166,15 @@ class Coaches(commands.Cog):
         except discord.HTTPException as e:
             print(f"[COACH] ⚠️ Erro ao apagar canal do ticket {canal.id}: {e}")
 
-    # ── Garante a ordem das mensagens fixas no canal do coach ───────────
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
-            return  # ignora mensagens do próprio bot (evita loop com o reorder abaixo)
+            return
 
         info = coach_por_channel_id(message.channel.id)
         if info is None:
-            return  # não é um canal de coach
+            return
 
         coach_key, _ = info
         try:

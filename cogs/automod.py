@@ -10,17 +10,6 @@ from datetime import timedelta
 
 from cogs import mod_utils as mu
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Cog: AutoMod
-#  Arquivo: cogs/automod.py
-#
-#  Escaneia toda mensagem em busca de:
-#   spam, flood (mensagens repetidas), links, convites de outros servidores,
-#   palavras proibidas, CAPS excessivo, menções em massa, excesso de emojis
-#   e padrões comuns de golpe/phishing.
-#
-#  Comandos /automod ... pra ligar/desligar filtros e configurar limites.
-# ─────────────────────────────────────────────────────────────────────────────
 
 REGEX_LINK = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
 REGEX_CONVITE = re.compile(r"(discord\.gg|discord(?:app)?\.com/invite)/\S+", re.IGNORECASE)
@@ -29,7 +18,7 @@ REGEX_EMOJI_UNICODE = re.compile(
     "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]"
 )
 
-# Palavras/padrões comuns em golpes de phishing no Discord (nitro grátis, steam, etc.)
+
 PADROES_PHISHING = [
     r"discord\s*nitro\s*(grátis|gratis|free)",
     r"steam\s*community\s*[a-z0-9.-]*\s*gift",
@@ -45,10 +34,10 @@ REGEX_PHISHING = re.compile("|".join(PADROES_PHISHING), re.IGNORECASE)
 class Automod(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # históricos em memória (não precisam persistir): {(guild_id, user_id): deque[(timestamp, conteudo)]}
+
         self.historico_msgs: dict[tuple[int, int], deque] = defaultdict(lambda: deque(maxlen=15))
 
-    # ── Helpers ───────────────────────────────────────────────────────────
+
     def _imune(self, membro: discord.Member, cfg_mod: dict) -> bool:
         if membro.bot:
             return True
@@ -100,7 +89,7 @@ class Automod(commands.Cog):
         )
         await mu.enviar_log_automod(self.bot, message.guild, embed)
 
-    # ── Listener principal ───────────────────────────────────────────────
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.guild is None or message.author.bot:
@@ -119,17 +108,17 @@ class Automod(commands.Cog):
         chave = (message.guild.id, message.author.id)
         agora = time.time()
 
-        # ── Anti-Phishing (prioridade máxima) ────────────────────────────
+
         if cfg.get("anti_phishing") and REGEX_PHISHING.search(conteudo):
             await self._acao(message, "Link/mensagem de phishing detectado", conteudo, cfg)
             return
 
-        # ── Anti-convites ─────────────────────────────────────────────────
+
         if cfg.get("anti_convites") and REGEX_CONVITE.search(conteudo):
             await self._acao(message, "Convite de outro servidor não permitido", conteudo, cfg)
             return
 
-        # ── Anti-links ────────────────────────────────────────────────────
+
         if cfg.get("anti_links"):
             achados = REGEX_LINK.findall(conteudo)
             if achados:
@@ -139,7 +128,7 @@ class Automod(commands.Cog):
                     await self._acao(message, "Envio de link não permitido", conteudo, cfg)
                     return
 
-        # ── Palavras proibidas ───────────────────────────────────────────
+
         proibidas = cfg.get("palavras_proibidas", [])
         if proibidas:
             texto_lower = conteudo.lower()
@@ -148,7 +137,7 @@ class Automod(commands.Cog):
                     await self._acao(message, "Palavra proibida detectada", palavra, cfg)
                     return
 
-        # ── CAPS excessivo ────────────────────────────────────────────────
+
         if cfg.get("anti_caps"):
             letras = [c for c in conteudo if c.isalpha()]
             if len(letras) >= 8:
@@ -158,18 +147,14 @@ class Automod(commands.Cog):
                     await self._acao(message, "Excesso de letras maiúsculas (CAPS)", conteudo, cfg)
                     return
 
-        # ── Menções em massa ──────────────────────────────────────────────
-        # @everyone/@here de quem não deveria conseguir pingar geral é sempre
-        # suspeito, então isso conta separado (e mais grave) do que só juntar
-        # um grupo de gente — cargos_staff/administradores já ficam imunes
-        # (ver _imune acima), então isso só pega quem realmente não deveria.
+
         if cfg.get("anti_mencoes") and message.mention_everyone:
             await self._acao(message, "Menção a @everyone/@here por quem não é staff", conteudo, cfg)
             return
 
         if cfg.get("anti_mencoes"):
-            # Deduplica: mencionar a mesma pessoa 2x na mesma mensagem (ex:
-            # "@fulano vem, @fulano confirma") não deveria contar em dobro.
+
+
             usuarios_unicos = {m.id for m in message.mentions}
             cargos_unicos = {r.id for r in message.role_mentions}
             total_mencoes = len(usuarios_unicos) + len(cargos_unicos)
@@ -177,14 +162,14 @@ class Automod(commands.Cog):
                 await self._acao(message, "Menções em massa", f"{total_mencoes} menções únicas", cfg)
                 return
 
-        # ── Excesso de emojis ─────────────────────────────────────────────
+
         if cfg.get("anti_emojis"):
             total_emojis = len(REGEX_EMOJI_CUSTOM.findall(conteudo)) + len(REGEX_EMOJI_UNICODE.findall(conteudo))
             if total_emojis >= cfg.get("anti_emojis_limite", 10):
                 await self._acao(message, "Excesso de emojis", f"{total_emojis} emojis", cfg)
                 return
 
-        # ── Anti-spam / anti-flood (usa o histórico em memória) ──────────
+
         historico = self.historico_msgs[chave]
         historico.append((agora, conteudo))
 
@@ -206,7 +191,7 @@ class Automod(commands.Cog):
                     historico.clear()
                     return
 
-    # ── /automod (grupo de configuração) ─────────────────────────────────
+
     automod_group = app_commands.Group(name="automod", description="Configurações do sistema de AutoMod.",
                                         default_permissions=discord.Permissions(manage_guild=True))
 

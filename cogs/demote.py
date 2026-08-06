@@ -5,41 +5,24 @@ from datetime import datetime, timezone
 
 from cogs.json_store import ler_json, salvar_json
 
-# ─────────────────────────────────────────────
-#  Cog: Quarentena por inatividade
-#  Arquivo: cogs/demote.py
-#  Comandos:
-#    !demotar @pessoa [motivo]   -> coloca o jogador em quarentena
-#    !fecharquarentena [aprovado] -> fecha o canal (uso dentro do canal de quarentena)
-#
-#  Fluxo atual:
-#    1) !demotar @pessoa -> expulsa a pessoa NA HORA e manda uma DM avisando.
-#
-#  Os comandos !fecharquarentena / !tirardemote e a checagem automática de
-#  expiração continuam aqui, mas só entram em ação se ainda existir alguma
-#  quarentena antiga registrada em data/quarentena.json — o fluxo novo não
-#  cria mais quarentenas.
-# ─────────────────────────────────────────────
 
-# ───────────────── CONFIGURAÇÕES (preencha os IDs do seu servidor) ─────────────────
 STAFF_ROLE_IDS = [
-    1511895253777649704,   # Dono do Clube
-    1511894837790769204,   # Sub-Dono
-    1523843469016043600,   # Tag de Staff
-]                                             # cargos que enxergam os canais de quarentena
+    1511895253777649704,
+    1511894837790769204,
+    1523843469016043600,
+]
 
-MEMBRO_ROLE_ID = 0                           # não há cargo de "Membro" no servidor — deixado em 0,
-                                              # então essa etapa é simplesmente pulada.
+MEMBRO_ROLE_ID = 0
 
-QUARENTENA_ROLE_ID = 0                       # deixado em 0 -> o bot procura um cargo chamado
-                                              # "Quarentena" e, se não existir, cria um
-                                              # automaticamente (sem nenhuma permissão).
+
+QUARENTENA_ROLE_ID = 0
+
 
 QUARENTENA_CATEGORY_NAME = "🔒 Quarentena"
 DIAS_QUARENTENA = 7
-INTERVALO_VERIFICACAO_MINUTOS = 30           # de quanto em quanto tempo o bot checa expiração
+INTERVALO_VERIFICACAO_MINUTOS = 30
 
-LOG_CHANNEL_ID = 1521897698419019907         # canal onde o bot manda o log de tudo que faz aqui
+LOG_CHANNEL_ID = 1521897698419019907
 
 DATA_FILE = "data/quarentena.json"
 
@@ -51,7 +34,7 @@ MENSAGEM_QUARENTENA = (
     "Caso deseje continuar fazendo parte da **TryHarders RL**, basta responder neste canal "
     "dentro de **7 dias**.\n\n"
     "Se não houver nenhuma resposta nesse período, você será removido automaticamente do clube."
-)  # legado — não é mais usada pelo !demotar, só fica aqui pra não quebrar quarentenas antigas
+)
 
 MENSAGEM_REMOCAO_FINAL = (
     "Olá! Você foi removido da **TryHarders RL** porque não houve nenhuma interação "
@@ -59,7 +42,7 @@ MENSAGEM_REMOCAO_FINAL = (
     "Caso queira receber uma nova oportunidade para voltar ao clube, entre em contato com "
     "**ravokes** pelo Discord. Após a análise da Staff, você poderá receber uma nova chance "
     "para demonstrar sua atividade."
-)  # legado — usada só pela checagem automática de quarentenas antigas que ainda estejam em aberto
+)
 
 MENSAGEM_EXPULSAO_DIRETA = (
     "Olá, tudo bem?\n\n"
@@ -68,7 +51,6 @@ MENSAGEM_EXPULSAO_DIRETA = (
 )
 
 
-# ── Helpers de leitura/escrita ──────────────────────────────────────────────
 def ler_dados() -> dict:
     return ler_json(DATA_FILE, {"ativos": {}})
 
@@ -87,7 +69,7 @@ class Demote(commands.Cog):
     def cog_unload(self):
         self.checar_expiracoes.cancel()
 
-    # ── Envia uma mensagem de log no canal de logs ──────────────────────────
+
     async def enviar_log(self, title: str, description: str, color: int = 0x5865F2, fields: list = None):
         canal = self.bot.get_channel(LOG_CHANNEL_ID)
         if canal is None:
@@ -112,7 +94,7 @@ class Demote(commands.Cog):
         except discord.HTTPException as e:
             print(f"[DEMOTE] ⚠️ Falha ao mandar log: {e}")
 
-    # ── Envia a DM de expulsão por inatividade pro membro ───────────────────
+
     async def enviar_dm_expulsao(self, membro: discord.Member) -> bool:
         """Manda a mensagem de expulsão por DM. Retorna True se conseguiu enviar."""
         embed = discord.Embed(
@@ -127,7 +109,7 @@ class Demote(commands.Cog):
         except (discord.Forbidden, discord.HTTPException):
             return False
 
-    # ── Restaura os cargos que o membro tinha antes de entrar em quarentena ─
+
     async def restaurar_cargos(self, guild: discord.Guild, membro: discord.Member, info: dict) -> list:
         """Remove o cargo Quarentena e devolve todos os cargos salvos. Retorna a lista de cargos restaurados."""
         cargo_quarentena = await self.obter_cargo_quarentena(guild)
@@ -151,7 +133,7 @@ class Demote(commands.Cog):
 
         return cargos_para_restaurar
 
-    # ── Pega (ou cria) o cargo Quarentena ───────────────────────────────────
+
     async def obter_cargo_quarentena(self, guild: discord.Guild) -> discord.Role:
         if QUARENTENA_ROLE_ID:
             cargo = guild.get_role(QUARENTENA_ROLE_ID)
@@ -162,8 +144,7 @@ class Demote(commands.Cog):
         if cargo:
             return cargo
 
-        # Cria o cargo sem nenhuma permissão (inclusive sem "Ver canais"),
-        # assim ele não concede acesso a nada por conta própria.
+
         cargo = await guild.create_role(
             name="Quarentena",
             permissions=discord.Permissions.none(),
@@ -173,7 +154,7 @@ class Demote(commands.Cog):
         print(f"[DEMOTE] ✅ Cargo 'Quarentena' criado em {guild.name}.")
         return cargo
 
-    # ── !demotar @pessoa ────────────────────────────────────────────────────
+
     @commands.command(name="demotar")
     @commands.has_permissions(kick_members=True)
     @commands.bot_has_permissions(kick_members=True)
@@ -210,8 +191,7 @@ class Demote(commands.Cog):
 
         motivo_final = motivo or "Inatividade"
 
-        # Manda a DM antes de expulsar — depois que o kick acontece o bot só
-        # consegue mandar DM se ainda tiver um servidor em comum com a pessoa.
+
         dm_enviada = await self.enviar_dm_expulsao(membro)
 
         try:
@@ -253,7 +233,7 @@ class Demote(commands.Cog):
         elif isinstance(error, commands.BotMissingPermissions):
             await ctx.send(f"❌ Preciso das permissões: {', '.join(error.missing_permissions)}", delete_after=8)
 
-    # ── !fecharquarentena [aprovado] — fecha o canal atual ──────────────────
+
     @commands.command(name="fecharquarentena", aliases=["fechardemote"])
     @commands.has_permissions(kick_members=True)
     async def fecharquarentena(self, ctx: commands.Context, decisao: str = None):
@@ -318,7 +298,7 @@ class Demote(commands.Cog):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("❌ Você precisa da permissão **Expulsar Membros** para usar este comando.", delete_after=6)
 
-    # ── !tirardemote @pessoa — tira a pessoa da quarentena de qualquer canal ─
+
     @commands.command(name="tirardemote", aliases=["tirarquarentena"])
     @commands.has_permissions(kick_members=True)
     @commands.bot_has_permissions(manage_roles=True, manage_channels=True)
@@ -396,7 +376,7 @@ class Demote(commands.Cog):
         elif isinstance(error, commands.BotMissingPermissions):
             await ctx.send(f"❌ Preciso das permissões: {', '.join(error.missing_permissions)}", delete_after=8)
 
-    # ── Lógica central de expulsão reaproveitada pelo demote em massa ────────
+
     async def _executar_expulsao_individual(self, guild: discord.Guild, membro: discord.Member, motivo: str, executor: discord.abc.User):
         """Manda a DM de aviso e expulsa o membro na hora.
         Retorna (status, motivo_falha) onde status é "sucesso" ou "falha"."""
@@ -412,7 +392,7 @@ class Demote(commands.Cog):
 
         return "sucesso", ("DM não enviada (fechada)" if not dm_enviada else None)
 
-    # ── Tira alguém da quarentena sem precisar de comando/canal (usado pelo !ativar) ──
+
     async def forcar_saida_quarentena(self, membro: discord.Member, motivo: str = "Marcado como ativo manualmente") -> bool:
         """Se o membro estiver em quarentena, restaura os cargos dele e apaga o canal.
         Retorna True se ele estava em quarentena (e foi tirado), False se não estava."""
@@ -449,7 +429,7 @@ class Demote(commands.Cog):
         )
         return True
 
-    # ── Detecta resposta do jogador no canal de quarentena ──────────────────
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:
@@ -457,7 +437,7 @@ class Demote(commands.Cog):
 
         prefixo = self.bot.command_prefix if isinstance(self.bot.command_prefix, str) else "!"
         if message.content.startswith(prefixo):
-            return  # deixa comandos passarem normalmente
+            return
 
         dados = ler_dados()
         user_id_alvo = None
@@ -469,7 +449,7 @@ class Demote(commands.Cog):
         if user_id_alvo is None:
             return
 
-        # Só o próprio jogador cancela a contagem ao responder
+
         if str(message.author.id) != user_id_alvo:
             return
 
@@ -480,7 +460,7 @@ class Demote(commands.Cog):
         info["respondido"] = True
         salvar_dados(dados)
 
-        # Membro ficou ativo -> restaura automaticamente todos os cargos que ele tinha antes
+
         cargos_restaurados = await self.restaurar_cargos(message.guild, message.author, info)
 
         mencoes = [
@@ -518,7 +498,7 @@ class Demote(commands.Cog):
             ],
         )
 
-    # ── Se o canal de quarentena for apagado (manualmente ou por permissão), encerra a quarentena ──
+
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         dados = ler_dados()
@@ -529,7 +509,7 @@ class Demote(commands.Cog):
                 break
 
         if user_id_alvo is None:
-            return  # não era um canal de quarentena controlado pelo bot
+            return
 
         info = dados["ativos"][user_id_alvo]
         del dados["ativos"][user_id_alvo]
@@ -553,7 +533,7 @@ class Demote(commands.Cog):
             ],
         )
 
-    # ── Checagem periódica de expiração (a cada N minutos) ───────────────────
+
     @tasks.loop(minutes=INTERVALO_VERIFICACAO_MINUTOS)
     async def checar_expiracoes(self):
         dados = ler_dados()
@@ -575,7 +555,7 @@ class Demote(commands.Cog):
 
                 membro = guild.get_member(int(uid))
 
-                # Envia a DM final antes de expulsar
+
                 if membro:
                     try:
                         embed = discord.Embed(
@@ -595,7 +575,7 @@ class Demote(commands.Cog):
 
                 del dados["ativos"][uid]
                 alterou = True
-                salvar_dados(dados)  # salva antes de apagar o canal, pra não duplicar o log do listener de canal apagado
+                salvar_dados(dados)
 
                 canal = self.bot.get_channel(info["channel_id"])
                 if canal:
@@ -620,10 +600,8 @@ class Demote(commands.Cog):
                     ],
                 )
             except Exception as e:
-                # Um registro malformado (ex: 'expira_em' ausente/inválido, dado
-                # legado corrompido) não pode derrubar o loop pra sempre — isso
-                # pararia a expulsão automática de quarentena para TODO MUNDO,
-                # não só para esse registro.
+
+
                 print(f"[DEMOTE] ⚠️ Erro ao processar quarentena de {uid}: {e}")
 
         if alterou:

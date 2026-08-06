@@ -6,15 +6,6 @@ import re
 from cogs.backup import ler, salvar
 from cogs import mod_utils as mu
 
-# ─────────────────────────────────────────────
-#  Cog: Enquete
-#  Arquivo: cogs/enquete.py
-#
-#  Comando: /enquete (só administradores)
-#  Abre um formulário perguntando: tema, opções, se quer mencionar
-#  algum cargo (e qual) e se a enquete é privada (voto anônimo,
-#  só o placar aparece, ninguém vê quem votou em quê).
-# ─────────────────────────────────────────────
 
 EMOJIS_NUMERO = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 MAX_OPCOES = 10
@@ -24,9 +15,6 @@ def _emoji(idx: int) -> str:
     return EMOJIS_NUMERO[idx] if idx < len(EMOJIS_NUMERO) else "🔘"
 
 
-# ─────────────────────────────────────────────
-#  Botão de voto (um por opção)
-# ─────────────────────────────────────────────
 class VotoButton(discord.ui.Button):
     def __init__(self, poll_id: str, idx: int, texto_opcao: str, disabled: bool = False):
         super().__init__(
@@ -45,9 +33,6 @@ class VotoButton(discord.ui.Button):
         await cog.registrar_voto(interaction, self.poll_id, self.idx)
 
 
-# ─────────────────────────────────────────────
-#  Botão de encerrar (só admin)
-# ─────────────────────────────────────────────
 class FecharButton(discord.ui.Button):
     def __init__(self, poll_id: str, disabled: bool = False):
         super().__init__(
@@ -65,9 +50,6 @@ class FecharButton(discord.ui.Button):
         await cog.encerrar(interaction, self.poll_id)
 
 
-# ─────────────────────────────────────────────
-#  Botão de ver quem votou (só admin, só em enquete pública)
-# ─────────────────────────────────────────────
 class VerVotosButton(discord.ui.Button):
     def __init__(self, poll_id: str):
         super().__init__(
@@ -94,9 +76,6 @@ class EnqueteView(discord.ui.View):
             self.add_item(VerVotosButton(poll_id))
 
 
-# ─────────────────────────────────────────────
-#  Modal: criação da enquete
-# ─────────────────────────────────────────────
 class EnqueteModal(discord.ui.Modal, title="📊 Nova Enquete"):
     tema = discord.ui.TextInput(
         label="Qual o tema da enquete?",
@@ -134,19 +113,16 @@ class EnqueteModal(discord.ui.Modal, title="📊 Nova Enquete"):
         )
 
 
-# ─────────────────────────────────────────────
-#  Cog principal
-# ─────────────────────────────────────────────
 class Enquete(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.dados = ler("enquetes")  # {mensagem_id_str: {...}}
+        self.dados = ler("enquetes")
 
-    # ── Helpers de persistência ──────────────────────────────────
+
     def _salvar(self):
         salvar("enquetes", self.dados)
 
-    # ── Monta o embed da enquete (placar) ────────────────────────
+
     def construir_embed(self, poll_id: str) -> discord.Embed:
         registro = self.dados[poll_id]
         opcoes = registro["opcoes"]
@@ -178,7 +154,7 @@ class Enquete(commands.Cog):
         embed.set_footer(text=f"{status} • {modo} • {total} voto(s) no total • criada por {registro.get('criador_nome','—')}")
         return embed
 
-    # ── Cria a enquete a partir do modal ─────────────────────────
+
     async def criar_enquete(self, interaction: discord.Interaction, tema: str, opcoes_raw: str, mencionar_raw: str, privada_raw: str):
         opcoes = [o.strip() for o in re.split(r"[\n,]", opcoes_raw) if o.strip()]
 
@@ -230,7 +206,7 @@ class Enquete(commands.Cog):
         view = EnqueteView(poll_id, opcoes, aberta=True, anonima=privada)
         await mensagem.edit(embed=embed, view=view)
 
-    # ── Registra o voto de quem clicou ───────────────────────────
+
     async def registrar_voto(self, interaction: discord.Interaction, poll_id: str, idx: int):
         registro = self.dados.get(poll_id)
         if not registro or not registro.get("aberta", True):
@@ -248,7 +224,7 @@ class Enquete(commands.Cog):
         opcao_texto = registro["opcoes"][idx]
         await interaction.followup.send(f"✅ Voto registrado: **{opcao_texto}**", ephemeral=True)
 
-    # ── Encerra a enquete (só admin) ─────────────────────────────
+
     async def encerrar(self, interaction: discord.Interaction, poll_id: str):
         registro = self.dados.get(poll_id)
         if not registro:
@@ -282,7 +258,7 @@ class Enquete(commands.Cog):
 
         await interaction.followup.send(resultado)
 
-    # ── Mostra quem votou em cada opção (só admin, só se não for anônima) ──
+
     async def ver_votos(self, interaction: discord.Interaction, poll_id: str):
         registro = self.dados.get(poll_id)
         if not registro:
@@ -314,7 +290,7 @@ class Enquete(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # ── Comando /enquete ──────────────────────────────────────────
+
     @app_commands.command(name="enquete", description="Cria uma enquete (só administradores)")
     async def enquete_cmd(self, interaction: discord.Interaction):
         if not (mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator):

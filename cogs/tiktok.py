@@ -7,16 +7,6 @@ import re
 import os
 import random
 
-# ─────────────────────────────────────────────
-#  Cog: TikTok Notifier — Multi-layer fallback
-#  Arquivo: cogs/tiktok.py
-#  Estratégias em ordem de prioridade:
-#    1. TikTok oEmbed API (oficial, sem auth)
-#    2. Scraping direto com rotate de User-Agents
-#    3. Scraping via proxy público
-#    4. RSS via Proxitok (instância alternativa)
-#    5. RSS via TikTok RSS Bridge
-# ─────────────────────────────────────────────
 
 TIKTOK_CHANNEL_ID = 1515151647641178193
 TIKTOK_USER          = "tryharders.rl"
@@ -31,7 +21,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
 ]
 
-# Instâncias públicas do Proxitok (alternativa ao TikTok)
+
 PROXITOK_INSTANCES = [
     "https://proxitok.pussthecat.org",
     "https://proxitok.privacy.com.de",
@@ -85,8 +75,8 @@ async def buscar_por_link(client: httpx.AsyncClient, link: str) -> dict | None:
 
     encontrado = extrair_video_id(url_final)
     if encontrado is None:
-        # Link curto (vm.tiktok.com / vt.tiktok.com) ou sem /video/ /photo/
-        # na URL — segue os redirecionamentos até achar o link completo.
+
+
         try:
             resp = await client.get(url_final, headers=headers_aleatorios(), timeout=15, follow_redirects=True)
             url_final = str(resp.url)
@@ -101,8 +91,8 @@ async def buscar_por_link(client: httpx.AsyncClient, link: str) -> dict | None:
     url_canonica = f"https://www.tiktok.com/@{TIKTOK_USER}/{tipo}/{post_id}"
     titulo = "Sem título"
     try:
-        # O oEmbed do TikTok aceita tanto link de vídeo quanto de foto —
-        # usamos a própria URL original resolvida, que já é o formato certo.
+
+
         oembed_url = f"https://www.tiktok.com/oembed?url={url_final}"
         oe = await client.get(oembed_url, headers=headers_aleatorios(), timeout=10)
         if oe.status_code == 200:
@@ -118,7 +108,6 @@ async def buscar_por_link(client: httpx.AsyncClient, link: str) -> dict | None:
     }
 
 
-# ── Estratégia 1: oEmbed API oficial ──────────────────────────────────────────
 async def via_oembed(client: httpx.AsyncClient) -> dict | None:
     """
     Usa a API oEmbed do TikTok para buscar o vídeo mais recente.
@@ -127,19 +116,16 @@ async def via_oembed(client: httpx.AsyncClient) -> dict | None:
     Aqui usamos como pré-verificação de existência.
     """
     try:
-        # Busca o HTML do perfil primeiro para pegar o ID
+
         url  = f"https://www.tiktok.com/@{TIKTOK_USER}"
         resp = await client.get(url, headers=headers_aleatorios(), timeout=15)
         ids  = re.findall(r'/@' + re.escape(TIKTOK_USER) + r'/video/(\d+)', resp.text)
         if not ids:
             return None
 
-        # Os IDs de vídeo do TikTok são crescentes com o tempo (tipo
-        # snowflake) — pegar o MAIOR valor numérico é mais confiável do que
-        # o primeiro da lista, que pode ser um vídeo fixado (pinned) e não
-        # o mais recente de verdade.
+
         video_id = max(ids, key=int)
-        # Valida com oEmbed
+
         oembed_url = f"https://www.tiktok.com/oembed?url=https://www.tiktok.com/@{TIKTOK_USER}/video/{video_id}"
         oe = await client.get(oembed_url, headers=headers_aleatorios(), timeout=10)
         if oe.status_code == 200:
@@ -155,14 +141,13 @@ async def via_oembed(client: httpx.AsyncClient) -> dict | None:
     return None
 
 
-# ── Estratégia 2: Scraping direto com JSON embutido ───────────────────────────
 async def via_scraping_direto(client: httpx.AsyncClient) -> dict | None:
     try:
         url  = f"https://www.tiktok.com/@{TIKTOK_USER}"
         resp = await client.get(url, headers=headers_aleatorios(), timeout=20)
         html = resp.text
 
-        # Tenta extrair do JSON universal injetado pelo TikTok
+
         match = re.search(
             r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
             html, re.DOTALL
@@ -170,17 +155,13 @@ async def via_scraping_direto(client: httpx.AsyncClient) -> dict | None:
         if match:
             data     = json.loads(match.group(1))
             scope    = data.get("__DEFAULT_SCOPE__", {})
-            # Navega pela estrutura de dados do perfil
+
             for key in scope:
                 if "user" in key.lower():
                     videos = scope[key].get("itemList", [])
                     if videos:
-                        # IMPORTANTE: videos[0] NÃO é garantidamente o vídeo
-                        # mais recente — se o perfil tiver um vídeo fixado
-                        # (pinned), ele vem primeiro na lista mesmo sendo
-                        # mais antigo. Por isso escolhemos explicitamente o
-                        # item com o maior "createTime" (data de criação),
-                        # ignorando a posição na lista.
+
+
                         v = max(videos, key=lambda item: int(item.get("createTime", 0) or 0))
                         vid_id = v.get("id", "")
                         titulo = v.get("desc", "Sem título")
@@ -191,9 +172,7 @@ async def via_scraping_direto(client: httpx.AsyncClient) -> dict | None:
                             "via":    "scraping-json",
                         }
 
-        # Fallback: regex direta no HTML (aqui não temos createTime
-        # disponível por item, então usamos o maior ID numérico como proxy
-        # de recência — os IDs do TikTok crescem com o tempo).
+
         ids = re.findall(r'/@' + re.escape(TIKTOK_USER) + r'/video/(\d+)', html)
         descs = re.findall(r'"desc"\s*:\s*"(.*?)"', html)
         if ids:
@@ -210,8 +189,6 @@ async def via_scraping_direto(client: httpx.AsyncClient) -> dict | None:
     return None
 
 
-
-# ── Estratégia 3: Proxitok RSS ────────────────────────────────────────────────
 async def via_proxitok(client: httpx.AsyncClient) -> dict | None:
     instancias = PROXITOK_INSTANCES.copy()
     random.shuffle(instancias)
@@ -223,9 +200,7 @@ async def via_proxitok(client: httpx.AsyncClient) -> dict | None:
                 continue
             xml = resp.text
 
-            # Escaneia TODOS os <item> do feed (não só o primeiro) e escolhe
-            # o de maior ID numérico — mais confiável do que confiar na
-            # ordem do feed, que pode trazer um vídeo fixado primeiro.
+
             itens_xml = re.findall(r'<item>(.*?)</item>', xml, re.DOTALL)
             if not itens_xml:
                 continue
@@ -254,7 +229,6 @@ async def via_proxitok(client: httpx.AsyncClient) -> dict | None:
     return None
 
 
-# ── Estratégia 4: RSSBridge ───────────────────────────────────────────────────
 async def via_rssbridge(client: httpx.AsyncClient) -> dict | None:
     bridges = [
         f"https://rssbridge.org/?action=display&bridge=TikTok&username={TIKTOK_USER}&format=Atom",
@@ -267,9 +241,7 @@ async def via_rssbridge(client: httpx.AsyncClient) -> dict | None:
                 continue
             xml = resp.text
 
-            # Mesmo cuidado do Proxitok: escaneia todas as <entry> (formato
-            # Atom) e escolhe a de maior ID numérico, em vez de confiar que
-            # a primeira é sempre a mais recente.
+
             entradas_xml = re.findall(r'<entry>(.*?)</entry>', xml, re.DOTALL)
             candidatos = entradas_xml or [xml]
 
@@ -296,7 +268,6 @@ async def via_rssbridge(client: httpx.AsyncClient) -> dict | None:
     return None
 
 
-# ── Orquestrador: tenta todas as estratégias em sequência ─────────────────────
 async def buscar_ultimo_video() -> dict | None:
     estrategias = [via_oembed, via_scraping_direto, via_proxitok, via_rssbridge]
     async with httpx.AsyncClient(follow_redirects=True) as client:
@@ -309,7 +280,6 @@ async def buscar_ultimo_video() -> dict | None:
     return None
 
 
-# ── Cog ───────────────────────────────────────────────────────────────────────
 class TikTok(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot          = bot
@@ -326,21 +296,15 @@ class TikTok(commands.Cog):
         try:
             await self._checar_e_notificar()
         except Exception as e:
-            # Uma falha de rede/scraping não pode matar essa verificação
-            # periódica pra sempre — só loga e tenta de novo no próximo ciclo.
+
+
             print(f"[TIKTOK] ⚠️ Erro inesperado ao verificar novo vídeo: {e}")
 
     @verificar_tiktok.before_loop
     async def antes_do_loop(self):
         await self.bot.wait_until_ready()
 
-    # ── Lógica central: busca o vídeo mais recente e só notifica se for
-    # realmente diferente do último já registrado (self.ultimo_video, que
-    # também está salvo em disco em LAST_VIDEO_FILE). Usada tanto pelo loop
-    # automático quanto pelo comando manual !atualizar-videos — assim os
-    # dois SEMPRE compartilham a mesma "memória" de qual foi o último vídeo
-    # postado, e nunca repetem um vídeo já anunciado (a menos que `forcar`
-    # seja usado de propósito).
+
     async def _checar_e_notificar(self, forcar: bool = False) -> str:
         """Retorna uma mensagem curta descrevendo o que aconteceu (pra usar na resposta do comando)."""
         canal = self.bot.get_channel(TIKTOK_CHANNEL_ID)
@@ -355,17 +319,17 @@ class TikTok(commands.Cog):
             print(f"[TIKTOK] ⚠️  Falha #{self.falhas} ao buscar vídeo.")
             return "⚠️ Não consegui buscar o vídeo mais recente agora (todas as estratégias falharam). Tenta de novo daqui a pouco."
 
-        self.falhas = 0  # reset contador de falhas
+        self.falhas = 0
         detalhe = f"(via {video['via']}, id `{video['id']}`)"
 
-        # Primeira execução — só salva
+
         if self.ultimo_video is None and not forcar:
             self.ultimo_video = video["id"]
             salvar_ultimo_video(video["id"])
             print(f"[TIKTOK] ✅ Primeiro vídeo registrado: {video['id']}")
             return f"✅ Primeiro vídeo registrado (não notificado, é o ponto de partida): **{video['titulo']}** {detalhe}"
 
-        # Mesmo vídeo de sempre — NÃO reposta, só avisa (a menos que forçado).
+
         if video["id"] == self.ultimo_video and not forcar:
             print("[TIKTOK] 🔁 Nenhum vídeo novo.")
             return (
@@ -374,7 +338,7 @@ class TikTok(commands.Cog):
                 f"busca), usa `!atualizar-videos forcar` pra reenviar esse vídeo na marra."
             )
 
-        # Vídeo novo de verdade (ou forçado)!
+
         self.ultimo_video = video["id"]
         salvar_ultimo_video(video["id"])
 
@@ -394,10 +358,7 @@ class TikTok(commands.Cog):
         print(f"[TIKTOK] 🎉 Novo vídeo notificado: {video['titulo']}")
         return f"🎉 Vídeo notificado em {canal.mention}: **{video['titulo']}** {detalhe}"
 
-    # ── Comando manual: força a checagem na hora, sem esperar os 30 min
-    # do loop automático. Usa a mesma lógica de dedupe do loop — se o
-    # vídeo mais recente já foi o último notificado, ele NÃO reposta,
-    # a menos que você use "!atualizar-videos forcar".
+
     @commands.command(name="atualizar-videos")
     @commands.has_permissions(manage_guild=True)
     async def atualizar_videos(self, ctx: commands.Context, opcao: str = None):
@@ -418,12 +379,7 @@ class TikTok(commands.Cog):
         else:
             raise error
 
-    # ── Comando manual: cola o link e o bot posta o anúncio na hora, sem
-    # depender do scraping automático. Serve pra casos como vídeo fixado
-    # atrapalhando a detecção, TikTok bloqueando a raspagem, ou só pra
-    # postar mais rápido sem esperar o loop. Também atualiza a "memória"
-    # de último vídeo, então o loop automático não vai reanunciar esse
-    # mesmo vídeo depois.
+
     @app_commands.command(name="video-novo", description="Anuncia manualmente um vídeo do TikTok a partir do link.")
     @app_commands.describe(link="Link do vídeo no TikTok (completo ou curto, tipo vm.tiktok.com/...)")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -450,7 +406,7 @@ class TikTok(commands.Cog):
             )
             return
 
-        # Já foi esse mesmo vídeo o último anunciado? Avisa em vez de repetir.
+
         if video["id"] == self.ultimo_video:
             await interaction.followup.send(
                 f"🔁 Esse aí já foi anunciado antes: **{video['titulo']}** (id `{video['id']}`)."

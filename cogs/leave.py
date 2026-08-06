@@ -2,17 +2,12 @@ import discord
 from discord.ext import commands
 from datetime import datetime, timezone
 
-# ─────────────────────────────────────────────
-#  Cog: Despedida (saída de membros)
-#  Arquivo: cogs/leave.py
-#  Evento: on_member_remove / on_member_ban
-# ─────────────────────────────────────────────
 
 LEAVE_CHANNEL_ID = 1522984476450361364
 
-COR_DESPEDIDA = 0x992D22  # vermelho escuro — saída normal (a pessoa que decidiu ir embora)
-COR_EXPULSO   = 0xE67E22  # laranja — expulso (kick)
-COR_BANIDO    = 0x2C2F33  # quase preto — banido (a punição mais séria)
+COR_DESPEDIDA = 0x992D22
+COR_EXPULSO   = 0xE67E22
+COR_BANIDO    = 0x2C2F33
 
 JANELA_AUDITORIA_SEGUNDOS = 15
 
@@ -69,7 +64,7 @@ class Despedida(commands.Cog):
     async def on_member_remove(self, member: discord.Member):
         guild = member.guild
 
-        # Se foi banido, quem cuida da mensagem é o on_member_ban — evita duplicar
+
         try:
             await guild.fetch_ban(member)
             return
@@ -106,7 +101,7 @@ class Despedida(commands.Cog):
             print(f"[LEAVE] ✅ Mensagem de expulsão enviada para {member} no canal #{channel.name}.")
             return
 
-        # Saída normal — a pessoa decidiu ir embora sozinha
+
         embed = discord.Embed(
             title="💔 Mais um saiu do clube...",
             description=f"**{member}** deixou a **{guild.name}**. Sentiremos falta! 🕊️",
@@ -127,7 +122,7 @@ class Despedida(commands.Cog):
             icon_url=guild.icon.url if guild.icon else None,
         )
 
-        # Menciona quem saiu fora do embed também
+
         await channel.send(content=member.mention, embed=embed)
         print(f"[LEAVE] ✅ Mensagem de saída enviada para {member} no canal #{channel.name}.")
 

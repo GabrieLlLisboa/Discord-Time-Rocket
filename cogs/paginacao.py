@@ -1,9 +1,5 @@
 import discord
 
-# ─────────────────────────────────────────────
-#  Utilitário: Paginação genérica
-#  Arquivo: cogs/paginacao.py
-# ─────────────────────────────────────────────
 
 class PaginacaoView(discord.ui.View):
     def __init__(self, embeds: list[discord.Embed], ephemeral: bool = False):

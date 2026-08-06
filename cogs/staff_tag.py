@@ -3,15 +3,6 @@ from discord.ext import commands
 
 from cogs.whitelist import STAFF_ROLE_IDS
 
-# ─────────────────────────────────────────────
-#  Cog: Tag de Staff
-#  Arquivo: cogs/staff_tag.py
-#
-#  Sempre que alguém tem QUALQUER cargo de staff (Sub-Dono, Diretor,
-#  Gerente, Moderador, Suporte, Dono, Administrador, Coach, Editor de
-#  vídeo...), esse cargo abaixo é adicionado junto automaticamente.
-#  Se a pessoa perde todos os cargos de staff, a tag é removida também.
-# ─────────────────────────────────────────────
 
 CARGO_TAG_STAFF_ID = 1523843469016043600
 

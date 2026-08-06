@@ -1,10 +1,6 @@
 import discord
 from discord.ext import commands, tasks
 
-# ─────────────────────────────────────────────
-#  Cog: Lista de Jogadores
-#  Arquivo: cogs/players.py
-# ─────────────────────────────────────────────
 
 JOGADORES_CHANNEL_ID = 1514775408124367149
 
@@ -28,9 +24,9 @@ IDS_MONITORADOS  = {c["id"] for c in CARGOS}
 CARGO_MAP        = {c["id"]: c for c in CARGOS}
 RANK_IDS         = {c["id"] for c in CARGOS if c["secao"] == "rank"}
 STAFF_IDS        = {c["id"] for c in CARGOS if c["secao"] == "staff"}
-CARGOS_RANK      = [c for c in CARGOS if c["secao"] == "rank"]  # usados no painel !setup-rank
+CARGOS_RANK      = [c for c in CARGOS if c["secao"] == "rank"]
 
-# Quem tiver qualquer um desses cargos não aparece na lista de jogadores
+
 IDS_OCULTOS = {1521890714873757707, 1514782308031533116}
 
 
@@ -111,7 +107,7 @@ class SelecaoRankView(discord.ui.View):
 
     def __init__(self, tipo: str):
         super().__init__(timeout=180)
-        self.tipo = tipo  # "subir" ou "descer"
+        self.tipo = tipo
         self.jogador: discord.Member | None = None
         self.novo_rank_id: int | None = None
         self.add_item(SelecionarJogador())
@@ -202,7 +198,7 @@ class Players(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot        = bot
         self.message_id = None
-        self.bot.add_view(PainelRankView())  # mantém os botões funcionando após restart
+        self.bot.add_view(PainelRankView())
         self.atualizar_lista.start()
 
     def cog_unload(self):
@@ -210,9 +206,8 @@ class Players(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        # Ranks não são mais detectados automaticamente por diff de cargo
-        # (isso causava mensagem errada às vezes). Agora eles só são
-        # anunciados via painel `!setup-rank`. Aqui só sobra a staff.
+
+
         cargos_antes  = {r.id for r in before.roles}
         cargos_depois = {r.id for r in after.roles}
         ganhou  = (cargos_depois - cargos_antes) & STAFF_IDS
@@ -246,9 +241,8 @@ class Players(commands.Cog):
         try:
             await self._editar_ou_criar(channel)
         except Exception as e:
-            # Uma falha pontual (ex: mensagem apagada na hora errada, erro de
-            # rede do Discord) não pode derrubar essa atualização periódica
-            # pro resto da vida do processo.
+
+
             print(f"[PLAYERS] ⚠️ Erro ao atualizar lista de jogadores: {e}")
 
     @atualizar_lista.before_loop

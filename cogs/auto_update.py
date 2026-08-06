@@ -6,25 +6,15 @@ import subprocess
 import discord
 from discord.ext import commands, tasks
 
-# ─────────────────────────────────────────────
-#  Cog: Auto Update
-#  Arquivo: cogs/auto_update.py
-#
-#  A cada 10s, dá um `git fetch` e compara o commit local com o commit da
-#  branch remota (a que o `git pull` normal usaria). Se tiver algo novo no
-#  GitHub, puxa (`git pull`) e reinicia o bot sozinho — sem precisar rodar
-#  nada manualmente no servidor, só dar `git push` na sua máquina.
-# ─────────────────────────────────────────────
 
-# Raiz do repositório = pasta que contém a pasta "cogs"
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 INTERVALO_CHECAGEM_SEGUNDOS = 10
 
-# Canal onde o bot avisa antes de reiniciar (deixe None pra desativar o aviso)
+
 LOG_CHANNEL_ID = 1521897698419019907
 
-# Único usuário que pode rodar o !checarupdate manualmente
+
 IDS_AUTORIZADOS = {1487452210605588592, 1421693641184772147}
 
 
@@ -63,7 +53,7 @@ class AutoUpdate(commands.Cog):
     def cog_unload(self):
         self.checar_atualizacao.cancel()
 
-    # ── Descobre o commit local e o commit da branch remota (upstream) ──
+
     async def _commits(self):
         """Retorna (commit_local, commit_remoto) ou (None, None) se der erro."""
         fetch = await _git("fetch", "--quiet")
@@ -72,7 +62,7 @@ class AutoUpdate(commands.Cog):
             return None, None
 
         local = await _git("rev-parse", "HEAD")
-        remoto = await _git("rev-parse", "@{u}")  # @{u} = branch remota configurada (a que o `git pull` usaria)
+        remoto = await _git("rev-parse", "@{u}")
 
         if local.returncode != 0 or remoto.returncode != 0:
             print(
@@ -83,7 +73,7 @@ class AutoUpdate(commands.Cog):
 
         return local.stdout.strip(), remoto.stdout.strip()
 
-    # ── Loop que checa o GitHub a cada 60s ───────────────────────
+
     @tasks.loop(seconds=INTERVALO_CHECAGEM_SEGUNDOS)
     async def checar_atualizacao(self):
         await self.bot.wait_until_ready()
@@ -116,14 +106,14 @@ class AutoUpdate(commands.Cog):
     async def antes_do_loop(self):
         await self.bot.wait_until_ready()
 
-    # ── Reinicia o processo em pé (mesmo PID/terminal) ───────────
+
     async def _reiniciar(self):
         try:
             await self.bot.close()
         finally:
             os.execv(sys.executable, [sys.executable] + sys.argv)
 
-    # ── !checarupdate — força a checagem na hora (staff autorizada) ─────────
+
     @commands.command(name="checarupdate", hidden=True)
     async def checar_update_manual(self, ctx: commands.Context):
         if ctx.author.id not in IDS_AUTORIZADOS:

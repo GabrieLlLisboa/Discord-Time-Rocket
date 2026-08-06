@@ -9,21 +9,11 @@ from datetime import datetime, timezone
 
 from cogs import mod_utils as mu
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Cog: Anti-Raid
-#  Arquivo: cogs/antiraid.py
-#
-#  Monitora a taxa de entrada de novos membros. Se muitas entradas
-#  acontecerem numa janela curta de tempo, considera um possível raid e
-#  aplica a ação configurada (kick / ban / quarentena) nos membros
-#  suspeitos, além de poder ativar o "modo de emergência" automaticamente.
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 class AntiRaid(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.entradas: dict[int, deque] = defaultdict(lambda: deque(maxlen=50))  # guild_id -> deque[timestamps]
+        self.entradas: dict[int, deque] = defaultdict(lambda: deque(maxlen=50))
 
     def _conta_suspeita(self, membro: discord.Member, cfg: dict) -> bool:
         idade_dias = (datetime.now(timezone.utc) - membro.created_at).days
@@ -63,7 +53,7 @@ class AntiRaid(commands.Cog):
         janela = cfg.get("janela_segundos", 10)
         recentes = [t for t in entradas if agora - t <= janela]
 
-        # ── Modo de emergência manual: kicka todo mundo que entrar ──────────
+
         if cfg.get("modo_emergencia"):
             await self._aplicar_acao_membro(membro, cfg, "Modo de emergência ativo (anti-raid)")
             embed = mu.embed_base("🚨 Modo de emergência: entrada bloqueada",
@@ -72,7 +62,7 @@ class AntiRaid(commands.Cog):
             await mu.enviar_log_antiraid(self.bot, guild, embed)
             return
 
-        # ── Detecção de raid por volume de entradas ─────────────────────────
+
         if len(recentes) >= cfg.get("limite_entradas", 8):
             suspeita = self._conta_suspeita(membro, cfg)
             if suspeita:
@@ -88,7 +78,7 @@ class AntiRaid(commands.Cog):
             )
             await mu.enviar_log_antiraid(self.bot, guild, embed)
 
-    # ── /antiraid (grupo de configuração) ────────────────────────────────
+
     antiraid_group = app_commands.Group(name="antiraid", description="Configurações do sistema Anti-Raid.",
                                          default_permissions=discord.Permissions(administrator=True))
 

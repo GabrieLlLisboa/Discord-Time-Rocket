@@ -7,43 +7,27 @@ import time
 from datetime import datetime, timezone, timedelta
 from cogs.json_store import ler_json, salvar_json
 
-# ─────────────────────────────────────────────
-#  Cog: Autopilot
-#  Arquivo: cogs/autopilot.py
-#  O bot manda mensagens automáticas sozinho, de tempos em tempos, tudo no
-#  mesmo canal, alternando entre dois tipos de conteúdo independentes:
-#   - "geral"         -> curiosidades aleatórias (assuntos gerais)
-#   - "rocket_league" -> curiosidades de Rocket League
-#  Cada tipo tem seu próprio agendamento (sorteado dentro do intervalo dele).
-#
-#  Regras extras:
-#   - O autopilot fica pausado das 22:00 às 12:00 (horário de Brasília).
-#   - Se tiver gente conversando no canal (mensagem humana recente), o bot
-#     não corta o papo — ele espera a conversa esfriar e checa de novo.
-# ─────────────────────────────────────────────
 
 CONFIG_PATH = "data/autopilot.json"
 
-# Fuso horário de Brasília (fixo, o Brasil não usa mais horário de verão).
+
 BR_TZ = timezone(timedelta(hours=-3))
 
-# Janela em que o autopilot fica pausado (não manda nada nesse intervalo).
-PAUSA_INICIO_HORA = 22  # a partir das 22:00
-PAUSA_FIM_HORA = 12     # até as 12:00 do dia seguinte
 
-# Se alguém mandou mensagem no canal há menos tempo que isso, o bot segura
-# o envio automático pra não cortar a conversa. Ele vai checando de novo a
-# cada minuto até a conversa esfriar.
-ESPERA_CONVERSA_SEGUNDOS = 5 * 60  # 5 minutos
+PAUSA_INICIO_HORA = 22
+PAUSA_FIM_HORA = 12
 
-# Canal único onde tudo é enviado (curiosidades gerais e de Rocket League).
+
+ESPERA_CONVERSA_SEGUNDOS = 5 * 60
+
+
 CANAL_ID = 1511898323840405655
 
-# Tipo "rocket_league" — intervalo de 2 a 3 horas.
+
 INTERVALO_RL_MIN = 120
 INTERVALO_RL_MAX = 180
 
-# Tipo "geral" — intervalo de 3 a 4 horas.
+
 INTERVALO_GERAL_MIN = 180
 INTERVALO_GERAL_MAX = 240
 
@@ -227,10 +211,7 @@ CURIOSIDADES_GERAIS = [
     "🐝 Você sabia? Uma colmeia pode ter dezenas de milhares de abelhas trabalhando de forma extremamente organizada.",
 ]
 
-# ── Enquetes rápidas (terceiro tipo de mensagem) ────────────────────────────
-# Em vez de só mandar uma curiosidade pra leitura passiva, de vez em quando o
-# bot manda uma enquete com reações, pra gerar interação de verdade.
-# Chance de qualquer envio ser uma enquete em vez de curiosidade.
+
 CHANCE_ENQUETE = 0.2
 
 ENQUETES_RL = [
@@ -255,9 +236,7 @@ ENQUETES_GERAIS = [
     {"pergunta": "Pizza com ou sem borda recheada?", "opcoes": [("🧀", "Com borda"), ("🍕", "Sem borda")]},
 ]
 
-# Configuração de cada tipo de mensagem do autopilot.
-# Os dois tipos mandam mensagem no mesmo canal (CANAL_ID), cada um com seu
-# próprio agendamento independente.
+
 CANAIS = {
     "geral": {"nome": "geral", "canal_id": CANAL_ID, "mensagens": CURIOSIDADES_GERAIS, "enquetes": ENQUETES_GERAIS, "intervalo_min": INTERVALO_GERAL_MIN, "intervalo_max": INTERVALO_GERAL_MAX},
     "rocket_league": {"nome": "rocket_league", "canal_id": CANAL_ID, "mensagens": CURIOSIDADES_RL, "enquetes": ENQUETES_RL, "intervalo_min": INTERVALO_RL_MIN, "intervalo_max": INTERVALO_RL_MAX},
@@ -298,8 +277,8 @@ class Autopilot(commands.Cog):
             return
 
         if self._em_pausa():
-            # Dentro da janela 22:00–12:00 (horário de Brasília): não manda
-            # nada. Os agendamentos continuam parados até a janela acabar.
+
+
             return
 
         canais_cfg = config.setdefault("canais", {})
@@ -311,15 +290,15 @@ class Autopilot(commands.Cog):
             proximo_ts = estado.get("proximo_envio_ts")
 
             if not proximo_ts:
-                # Primeira vez rodando pra esse tipo — agenda e segue.
+
                 self._agendar_proximo(chave, estado)
                 precisa_salvar = True
                 continue
 
             if agora >= proximo_ts:
                 if await self._conversa_recente(chave):
-                    # Tem gente conversando no canal — não corta o papo.
-                    # Espera um pouco e checa de novo no próximo minuto.
+
+
                     estado["proximo_envio_ts"] = agora + 60
                     precisa_salvar = True
                     continue
@@ -327,8 +306,8 @@ class Autopilot(commands.Cog):
                 try:
                     await self._enviar_mensagem(chave)
                 except Exception as e:
-                    # Uma falha pontual (canal deletado, sem permissão, etc.)
-                    # não pode derrubar o loop pro resto da vida do processo.
+
+
                     print(f"[AUTOPILOT] ⚠️ Erro ao enviar mensagem do tipo {chave}: {e}")
                 finally:
                     self._agendar_proximo(chave, estado)
@@ -421,7 +400,7 @@ class Autopilot(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    # ── Comandos de administração ───────────────────────────────────────
+
     @app_commands.command(name="autopilot_toggle", description="[Staff] Liga ou desliga as mensagens automáticas do bot.")
     @app_commands.checks.has_permissions(administrator=True)
     async def autopilot_toggle(self, interaction: discord.Interaction):

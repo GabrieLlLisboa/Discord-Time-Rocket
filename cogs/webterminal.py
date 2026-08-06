@@ -8,26 +8,13 @@ from discord.ext import commands, tasks
 
 import console as console_local
 
-# ─────────────────────────────────────────────
-#  Terminal web
-#  Arquivo: webterminal.py
-#
-#  Faz o canal abaixo funcionar como um espelho do terminal onde o bot
-#  está rodando:
-#    • Tudo que o bot imprime no terminal (print, erros, logs de outros
-#      cogs) também é mandado pra esse canal, em quase tempo real.
-#    • Quem tiver permissão de administrador pode digitar comandos DIRETO
-#      no canal (ex: "update", "reiniciar", "parar") e eles rodam
-#      exatamente como se tivessem sido digitados no terminal local —
-#      é o mesmo código de console.py.
-# ─────────────────────────────────────────────
 
 CANAL_TERMINAL_ID = 1534197342922735679
 
-# De quanto em quanto tempo o buffer acumulado é mandado pro Discord.
+
 INTERVALO_FLUSH_SEGUNDOS = 1.5
 
-# Discord limita mensagens a 2000 caracteres — deixa margem pros ``` ```.
+
 TAMANHO_MAX_BLOCO = 1900
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -67,8 +54,6 @@ class _TerminalTee:
         return texto
 
 
-# Instância única do cog, pra console.py conseguir forçar um flush antes de
-# reiniciar/desligar o processo (ver console._antes_de_matar_o_processo).
 _instancia: "WebTerminal | None" = None
 
 
@@ -101,7 +86,7 @@ class WebTerminal(commands.Cog):
     def cog_unload(self):
         self.flush_loop.cancel()
 
-    # ── Loop que manda o buffer acumulado pro canal periodicamente ─────────
+
     @tasks.loop(seconds=INTERVALO_FLUSH_SEGUNDOS)
     async def flush_loop(self):
         await self._flush()
@@ -139,7 +124,7 @@ class WebTerminal(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    # ── Comandos digitados no canal funcionam igual ao terminal local ──────
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:

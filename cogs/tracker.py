@@ -4,13 +4,6 @@ import httpx
 import os
 from datetime import datetime, timezone
 
-# ─────────────────────────────────────────────
-#  Cog: Tracker (Rank Rocket League)
-#  Arquivo: cogs/tracker.py
-#  Comandos: !tracker
-#  Botão → Modal (nick) → busca rank na Tracker Network
-#  e envia o resultado em privado (ephemeral) pro jogador.
-# ─────────────────────────────────────────────
 
 TRN_API_KEY = os.getenv("TRN_API_KEY", "")
 TRN_BASE_URL = "https://api.tracker.gg/api/v2/rocket-league/standard/profile"
@@ -24,7 +17,7 @@ PLATAFORMAS_VALIDAS = {
     "ps":    "psn",
 }
 
-# Nome do segmento na API da Tracker Network → nome bonito pra exibir
+
 MODOS = {
     "Ranked Duel 1v1":     ("🥇", "1v1 — Duel"),
     "Ranked Doubles 2v2":  ("🥈", "2v2 — Doubles"),
@@ -100,12 +93,12 @@ async def buscar_rank_rl(nick: str, plataforma: str = "epic") -> dict:
 
     data = resp.json().get("data", {})
 
-    # Tempo de conta (data de criação reportada pela plataforma)
+
     metadata = data.get("metadata", {})
     criado_em = metadata.get("dateCreated") or metadata.get("createdAt")
     tempo_conta = _formatar_tempo_conta(criado_em) if criado_em else "Indisponível"
 
-    # Ranks por modo
+
     ranks = {}
     for segmento in data.get("segments", []):
         nome_segmento = segmento.get("metadata", {}).get("name", "")
@@ -126,7 +119,6 @@ async def buscar_rank_rl(nick: str, plataforma: str = "epic") -> dict:
     return {"erro": None, "ranks": ranks, "tempo_conta": tempo_conta, "nick": nick, "plataforma": plataforma}
 
 
-# ── Modal: Buscar Rank ─────────────────────────────────────────────────────────
 class TrackerModal(discord.ui.Modal, title="🔎 Buscar Rank — Rocket League"):
     nick = discord.ui.TextInput(
         label="Nick do jogador",
@@ -183,7 +175,6 @@ class TrackerModal(discord.ui.Modal, title="🔎 Buscar Rank — Rocket League")
         print(f"[TRACKER] ✅ Rank de '{nick}' consultado por {interaction.user}.")
 
 
-# ── View: Botão que abre o Modal ───────────────────────────────────────────────
 class TrackerView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -197,7 +188,6 @@ class TrackerView(discord.ui.View):
         await interaction.response.send_modal(TrackerModal())
 
 
-# ── Cog principal ──────────────────────────────────────────────────────────────
 class Tracker(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot

@@ -6,15 +6,6 @@ from discord.ext import commands
 
 from cogs import mod_utils as mu
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Cog: Painel de Configuração
-#  Arquivo: cogs/mod_config.py
-#
-#  Comando /moderacao-config: abre um painel interativo (selects + botões)
-#  pra definir canais de log, cargos de staff/mute, e os toggles gerais
-#  do sistema (confirmação obrigatória, DM ao punir).
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 def _embed_config(guild_id: int) -> discord.Embed:
     cfg = mu.get_config(guild_id)

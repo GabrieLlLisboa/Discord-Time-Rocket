@@ -16,28 +16,14 @@ try:
 except ImportError:
     _PIL_OK = False
 
-# ─────────────────────────────────────────────
-#  Cog: Tíquetes
-#  Arquivo: cogs/tickets.py
-#  Comandos: !setup
-#  Abre canal privado por categoria
-#
-#  Além do fluxo básico de abrir/fechar, esse cog também cuida de:
-#    • Avaliação do atendimento (1 a 5 estrelas) com média exibida no
-#      canal onde o !setup foi enviado.
-#    • Transcrição em HTML mandada na DM de quem abriu o tíquete, tanto
-#      ao "Fechar" (mantém o canal) quanto ao "Deletar".
-#    • Imagem com o tempo médio de resposta, anexada na embed de
-#      abertura de cada novo tíquete.
-# ─────────────────────────────────────────────
 
 FUSO_BRASILIA = timezone(timedelta(hours=-3))
 
-# ── Arquivos de dados persistentes ──────────────────────────────────────────
-ARQ_CONFIG      = "data/ticket_config.json"      # painel do !setup (msg ids)
-ARQ_AVALIACOES  = "data/ticket_avaliacoes.json"  # notas de avaliação
-ARQ_TEMPOS      = "data/ticket_tempos.json"      # tempo médio de resposta
-ARQ_ABERTOS     = "data/ticket_abertos.json"     # tíquetes abertos agora
+
+ARQ_CONFIG      = "data/ticket_config.json"
+ARQ_AVALIACOES  = "data/ticket_avaliacoes.json"
+ARQ_TEMPOS      = "data/ticket_tempos.json"
+ARQ_ABERTOS     = "data/ticket_abertos.json"
 
 
 def _ler_config() -> dict:
@@ -72,26 +58,9 @@ def _salvar_abertos(dados: dict):
     salvar_json(ARQ_ABERTOS, dados)
 
 
-# ── Anti-abuso na criação de tickets ────────────────────────────────────────
-# ANTES: não havia cooldown nem limite de tickets simultâneos — qualquer
-# usuário podia clicar repetidamente no menu e abrir vários canais em
-# sequência (flood de canais, aproximação do limite de canais do servidor,
-# rate limit da API do Discord, possível ataque com contas alternativas).
-#
-# AGORA:
-#  - COOLDOWN_SEGUNDOS: tempo mínimo entre duas criações de ticket pelo
-#    mesmo usuário. Uma segunda tentativa dentro da janela é rejeitada sem
-#    criar canal nenhum (sem erro, só um aviso ephemeral).
-#  - MAX_TICKETS_SIMULTANEOS: quantidade máxima de tickets que um mesmo
-#    usuário pode manter abertos ao mesmo tempo (somando todas as
-#    categorias). Ao atingir o limite, novas criações são bloqueadas até
-#    que algum ticket existente seja fechado.
-# Os dados ficam em memória (nível de módulo, não por instância de View),
-# então valem para qualquer instância da view — inclusive a persistente
-# registrada em main.py — enquanto o processo do bot estiver rodando.
 COOLDOWN_SEGUNDOS       = 60
 MAX_TICKETS_SIMULTANEOS = 3
-_ultima_criacao: dict[int, float] = {}  # user_id -> timestamp (time.monotonic())
+_ultima_criacao: dict[int, float] = {}
 
 CATEGORIAS = [
     discord.SelectOption(
@@ -124,36 +93,39 @@ CATEGORIAS = [
         emoji="💻",
         value="dev"
     ),
+    discord.SelectOption(
+        label="Tratativas com Administração",
+        description="Assunto restrito — visível apenas para administradores.",
+        emoji="🛡️",
+        value="administracao"
+    ),
 ]
 
 NOMES = {
-    "duvidas":   "duvida",
-    "denuncias": "denuncia",
-    "time":      "time",
-    "tecnico":   "tecnico",
-    "dev":       "dev",
+    "duvidas":       "duvida",
+    "denuncias":     "denuncia",
+    "time":          "time",
+    "tecnico":       "tecnico",
+    "dev":           "dev",
+    "administracao": "administracao",
 }
 
 CORES = {
-    "duvidas":   0x5865F2,
-    "denuncias": 0xED4245,
-    "time":      0xFEE75C,
-    "tecnico":   0x57F287,
-    "dev":       0x9B59B6,
+    "duvidas":       0x5865F2,
+    "denuncias":     0xED4245,
+    "time":          0xFEE75C,
+    "tecnico":       0x57F287,
+    "dev":           0x9B59B6,
+    "administracao": 0x2C2F33,
 }
 
-# Categoria "Desenvolvimento": tíquete restrito — só quem abriu e o cargo
-# abaixo enxergam o canal. Diferente das outras categorias, administradores
-# NÃO são adicionados automaticamente aqui.
+
 CARGO_DESENVOLVIMENTO_ID = 1525540085112770746
 
-# Cargo da equipe: quem tem esse cargo é considerado "staff" pra tudo
-# relacionado a tíquetes — vê todos os tíquetes (inclusive os de
-# Desenvolvimento) e pode fechar/deletar qualquer um, igual administrador.
+
 CARGO_EQUIPE_ID = 1532184563491541164
 
 
-# ── Helpers de tempo médio de resposta (imagem) ─────────────────────────────
 _FONTES_CANDIDATAS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -193,15 +165,15 @@ def gerar_imagem_tempo_resposta(media_segundos: float | None, total: int) -> dis
 
     try:
         largura, altura = 600, 150
-        fundo    = (43, 45, 49)     # #2B2D31 — mesmo tom dos embeds do Discord
-        destaque = (88, 101, 242)   # #5865F2 — blurple
+        fundo    = (43, 45, 49)
+        destaque = (88, 101, 242)
         texto_cor   = (219, 222, 225)
         texto_claro = (148, 155, 164)
 
         img = Image.new("RGB", (largura, altura), fundo)
         draw = ImageDraw.Draw(img)
 
-        # Barra de destaque na lateral esquerda
+
         draw.rectangle([0, 0, 8, altura], fill=destaque)
 
         fonte_titulo = _carregar_fonte(20, negrito=True)
@@ -228,7 +200,6 @@ def gerar_imagem_tempo_resposta(media_segundos: float | None, total: int) -> dis
         return None
 
 
-# ── Helper de transcrição em HTML ───────────────────────────────────────────
 async def gerar_transcript_html(canal: discord.TextChannel) -> discord.File:
     mensagens = [m async for m in canal.history(limit=None, oldest_first=True)]
 
@@ -302,10 +273,6 @@ async def gerar_transcript_html(canal: discord.TextChannel) -> discord.File:
     return discord.File(buffer, filename=f"transcript-{canal.name}.html")
 
 
-# ── View de avaliação (1 a 5 estrelas) ──────────────────────────────────────
-# Usa custom_id com o ID de quem abriu o tíquete embutido (em vez de guardar
-# estado em memória), assim continua funcionando mesmo depois de um restart
-# do bot — o clique é tratado via listener bruto (on_interaction) no cog.
 def _montar_view_avaliacao(dono_id: int) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
     for nota in range(1, 6):
@@ -317,7 +284,6 @@ def _montar_view_avaliacao(dono_id: int) -> discord.ui.View:
     return view
 
 
-# ── Select Menu ────────────────────────────────────────────────────────────────
 class TicketSelect(discord.ui.Select):
     def __init__(self):
         super().__init__(
@@ -333,7 +299,7 @@ class TicketSelect(discord.ui.Select):
         guild     = interaction.guild
         membro    = interaction.user
 
-        # ── Cooldown por usuário ────────────────────────────────────────
+
         agora  = time.monotonic()
         ultima = _ultima_criacao.get(membro.id)
         if ultima is not None and (agora - ultima) < COOLDOWN_SEGUNDOS:
@@ -344,15 +310,10 @@ class TicketSelect(discord.ui.Select):
             )
             return
 
-        # Nome do canal baseado no ID do usuário — não no username.
-        # ANTES: usava membro.name, então dois usernames parecidos podiam
-        # colidir, um usuário podia mudar de nome e "perder" a associação
-        # com o próprio ticket, e dava pra descobrir se outra pessoa tinha
-        # ticket aberto só testando nomes parecidos. O ID do Discord é
-        # único, estável e não muda com o usuário renomeando a conta.
+
         nome_canal = f"ticket-{NOMES[valor]}-{membro.id}"
 
-        # Verifica se já tem tíquete aberto dessa categoria
+
         existente = discord.utils.get(guild.text_channels, name=nome_canal)
         if existente:
             await interaction.response.send_message(
@@ -361,7 +322,7 @@ class TicketSelect(discord.ui.Select):
             )
             return
 
-        # ── Limite de tickets simultâneos (todas as categorias) ──────────
+
         abertos = [
             c for c in guild.text_channels
             if c.name.startswith("ticket-") and c.name.endswith(f"-{membro.id}")
@@ -374,12 +335,10 @@ class TicketSelect(discord.ui.Select):
             )
             return
 
-        # Marca a tentativa já aqui (antes de criar o canal) para fechar a
-        # janela de corrida: dois cliques rápidos em sequência não devem
-        # conseguir passar pelo cooldown os dois.
+
         _ultima_criacao[membro.id] = agora
 
-        # Permissões do canal
+
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             membro:             discord.PermissionOverwrite(view_channel=True, send_messages=True),
@@ -387,9 +346,8 @@ class TicketSelect(discord.ui.Select):
         }
 
         if valor == "dev":
-            # Categoria restrita: só quem abriu, o cargo de Desenvolvimento e
-            # o cargo da equipe enxergam esse tíquete. Administradores não
-            # entram automaticamente aqui (só via cargo da equipe, se tiverem).
+
+
             cargo_dev = guild.get_role(CARGO_DESENVOLVIMENTO_ID)
             if cargo_dev is not None:
                 overwrites[cargo_dev] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
@@ -399,8 +357,14 @@ class TicketSelect(discord.ui.Select):
             cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
             if cargo_equipe is not None:
                 overwrites[cargo_equipe] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        elif valor == "administracao":
+
+
+            for role in guild.roles:
+                if role.permissions.administrator:
+                    overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
         else:
-            # Administradores também veem
+
             for role in guild.roles:
                 if role.permissions.administrator:
                     overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
@@ -411,20 +375,19 @@ class TicketSelect(discord.ui.Select):
             else:
                 print(f"[TICKET] ⚠️ Cargo da equipe ({CARGO_EQUIPE_ID}) não encontrado no servidor.")
 
-        # Cria o canal
+
         canal = await guild.create_text_channel(
             name=nome_canal,
             overwrites=overwrites,
             reason=f"Tíquete aberto por {membro} — {valor}"
         )
 
-        # Registra o tíquete como "aberto" pra rastrear o tempo até a
-        # primeira resposta da equipe (usado no card de tempo médio).
+
         registro_abertos = _ler_abertos()
         registro_abertos[str(canal.id)] = {"criado_em": time.time(), "respondido": False}
         _salvar_abertos(registro_abertos)
 
-        # Embed de abertura dentro do tíquete
+
         embed = discord.Embed(
             title=f"Tíquete — {self.options[[o.value for o in self.options].index(valor)].label}",
             description=(
@@ -437,7 +400,7 @@ class TicketSelect(discord.ui.Select):
         embed.set_footer(text="Pra fechar este tíquete, clique no botão abaixo.")
         embed.set_thumbnail(url=membro.display_avatar.url)
 
-        # ── Card com o tempo médio de resposta da equipe ─────────────────
+
         tempos = _ler_tempos()
         total_t = tempos.get("total", 0)
         media_t = (tempos.get("soma_segundos", 0) / total_t) if total_t > 0 else None
@@ -445,7 +408,7 @@ class TicketSelect(discord.ui.Select):
         if arquivo_imagem:
             embed.set_image(url="attachment://tempo_resposta.png")
 
-        # Botão de fechar
+
         view = FecharTicketView()
         if arquivo_imagem:
             await canal.send(content=membro.mention, embed=embed, view=view, file=arquivo_imagem)
@@ -459,16 +422,14 @@ class TicketSelect(discord.ui.Select):
         print(f"[TICKET] ✅ Canal {nome_canal} criado para {membro}.")
 
 
-# ── Botão de fechar tíquete ────────────────────────────────────────────────────
 class FecharTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="🔒 Fechar Tíquete", style=discord.ButtonStyle.danger, custom_id="fechar_ticket")
     async def fechar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Normalmente só administradores fecham. Exceção: nos tíquetes de
-        # Desenvolvimento, administradores não têm acesso automático ao
-        # canal, então o próprio cargo de Desenvolvimento também pode fechar.
+
+
         pode_fechar = (
             interaction.user.guild_permissions.administrator
             or mu.eh_super_admin(interaction.user.id)
@@ -476,6 +437,13 @@ class FecharTicketView(discord.ui.View):
         )
         if not pode_fechar and interaction.channel.name.startswith(f"ticket-{NOMES['dev']}-"):
             pode_fechar = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+
+
+        if interaction.channel.name.startswith(f"ticket-{NOMES['administracao']}-"):
+            pode_fechar = (
+                interaction.user.guild_permissions.administrator
+                or mu.eh_super_admin(interaction.user.id)
+            )
 
         if not pode_fechar:
             await interaction.response.send_message(
@@ -491,7 +459,6 @@ class FecharTicketView(discord.ui.View):
         )
 
 
-# ── Botão de reabrir tíquete (aparece na mensagem de fechamento) ────────────
 class ReabrirTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -500,9 +467,7 @@ class ReabrirTicketView(discord.ui.View):
     async def reabrir(self, interaction: discord.Interaction, button: discord.ui.Button):
         canal = interaction.channel
 
-        # Mesma regra de permissão do botão de fechar: administradores, staff
-        # (cargo de equipe) e, nos tíquetes de Desenvolvimento, o próprio
-        # cargo de Desenvolvimento também pode reabrir.
+
         pode_reabrir = (
             interaction.user.guild_permissions.administrator
             or mu.eh_super_admin(interaction.user.id)
@@ -510,6 +475,13 @@ class ReabrirTicketView(discord.ui.View):
         )
         if not pode_reabrir and canal.name.startswith(f"ticket-{NOMES['dev']}-"):
             pode_reabrir = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+
+
+        if canal.name.startswith(f"ticket-{NOMES['administracao']}-"):
+            pode_reabrir = (
+                interaction.user.guild_permissions.administrator
+                or mu.eh_super_admin(interaction.user.id)
+            )
 
         if not pode_reabrir:
             await interaction.response.send_message(
@@ -523,7 +495,6 @@ class ReabrirTicketView(discord.ui.View):
         await cog.reabrir_ticket(interaction)
 
 
-# ── Escolha: fechar (mantém o canal) ou deletar de vez ──────────────────────
 class EscolhaFecharView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
@@ -541,19 +512,17 @@ class EscolhaFecharView(discord.ui.View):
         await cog.finalizar_ticket(interaction, deletar=True)
 
 
-# ── View do setup (Select Menu) ────────────────────────────────────────────────
 class TicketSetupView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketSelect())
 
 
-# ── Cog principal ──────────────────────────────────────────────────────────────
 class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ── Extrai o ID de quem abriu o tíquete a partir do nome do canal ──────
+
     @staticmethod
     def _extrair_dono_id(nome_canal: str) -> int | None:
         if not nome_canal.startswith("ticket-"):
@@ -570,7 +539,7 @@ class Tickets(commands.Cog):
             del abertos[str(canal_id)]
             _salvar_abertos(abertos)
 
-    # ── Rastreia o tempo até a primeira resposta da equipe num tíquete ─────
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
@@ -582,7 +551,7 @@ class Tickets(commands.Cog):
 
         dono_id = self._extrair_dono_id(canal.name)
         if dono_id is None or message.author.id == dono_id:
-            return  # só conta como "resposta" quem não é o dono do tíquete
+            return
 
         abertos = _ler_abertos()
         info = abertos.get(str(canal.id))
@@ -606,7 +575,7 @@ class Tickets(commands.Cog):
         abertos[str(canal.id)] = info
         _salvar_abertos(abertos)
 
-    # ── Clique nas estrelas de avaliação (custom_id: ticket_avaliacao_N_donoId) ──
+
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type != discord.InteractionType.component:
@@ -637,7 +606,7 @@ class Tickets(commands.Cog):
         await interaction.response.edit_message(embed=embed, view=None)
         await self.registrar_avaliacao(interaction.guild, nota)
 
-    # ── Registra uma nota e atualiza a embed de média no canal do setup ────
+
     async def registrar_avaliacao(self, guild: discord.Guild, nota: int):
         dados = _ler_avaliacoes()
         dados["total"] = dados.get("total", 0) + 1
@@ -707,7 +676,7 @@ class Tickets(commands.Cog):
         cfg["setup_channel_id"] = canal.id
         _salvar_config(cfg)
 
-    # ── Fecha (mantém) ou deleta o tíquete: transcript + avaliação + DM ────
+
     async def finalizar_ticket(self, interaction: discord.Interaction, deletar: bool):
         canal = interaction.channel
         guild = interaction.guild
@@ -720,14 +689,14 @@ class Tickets(commands.Cog):
             except discord.HTTPException:
                 dono = None
 
-        # ── Transcrição em HTML ─────────────────────────────────────────
+
         arquivo_transcript = None
         try:
             arquivo_transcript = await gerar_transcript_html(canal)
         except Exception as e:
             print(f"[TICKET] ⚠️ Erro ao gerar transcript de #{canal.name}: {e}")
 
-        # ── Pede pro dono avaliar o atendimento, direto no canal ────────
+
         if dono_id:
             embed_avaliacao = discord.Embed(
                 title="⭐ Avalie o atendimento",
@@ -742,7 +711,7 @@ class Tickets(commands.Cog):
             except discord.HTTPException:
                 pass
 
-        # ── Manda a transcrição na DM de quem abriu o tíquete ────────────
+
         if dono and arquivo_transcript:
             try:
                 embed_dm = discord.Embed(
@@ -794,7 +763,7 @@ class Tickets(commands.Cog):
                 pass
             print(f"[TICKET] 🔒 Canal {canal.name} fechado (não deletado) por {interaction.user}.")
 
-    # ── Reabre um tíquete previamente fechado (canal mantido) ───────────────
+
     async def reabrir_ticket(self, interaction: discord.Interaction):
         canal = interaction.channel
         guild = interaction.guild
@@ -807,21 +776,19 @@ class Tickets(commands.Cog):
             except discord.HTTPException:
                 dono = None
 
-        # Devolve a permissão de escrever pro dono do tíquete
+
         if isinstance(dono, discord.Member):
             try:
                 await canal.set_permissions(dono, view_channel=True, send_messages=True)
             except discord.Forbidden:
                 pass
 
-        # Volta a contar o tempo de resposta como se o tíquete tivesse
-        # acabado de ser aberto de novo (senão a métrica de tempo médio de
-        # resposta ficaria com um tíquete "fechado" preso pra sempre).
+
         registro_abertos = _ler_abertos()
         registro_abertos[str(canal.id)] = {"criado_em": time.time(), "respondido": False}
         _salvar_abertos(registro_abertos)
 
-        # Remove o botão "Reabrir" da mensagem antiga de fechamento
+
         try:
             await interaction.message.edit(view=None)
         except discord.HTTPException:
@@ -866,7 +833,7 @@ class Tickets(commands.Cog):
         )
         embed.set_footer(text="Apenas você e a equipe verão seu tíquete.")
 
-        # ── Atualiza o painel já existente em vez de mandar um novo ──────
+
         cfg = _ler_config()
         mensagem_existente = None
         canal_id_antigo = cfg.get("setup_channel_id")

@@ -23,8 +23,8 @@ class ComentarioModal(discord.ui.Modal, title="Avaliar Atendimento"):
         self.nota = nota
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Import local para evitar import circular (coach_manager também
-        # depende, indiretamente, de módulos que importam views/selects).
+
+
         from cogs.coach_manager import concluir_avaliacao
 
         await concluir_avaliacao(interaction, self.canal_ticket_id, self.nota, str(self.comentario))

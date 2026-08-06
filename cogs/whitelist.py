@@ -10,24 +10,19 @@ from cogs.backup import ler, salvar
 from cogs.players import CARGOS as PLAYER_CARGOS
 from cogs import mod_utils as mu
 
-# {"Ouro": id, "Platina": id, ...} — montado a partir dos cargos de rank já existentes
+
 CARGO_RANKS = {c["nome"]: c["id"] for c in PLAYER_CARGOS if c["secao"] == "rank"}
 
-# ── Incentivo/cobrança pra quem não termina a whitelist ─────────────────────
-# Só começa a incomodar 15 min depois do canal criado, e depois disso repete
-# a cada 10-15 min (sorteado), até a pessoa terminar (status sai de
-# "em_andamento") ou o canal ser apagado.
+
 INCENTIVO_ESPERA_INICIAL_SEGUNDOS = 15 * 60
 INCENTIVO_INTERVALO_MIN = 10
 INCENTIVO_INTERVALO_MAX = 15
 
-# Timeout automático: se passar esse tempo desde a criação do canal sem a
-# whitelist ser concluída, o bot fecha o canal sozinho (arquiva = apaga,
-# já que canais recusados/aprovados também são apagados nesse bot).
+
 WHITELIST_TIMEOUT_DIAS = 3
 WHITELIST_TIMEOUT_SEGUNDOS = WHITELIST_TIMEOUT_DIAS * 24 * 60 * 60
 
-# Pra quem ainda nem começou a responder nada.
+
 INCENTIVO_NAO_COMECOU = [
     "{mention} bora começar? 👀",
     "{mention} tá esperando o quê pra começar a whitelist? 🚀",
@@ -55,7 +50,7 @@ INCENTIVO_NAO_COMECOU = [
     "{mention} vamos nessa? Sua whitelist não vai se preencher sozinha! 📋",
 ]
 
-# Pra quem já começou mas parou no meio do caminho.
+
 INCENTIVO_PAROU_NO_MEIO = [
     "{mention} bora acabar? Você já começou, falta pouco! 💪",
     "{mention} não para no meio não, vem terminar a whitelist! 🏁",
@@ -75,29 +70,13 @@ INCENTIVO_PAROU_NO_MEIO = [
 ]
 
 
-# ─────────────────────────────────────────────
-#  Cog: Whitelist
-#  Arquivo: cogs/whitelist.py
-#
-#  Fluxo: membro entra -> só vê o canal "whitelist-<nick>" -> responde
-#  uma sequência de perguntas -> no final recebe os cargos e o canal é
-#  travado (fica só leitura, arquivado pra staff consultar se precisar).
-# ─────────────────────────────────────────────
-
-# ── CONFIGURAÇÕES (ajuste aqui se precisar) ─────────────────────────────────
-
-# Categoria onde os canais de whitelist são criados. Deixe 0 que o bot
-# procura (ou cria, se não existir) uma categoria chamada "🔒 Whitelist".
 CATEGORIA_WHITELIST_ID = 0
 NOME_CATEGORIA_WHITELIST = "🔒 Whitelist"
 
-# Canal onde fica o log de cada whitelist concluída (nick, rank, plataforma, etc).
-# 0 = desativado. Me passa o ID que eu preencho aqui.
+
 CANAL_LOG_WHITELIST_ID = 1521897698419019907
 
-# Canal onde fica o "quadro" de status de cada whitelist (pendente,
-# em análise, aprovada, recusada). Deixe 0 que o bot cria/usa um canal
-# chamado "status-whitelist" (fica visível pra todo mundo, só leitura).
+
 STATUS_WHITELIST_CHANNEL_ID = 0
 NOME_CANAL_STATUS = "status-whitelist"
 
@@ -109,53 +88,41 @@ STATUS_LABELS = {
     "cancelada":   ("🚫 Cancelada",  0x99AAB5),
 }
 
-# Cargo "membro da equipe" — quem tem esse cargo pode usar /perfil-whitelist
-# pra consultar o perfil/respostas de whitelist de qualquer membro.
+
 CARGO_MEMBRO_EQUIPE_ID = 1532184563491541164
 
-# Cargo "membro da equipe" — NÃO é dado automaticamente no fim da whitelist
-# (deixado aqui só de referência, caso você use em outro lugar).
+
 CARGO_MEMBRO_ID = 1523830313141272586
 
-# Cargo dado automaticamente (na hora, sem precisar de aprovação) pra quem
-# escolhe "Inglês" na pergunta de idioma da whitelist.
+
 CARGO_IDIOMA_INGLES_ID = 1525312330831892481
 
 IDIOMAS = ["Português", "Inglês"]
 IDIOMA_EMOJIS = {"Português": "🇧🇷", "Inglês": "🇬🇧"}
 
-# Cargo que a pessoa recebe assim que entra no servidor — é ele que bloqueia
-# a visão de todos os canais (configurado nas permissões dos canais como
-# "negar" pra esse cargo). É removido automaticamente quando termina a whitelist.
+
 CARGO_SEM_ACESSO_ID = 1521890714873757707
 
-# Cargos de staff — quem tiver qualquer um desses, recebe automaticamente
-# o cargo de "tag" de staff abaixo (isso é feito em cogs/staff_tag.py).
-#
-# Coach (1513356584946896946) e Editor de vídeo (1513240072139309317) têm
-# "secao": "staff" em PLAYER_CARGOS (players.py), mas foram explicitamente
-# excluídos daqui: quem tem só esses cargos NÃO recebe a tag de staff.
+
 CARGOS_EXCLUIDOS_DA_TAG_STAFF = {
-    1513240072139309317,  # Editor de vídeo
-    1513356584946896946,  # Coach
+    1513240072139309317,
+    1513356584946896946,
 }
 
 STAFF_ROLE_IDS = ({c["id"] for c in PLAYER_CARGOS if c["secao"] == "staff"} | {
-    1511894837790769204,  # Sub-Dono
-    1523835085475020932,  # Diretor
-    1523835045872275566,  # Gerente
-    1523835010795176027,  # Moderador
-    1523833330175442954,  # Suporte
-    1523843469016043600,  # Tag de Staff
+    1511894837790769204,
+    1523835085475020932,
+    1523835045872275566,
+    1523835010795176027,
+    1523833330175442954,
+    1523843469016043600,
 }) - CARGOS_EXCLUIDOS_DA_TAG_STAFF
 
-# Cargos que podem ver os canais de whitelist (além do próprio membro).
-# Só estes 3 — os demais cargos de staff (Gerente, Moderador, Suporte etc.)
-# não têm acesso aos canais de whitelist.
+
 CARGOS_QUE_VEEM_WHITELIST = {
-    1511895253777649704,  # Dono do Clube
-    1511894837790769204,  # Sub-Dono
-    1523835085475020932,  # Diretor
+    1511895253777649704,
+    1511894837790769204,
+    1523835085475020932,
 }
 
 RANK_IDS = set(CARGO_RANKS.values())
@@ -170,7 +137,7 @@ DIVISOES = ["Divisão 1", "Divisão 2", "Divisão 3"]
 
 TEMPOS_JOGANDO = ["Menos de 1 ano", "1 a 2 anos", "2 a 4 anos", "Mais de 4 anos"]
 
-# Habilidades extras — pergunta opcional, feita na mesma etapa do TikTok.
+
 HABILIDADES = ["Programação", "Designer", "Roteiro", "Editor de vídeo", "Administração"]
 
 
@@ -181,9 +148,6 @@ def _slug(nome: str) -> str:
     return nome or "jogador"
 
 
-# ─────────────────────────────────────────────
-#  Modal: nick no Rocket League
-# ─────────────────────────────────────────────
 class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
     nick = discord.ui.TextInput(
         label="Qual seu nick no Rocket League?",
@@ -215,9 +179,6 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
         await self.cog.enviar_pergunta(interaction.channel, membro, "idioma")
 
 
-# ─────────────────────────────────────────────
-#  Modal: perguntas abertas (texto livre)
-# ─────────────────────────────────────────────
 class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
     tiktok = discord.ui.TextInput(
         label="Qual o link da sua conta do TikTok?",
@@ -239,9 +200,6 @@ class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
         await self.cog.enviar_pergunta(interaction.channel, membro, "duvidas")
 
 
-# ─────────────────────────────────────────────
-#  View: botão que abre o modal de perguntas abertas
-# ─────────────────────────────────────────────
 class DesistirButton(discord.ui.Button):
     """Botão reutilizável de 'desistir', adicionado nas etapas intermediárias
     da whitelist (depois da primeira tela) pra pessoa poder desistir a
@@ -265,9 +223,6 @@ class AbrirPerguntasView(discord.ui.View):
         await interaction.response.send_modal(PerguntasAbertasModal(self.cog))
 
 
-# ─────────────────────────────────────────────
-#  View genérica de seleção (usada em várias perguntas)
-# ─────────────────────────────────────────────
 class EscolhaSelect(discord.ui.Select):
     def __init__(self, cog: "Whitelist", step: str, opcoes: list[str], placeholder: str, prox_step: str | None, emojis: dict | None = None):
         options = [
@@ -288,10 +243,7 @@ class EscolhaSelect(discord.ui.Select):
             guild = interaction.guild
             cargo_ingles = guild.get_role(CARGO_IDIOMA_INGLES_ID)
 
-            # Conta com base nos membros reais do servidor (não só em quem já
-            # respondeu a whitelist): quem tem o cargo de Inglês é falante de
-            # Inglês, todo o resto (menos bots e o próprio membro) é considerado
-            # falante de Português, já que é o idioma padrão do servidor.
+
             falantes_ingles = sum(
                 1 for m in (cargo_ingles.members if cargo_ingles else [])
                 if not m.bot and m.id != membro.id
@@ -325,14 +277,13 @@ class EscolhaSelect(discord.ui.Select):
         else:
             await interaction.response.send_message(f"✅ Resposta registrada: **{valor}**")
 
-        # Peak rank Supersonic Legend não tem divisão — pula direto
+
         if self.step == "peak_rank" and valor == "Supersonic Legend":
             self.cog.salvar_resposta(membro.id, "peak_div", "—")
             await self.cog.enviar_pergunta(interaction.channel, membro, "tempo")
             return
 
-        # Quem não tem TikTok pula o formulário de link e vai pra pergunta
-        # opcional de habilidades (mesma etapa da pergunta do TikTok).
+
         if self.step == "tem_tiktok" and valor == "Não":
             self.cog.salvar_resposta(membro.id, "tiktok", "Não possui")
             await self.cog.enviar_pergunta(interaction.channel, membro, "habilidades")
@@ -349,9 +300,6 @@ class EscolhaView(discord.ui.View):
         self.add_item(DesistirButton())
 
 
-# ─────────────────────────────────────────────
-#  Habilidades — pergunta opcional (multi-seleção), mesma etapa do TikTok
-# ─────────────────────────────────────────────
 class HabilidadesSelect(discord.ui.Select):
     def __init__(self):
         options = [discord.SelectOption(label=h) for h in HABILIDADES]
@@ -386,9 +334,6 @@ class HabilidadesView(discord.ui.View):
         await cog.prosseguir_apos_habilidades(interaction.channel, membro)
 
 
-# ─────────────────────────────────────────────
-#  View inicial: botão "Começar Whitelist"
-# ─────────────────────────────────────────────
 class ComecarWhitelistView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -396,7 +341,7 @@ class ComecarWhitelistView(discord.ui.View):
     @discord.ui.button(label="🚀 Começar Whitelist", style=discord.ButtonStyle.success, custom_id="wl_comecar")
     async def comecar(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        if interaction.channel.name != f"whitelist-{_slug(interaction.user.name)}" and \
+        if interaction.channel.name != f"whitelist-{_slug(interaction.user.name)}" and\
            not interaction.channel.name.startswith("whitelist-"):
             await interaction.response.send_message("❌ Use isso no seu canal de whitelist.", ephemeral=True)
             return
@@ -436,9 +381,6 @@ class ConfirmarDesistenciaView(discord.ui.View):
         await interaction.response.edit_message(content="Beleza, sua whitelist continua normalmente! 👍", view=None)
 
 
-# ─────────────────────────────────────────────
-#  View final: dúvidas + concluir
-# ─────────────────────────────────────────────
 class FinalizarWhitelistView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -449,9 +391,6 @@ class FinalizarWhitelistView(discord.ui.View):
         await cog.solicitar_aprovacao(interaction)
 
 
-# ─────────────────────────────────────────────
-#  View de revisão: só admin pode usar
-# ─────────────────────────────────────────────
 def _checar_admin(interaction: discord.Interaction) -> bool:
     return mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator
 
@@ -488,13 +427,10 @@ class RevisaoWhitelistView(discord.ui.View):
         await interaction.response.send_message(mensagem, ephemeral=ephemeral)
 
 
-# ─────────────────────────────────────────────
-#  Cog principal
-# ─────────────────────────────────────────────
 class Whitelist(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.dados = ler("whitelist")  # {user_id_str: {"respostas": {...}, "canal_id":..., "status":...}}
+        self.dados = ler("whitelist")
         self.limpeza_canais.start()
         self.incentivo_whitelist.start()
 
@@ -521,8 +457,8 @@ class Whitelist(commands.Cog):
 
             criado_ts = registro.get("criado_ts")
             if not criado_ts:
-                # Registro antigo, sem criado_ts salvo — começa a contar a
-                # partir de agora, não vamos disparar retroativamente.
+
+
                 registro["criado_ts"] = agora
                 mudou = True
                 continue
@@ -530,7 +466,7 @@ class Whitelist(commands.Cog):
             if agora - criado_ts < INCENTIVO_ESPERA_INICIAL_SEGUNDOS:
                 continue
 
-            # ── Timeout automático: fecha sozinho se passar dias demais ──
+
             if agora - criado_ts >= WHITELIST_TIMEOUT_SEGUNDOS:
                 canal = self.bot.get_channel(canal_id)
                 if canal is not None:
@@ -597,10 +533,8 @@ class Whitelist(commands.Cog):
         agora = time.time()
         mudou = False
         for uid_str, registro in list(self.dados.items()):
-            # BUG corrigido: antes só limpava canais "aprovada", então canais
-            # de whitelist "recusada" (que também agendam deletar_em) nunca
-            # eram apagados por aqui — só sumiam de carona quando o membro
-            # recusado era expulso (on_member_remove). Agora cobre os dois.
+
+
             if registro.get("status") not in ("aprovada", "recusada") or registro.get("canal_apagado"):
                 continue
             deletar_em = registro.get("deletar_em")
@@ -622,14 +556,14 @@ class Whitelist(commands.Cog):
     async def antes_limpeza(self):
         await self.bot.wait_until_ready()
 
-    # ── Persistência ─────────────────────────────────────────────
+
     def salvar_resposta(self, user_id: int, chave: str, valor: str):
         uid = str(user_id)
         registro = self.dados.setdefault(uid, {"respostas": {}, "status": "em_andamento"})
         registro["respostas"][chave] = valor
         salvar("whitelist", self.dados)
 
-    # ── Categoria (cria se não existir) ─────────────────────────────
+
     async def get_categoria(self, guild: discord.Guild) -> discord.CategoryChannel:
         if CATEGORIA_WHITELIST_ID:
             cat = guild.get_channel(CATEGORIA_WHITELIST_ID)
@@ -640,7 +574,7 @@ class Whitelist(commands.Cog):
             cat = await guild.create_category(NOME_CATEGORIA_WHITELIST, reason="Categoria de whitelist criada automaticamente")
         return cat
 
-    # ── Canal de status (cria se não existir) ────────────────────────
+
     async def get_canal_status(self, guild: discord.Guild) -> discord.TextChannel:
         if STATUS_WHITELIST_CHANNEL_ID:
             canal = guild.get_channel(STATUS_WHITELIST_CHANNEL_ID)
@@ -661,7 +595,7 @@ class Whitelist(commands.Cog):
             )
         return canal
 
-    # ── Cria ou atualiza a linha da pessoa no quadro de status ───────
+
     async def atualizar_status_board(self, guild: discord.Guild, membro_id: int):
         registro = self.dados.get(str(membro_id))
         if not registro:
@@ -686,7 +620,7 @@ class Whitelist(commands.Cog):
                 verbo = "Aprovado" if status == "aprovada" else "Recusado"
                 embed.add_field(name="Responsável", value=f"{verbo} por **{decidido_por_nome}**", inline=False)
 
-        # ── Respostas da whitelist (mesmas exibidas em /perfil-whitelist) ──
+
         r = registro.get("respostas", {})
         if r:
             embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
@@ -714,7 +648,7 @@ class Whitelist(commands.Cog):
         registro["status_msg_id"] = nova.id
         salvar("whitelist", self.dados)
 
-    # ── Criação do canal privado ao entrar ──────────────────────────
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         if member.bot:
@@ -776,15 +710,12 @@ class Whitelist(commands.Cog):
         await canal.send(content=member.mention, embed=embed, view=ComecarWhitelistView())
         return canal
 
-    # Se a pessoa sair antes de terminar, limpa o canal
+
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
         registro = self.dados.get(str(member.id))
-        # Bug corrigido: o status "concluido" nunca existia de verdade (os
-        # status reais são em_andamento/pendente/aprovada/recusada/cancelada).
-        # Só faz sentido apagar o canal automaticamente se a whitelist ainda
-        # não tinha sido decidida — se já foi aprovada/recusada, deixa o
-        # fluxo normal (limpeza_canais / staff) cuidar disso.
+
+
         if not registro or registro.get("status") in ("aprovada", "recusada", "cancelada"):
             return
         canal_id = registro.get("canal_id")
@@ -799,7 +730,7 @@ class Whitelist(commands.Cog):
         registro["cancelado_em"] = time.time()
         salvar("whitelist", self.dados)
 
-    # ── Dá o cargo de rank (remove outros ranks antes) — só na aprovação ──
+
     async def dar_cargo_rank(self, guild: discord.Guild, membro: discord.Member, rank_nome: str) -> str | None:
         cargo = guild.get_role(CARGO_RANKS.get(rank_nome, 0))
         if cargo is None:
@@ -814,8 +745,7 @@ class Whitelist(commands.Cog):
             return "⚠️ Não tenho permissão pra dar o cargo de rank."
         return None
 
-    # ── Depois da pergunta opcional de habilidades, retoma o fluxo normal:
-    # quem tem TikTok vai preencher o link, quem não tem já vai pras dúvidas ──
+
     async def prosseguir_apos_habilidades(self, canal: discord.TextChannel, membro: discord.Member):
         registro = self.dados.get(str(membro.id), {})
         tem_tiktok = registro.get("respostas", {}).get("tem_tiktok")
@@ -824,7 +754,7 @@ class Whitelist(commands.Cog):
         else:
             await self.enviar_pergunta(canal, membro, "duvidas")
 
-    # ── Envia a pergunta correspondente ao passo ────────────────────
+
     async def enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str):
         if step == "idioma":
             view = EscolhaView(self, "idioma", IDIOMAS, "Escolha seu idioma...", "rank", emojis=IDIOMA_EMOJIS)
@@ -897,7 +827,7 @@ class Whitelist(commands.Cog):
             )
             await canal.send(embed=embed, view=FinalizarWhitelistView())
 
-    # ── Pede aprovação (era o antigo "finalizar") ───────────────────
+
     async def solicitar_aprovacao(self, interaction: discord.Interaction):
         membro = interaction.user
         guild = interaction.guild
@@ -913,7 +843,7 @@ class Whitelist(commands.Cog):
             "📨 **Suas respostas foram enviadas!** Um administrador vai revisar e te avisar por aqui assim que decidir. Aguenta aí! ⏳"
         )
 
-        # Trava o envio de mensagens pro membro enquanto aguarda análise
+
         try:
             await interaction.channel.set_permissions(membro, send_messages=False, view_channel=True)
         except discord.Forbidden:
@@ -923,7 +853,7 @@ class Whitelist(commands.Cog):
 
         r = registro["respostas"]
 
-        # Resumo completo pra staff, direto no canal privado da whitelist
+
         embed_resumo = discord.Embed(
             title=f"📋 Resumo da Whitelist — {membro}",
             description="Confira as respostas antes de decidir abaixo.",
@@ -943,7 +873,7 @@ class Whitelist(commands.Cog):
         embed_resumo.set_footer(text=f"ID: {membro.id}")
         await interaction.channel.send(embed=embed_resumo)
 
-        # Painel de revisão pra staff, só dentro do próprio canal privado
+
         embed_revisao = discord.Embed(
             title="🔎 Whitelist aguardando revisão",
             description=f"Analisa as respostas de {membro.mention} e decide abaixo.\n(apenas **administradores**)",
@@ -951,7 +881,7 @@ class Whitelist(commands.Cog):
         )
         await interaction.channel.send(embed=embed_revisao, view=RevisaoWhitelistView(membro.id))
 
-        # Log completo pra staff
+
         if CANAL_LOG_WHITELIST_ID:
             canal_log = self.bot.get_channel(CANAL_LOG_WHITELIST_ID)
             if canal_log:
@@ -968,7 +898,7 @@ class Whitelist(commands.Cog):
                 embed.set_footer(text=f"ID: {membro.id}")
                 await canal_log.send(embed=embed)
 
-    # ── Admin marca como "em análise" ────────────────────────────────
+
     async def marcar_visualizada(self, interaction: discord.Interaction, membro_id: int):
         registro = self.dados.get(str(membro_id))
         if not registro:
@@ -984,11 +914,7 @@ class Whitelist(commands.Cog):
             f"A partir de agora, só {interaction.user.mention} pode aprovar ou recusar essa whitelist."
         )
 
-    # ── Admin aprova ──────────────────────────────────────────────
-    # Método "core": não depende de Interaction, então pode ser chamado
-    # tanto pelo botão "✅ Aprovar" quanto pelo comando !aprovar-whitelist.
-    # Retorna (ephemeral, mensagem) — `ephemeral` só é usado pelo botão
-    # (Interaction); o comando de texto sempre manda a mensagem normal.
+
     async def aprovar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel) -> tuple[bool, str]:
         registro = self.dados.get(str(membro_id))
         if not registro:
@@ -1004,11 +930,7 @@ class Whitelist(commands.Cog):
             nome = registro.get("visualizado_por_nome", "outro administrador")
             return True, f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar."
 
-        # Trava a whitelist JÁ AQUI, antes de qualquer `await`. Como o bot
-        # roda tudo num único loop assíncrono, nada mais executa entre uma
-        # linha e outra até a primeira pausa (await) — então, se dois
-        # admins clicarem/digitarem quase ao mesmo tempo, só o primeiro
-        # passa por essa checagem; o segundo já vai cair no bloco acima.
+
         registro["status"] = "aprovada"
         registro["decidido_por_nome"] = str(autor)
         registro["decidido_por_id"] = autor.id
@@ -1037,24 +959,21 @@ class Whitelist(commands.Cog):
             f"*(este canal vai ser apagado automaticamente em 10 minutos)*"
         )
 
-        # Tira a visão do canal de whitelist pro membro (ele não precisa mais dele)
+
         if membro:
             try:
                 await canal.set_permissions(membro, overwrite=None)
             except discord.Forbidden:
                 pass
 
-        # Agenda a exclusão do canal em 10 minutos (sobrevive a restart do bot)
+
         registro["deletar_em"] = time.time() + 600
         registro["canal_apagado"] = False
         salvar("whitelist", self.dados)
 
         return False, mensagem
 
-    # ── Admin recusa -> expulsa o membro automaticamente ─────────────
-    # Sempre que a whitelist é reprovada, o membro é removido do servidor
-    # (banimento não, só kick — ele pode entrar de novo e tentar outra vez
-    # do zero se quiser).
+
     async def recusar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel) -> tuple[bool, str]:
         registro = self.dados.get(str(membro_id))
         if not registro:
@@ -1070,7 +989,7 @@ class Whitelist(commands.Cog):
             nome = registro.get("visualizado_por_nome", "outro administrador")
             return True, f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar."
 
-        # Mesma trava imediata explicada em aprovar_core()
+
         registro["status"] = "recusada"
         registro["decidido_por_nome"] = str(autor)
         registro["decidido_por_id"] = autor.id
@@ -1089,8 +1008,7 @@ class Whitelist(commands.Cog):
 
         await self.atualizar_status_board(guild, membro_id)
 
-        # Agenda a exclusão do canal em 10 minutos, igual à aprovação —
-        # como o membro foi expulso, não faz sentido reabrir o processo.
+
         registro["deletar_em"] = time.time() + 600
         registro["canal_apagado"] = False
         salvar("whitelist", self.dados)
@@ -1102,14 +1020,14 @@ class Whitelist(commands.Cog):
         )
         return False, mensagem
 
-    # ── Acha de qual membro é o canal de whitelist atual (pelos comandos) ──
+
     def _membro_id_do_canal(self, canal_id: int) -> int | None:
         for membro_id_str, registro in self.dados.items():
             if registro.get("canal_id") == canal_id:
                 return int(membro_id_str)
         return None
 
-    # ── Marca um registro como cancelado (staff, timeout, ou membro saiu) ──
+
     def marcar_cancelada(self, canal_id: int, motivo: str) -> None:
         membro_id = self._membro_id_do_canal(canal_id)
         if membro_id is None:
@@ -1122,7 +1040,7 @@ class Whitelist(commands.Cog):
         registro["cancelado_em"] = time.time()
         salvar("whitelist", self.dados)
 
-    # ── Fluxo de "desistir" iniciado pelo próprio membro ─────────────────
+
     async def pedir_confirmacao_desistencia(self, interaction: discord.Interaction):
         membro_id = self._membro_id_do_canal(interaction.channel.id)
         if membro_id is None or membro_id != interaction.user.id:
@@ -1166,7 +1084,7 @@ class Whitelist(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    # ── Comando manual pra staff criar/recriar o canal de alguém ────
+
     @commands.command(name="whitelist")
     @commands.has_permissions(administrator=True)
     async def whitelist_manual(self, ctx: commands.Context, membro: discord.Member):
@@ -1180,10 +1098,7 @@ class Whitelist(commands.Cog):
         elif isinstance(error, commands.MemberNotFound):
             await ctx.send("❌ Não achei esse membro.", delete_after=5)
 
-    # ── Comandos de texto: aprovar/reprovar a whitelist do canal atual ──
-    # Uso: dentro do canal "whitelist-<nick>" da pessoa, digitar
-    # !aprovar-whitelist ou !reprovar-whitelist. Fazem exatamente a mesma
-    # coisa que os botões "✅ Aprovar" / "❌ Recusar" no board de revisão.
+
     @commands.command(name="aprovar-whitelist")
     @commands.has_permissions(administrator=True)
     async def aprovar_whitelist_cmd(self, ctx: commands.Context):
@@ -1214,7 +1129,7 @@ class Whitelist(commands.Cog):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
 
-    # ── /perfil-whitelist: mostra o perfil completo de whitelist de alguém ──
+
     @app_commands.command(name="perfil-whitelist", description="[Staff] Vê o perfil/respostas da whitelist de um membro.")
     @app_commands.describe(membro="Membro cujo perfil de whitelist você quer ver")
     @app_commands.checks.has_role(CARGO_MEMBRO_EQUIPE_ID)

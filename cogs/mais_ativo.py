@@ -4,23 +4,15 @@ from datetime import datetime, timedelta, timezone
 
 from cogs.json_store import ler_json, salvar_json
 
-# ─────────────────────────────────────────────
-#  Cog: Usuário Mais Ativo (diário)
-#  Arquivo: cogs/mais_ativo.py
-#
-#  Conta quantas mensagens cada pessoa manda por dia (fuso de Brasília) e,
-#  assim que o dia vira, anuncia no canal de jogadores quem foi o usuário
-#  mais ativo do dia anterior — considerando SÓ mensagens (call não conta).
-# ─────────────────────────────────────────────
 
-CANAL_RANKING_ID = 1514775408124367149  # canal de jogadores (mesmo de cogs/players.py)
+CANAL_RANKING_ID = 1514775408124367149
 
 BR_TZ = timezone(timedelta(hours=-3))
 
-DATA_PATH = "data/atividade_diaria.json"           # {"YYYY-MM-DD": {"user_id": qtd_mensagens}}
-CONTROLE_PATH = "data/atividade_diaria_controle.json"  # {"ultimo_dia_anunciado": "YYYY-MM-DD"}
+DATA_PATH = "data/atividade_diaria.json"
+CONTROLE_PATH = "data/atividade_diaria_controle.json"
 
-DIAS_PARA_MANTER = 60  # não deixa o histórico crescer pra sempre
+DIAS_PARA_MANTER = 60
 
 
 def _hoje_str() -> str:
@@ -56,7 +48,7 @@ class MaisAtivo(commands.Cog):
     def cog_unload(self):
         self.verificar_virada_dia.cancel()
 
-    # ── Conta mensagens do dia atual ─────────────────────────────────────────
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:
@@ -68,14 +60,13 @@ class MaisAtivo(commands.Cog):
         registro_dia[sid] = registro_dia.get(sid, 0) + 1
         _salvar_dados(self.dados)
 
-        # Poda dias antigos de vez em quando (não precisa ser toda mensagem,
-        # mas fazer aqui é simples e barato o suficiente)
+
         if len(self.dados) > DIAS_PARA_MANTER:
             for antigo in sorted(self.dados.keys())[:-DIAS_PARA_MANTER]:
                 del self.dados[antigo]
             _salvar_dados(self.dados)
 
-    # ── Monta e manda o embed de ranking de um dia específico ───────────────
+
     async def _anunciar_mais_ativo(self, guild: discord.Guild, dia: str):
         registro_dia = self.dados.get(dia, {})
         if not registro_dia:
@@ -128,7 +119,7 @@ class MaisAtivo(commands.Cog):
         except discord.HTTPException as e:
             print(f"[MAIS_ATIVO] ⚠️ Erro ao anunciar usuário mais ativo: {e}")
 
-    # ── Confere a cada minuto se o dia virou, pra anunciar o dia anterior ───
+
     @tasks.loop(minutes=1)
     async def verificar_virada_dia(self):
         await self.bot.wait_until_ready()
@@ -136,14 +127,9 @@ class MaisAtivo(commands.Cog):
 
         controle = _ler_controle()
         if controle.get("ultimo_dia_anunciado") == ontem:
-            return  # já anunciou o dia de ontem, nada a fazer
+            return
 
-        # Manda só UMA vez, pro servidor dono do canal de anúncio — antes o
-        # código percorria todos os servidores em que o bot está (self.bot.guilds)
-        # chamando get_channel(CANAL_RANKING_ID), que é uma busca GLOBAL (não por
-        # servidor). Se o bot estiver em mais de um servidor, isso repetia o
-        # mesmo anúncio, um por servidor, sempre no mesmo canal — daí a
-        # mensagem duplicada.
+
         canal = self.bot.get_channel(CANAL_RANKING_ID)
         if canal is None:
             print(f"[MAIS_ATIVO] ⚠️ Canal {CANAL_RANKING_ID} não encontrado.")
@@ -161,7 +147,7 @@ class MaisAtivo(commands.Cog):
     async def antes_verificar(self):
         await self.bot.wait_until_ready()
 
-    # ── !mais-ativo [ontem|hoje] — comando manual pra staff testar/consultar ──
+
     @commands.command(name="mais-ativo")
     @commands.has_permissions(administrator=True)
     async def mais_ativo_manual(self, ctx: commands.Context, quando: str = "ontem"):

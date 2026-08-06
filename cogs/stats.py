@@ -3,11 +3,6 @@ from discord.ext import commands
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 
-# ─────────────────────────────────────────────
-#  Cog: Estatísticas
-#  Arquivo: cogs/stats.py
-#  /perfil @membro — /historico
-# ─────────────────────────────────────────────
 
 RANKS_IDS = {
     1514772134327488642: ("🌌", "Super Sonic Legend"),
@@ -49,7 +44,7 @@ class Stats(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ── /perfil ───────────────────────────────────────────────────────────────
+
     @app_commands.command(name="perfil", description="Veja o perfil de um jogador.")
     @app_commands.describe(membro="Jogador que deseja consultar (deixe vazio para ver o seu)")
     async def perfil(self, interaction: discord.Interaction, membro: discord.Member = None):
@@ -84,7 +79,7 @@ class Stats(commands.Cog):
 
         await interaction.response.send_message(embed=embed)
 
-    # ── /historico ────────────────────────────────────────────────────────────
+
     @app_commands.command(name="historico", description="Veja o histórico de amistosos registrados.")
     async def historico(self, interaction: discord.Interaction):
         amistosos = ler("amistosos")
@@ -100,7 +95,7 @@ class Stats(commands.Cog):
             color=0xD4A843,
         )
 
-        for a in amistosos[-10:][::-1]:  # últimos 10, mais recente primeiro
+        for a in amistosos[-10:][::-1]:
             resultado = a.get("resultado", "⏳ Aguardando")
             placar    = a.get("placar", "")
             valor = (

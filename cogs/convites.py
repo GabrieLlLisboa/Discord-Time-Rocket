@@ -3,18 +3,6 @@ from discord.ext import commands
 
 from cogs.json_store import ler_json, salvar_json
 
-# ─────────────────────────────────────────────
-#  Cog: Rastreador de Convites
-#  Arquivo: cogs/convites.py
-#
-#  Quando alguém entra no servidor, descobre qual convite
-#  foi usado (comparando os usos de cada invite antes/depois
-#  do join) e avisa no canal configurado quem convidou quem,
-#  junto com o total acumulado de convites de quem convidou.
-#
-#  OBS: o bot precisa da permissão "Gerenciar Servidor" pra
-#  conseguir ler os convites do servidor (guild.invites()).
-# ─────────────────────────────────────────────
 
 CANAL_CONVITES_ID = 1523750525210984661
 
@@ -32,8 +20,8 @@ def _salvar(dados: dict):
 class Convites(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.dados = _ler()  # { "inviter_id": total_de_convites_feitos (cumulativo) }
-        self.cache_usos = {}  # { guild_id: { invite_code: uses } } — snapshot pra comparar
+        self.dados = _ler()
+        self.cache_usos = {}
 
     def _total_de(self, user_id: int) -> int:
         return self.dados.get(str(user_id), 0)
@@ -46,14 +34,14 @@ class Convites(commands.Cog):
             return {}
         return {inv.code: (inv.uses or 0) for inv in invites}
 
-    # ── Ao iniciar o bot: monta o snapshot inicial de usos de cada convite ───
+
     @commands.Cog.listener()
     async def on_ready(self):
         for guild in self.bot.guilds:
             self.cache_usos[guild.id] = await self._snapshot(guild)
         print("[CONVITES] ✅ Cache de convites carregado.")
 
-    # ── Mantém o cache atualizado quando convites são criados/apagados ──────
+
     @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite):
         cache = self.cache_usos.setdefault(invite.guild.id, {})
@@ -64,7 +52,7 @@ class Convites(commands.Cog):
         cache = self.cache_usos.get(invite.guild.id, {})
         cache.pop(invite.code, None)
 
-    # ── Alguém entrou: descobre qual convite foi usado ───────────────────────
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         if member.bot:
@@ -73,7 +61,7 @@ class Convites(commands.Cog):
         guild = member.guild
         cache_antigo = self.cache_usos.get(guild.id, {})
         cache_novo = await self._snapshot(guild)
-        self.cache_usos[guild.id] = cache_novo  # já deixa atualizado pro próximo join
+        self.cache_usos[guild.id] = cache_novo
 
         canal = self.bot.get_channel(CANAL_CONVITES_ID)
         if canal is None:
@@ -90,7 +78,7 @@ class Convites(commands.Cog):
             await canal.send(f"👋 {member.mention} entrou no servidor, mas não consegui identificar quem convidou.")
             return
 
-        # Precisa buscar de novo pra pegar o objeto Invite (com o .inviter)
+
         try:
             convite = discord.utils.get(await guild.invites(), code=usado)
         except discord.Forbidden:

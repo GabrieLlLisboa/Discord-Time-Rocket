@@ -80,10 +80,10 @@ def salvar_json(path: str, dados) -> None:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(dados, f, ensure_ascii=False, indent=2)
             f.flush()
-            os.fsync(f.fileno())  # garante que foi pro disco antes do replace
+            os.fsync(f.fileno())
         os.replace(tmp_path, path)
     finally:
-        # Se algo deu errado antes do os.replace, não deixa lixo pra trás
+
         if os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)

@@ -4,11 +4,6 @@ from discord import app_commands
 from datetime import datetime, timezone, timedelta
 from cogs.backup import ler, salvar
 
-# ─────────────────────────────────────────────
-#  Cog: Agendamento de Treinos
-#  Arquivo: cogs/treinos.py
-#  /treino — agenda e lembra 30 min antes
-# ─────────────────────────────────────────────
 
 ADMIN_ROLE_ID = 1511894837790769204
 
@@ -20,7 +15,7 @@ def parse_data(data_str: str, hora_str: str) -> datetime | None:
     try:
         ano  = datetime.now().year
         dt   = datetime.strptime(f"{data_str.strip()}/{ano} {hora_str.strip()}", "%d/%m/%Y %H:%M")
-        # Brasília = UTC-3
+
         dt_utc = dt.replace(tzinfo=timezone(timedelta(hours=-3)))
         return dt_utc
     except Exception:
@@ -35,7 +30,7 @@ class Treinos(commands.Cog):
     def cog_unload(self):
         self.verificar_treinos.cancel()
 
-    # ── /treino ───────────────────────────────────────────────────────────────
+
     @app_commands.command(name="treino", description="Agenda um treino e lembra o time 30 min antes.")
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     @app_commands.describe(
@@ -103,7 +98,7 @@ class Treinos(commands.Cog):
                 "❌ Apenas **Administradores** podem agendar treinos.", ephemeral=True
             )
 
-    # ── /treinos — lista os próximos treinos ──────────────────────────────────
+
     @app_commands.command(name="treinos", description="Lista os próximos treinos agendados.")
     async def listar_treinos(self, interaction: discord.Interaction):
         treinos = ler("treinos")
@@ -131,7 +126,7 @@ class Treinos(commands.Cog):
             )
         await interaction.response.send_message(embed=embed)
 
-    # ── Task: verifica e envia lembretes ──────────────────────────────────────
+
     @tasks.loop(minutes=1)
     async def verificar_treinos(self):
         await self.bot.wait_until_ready()
@@ -146,7 +141,7 @@ class Treinos(commands.Cog):
                 dt = datetime.fromisoformat(t["timestamp"])
                 diff = (dt - agora).total_seconds()
 
-                # Envia lembrete 30 min antes (janela de 1 min pra não perder)
+
                 if 0 < diff <= 1860:
                     canal = self.bot.get_channel(t["canal_id"])
                     if canal:
@@ -165,9 +160,8 @@ class Treinos(commands.Cog):
                     t["lembrete_enviado"] = True
                     alterado = True
             except Exception as e:
-                # Um treino com dado malformado (timestamp inválido, chave
-                # ausente etc.) não pode travar o lembrete de todos os outros
-                # treinos pra sempre.
+
+
                 print(f"[TREINO] ⚠️ Erro ao processar treino {t.get('id', '?')}: {e}")
 
         if alterado:

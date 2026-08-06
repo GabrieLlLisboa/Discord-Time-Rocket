@@ -6,17 +6,6 @@ from datetime import datetime, timezone
 from cogs.players import CARGOS
 from cogs.json_store import ler_json, salvar_json
 
-# ─────────────────────────────────────────────
-#  Cog: Campeonatos / Torneios
-#  Arquivo: cogs/campeonato.py
-#
-#  /criar-campeonato e /torneiar são slash commands.
-#  !destornear continua sendo comando de prefixo (!).
-#
-#  Cada campeonato gera DUAS mensagens no canal:
-#    1) A mensagem de informações + botão "Entrar no Torneio"
-#    2) A mensagem com a lista de inscritos (atualizada à parte)
-# ─────────────────────────────────────────────
 
 DATA_FILE = "data/campeonatos.json"
 
@@ -55,7 +44,7 @@ def _membro_tem_rank(membro: discord.Member, rank_nome: str) -> bool:
         return True
     info = RANKS_VALIDOS.get(rank_nome.lower())
     if info is None:
-        return True  # rank desconhecido — não bloqueia, deixa passar
+        return True
     return any(r.id == info["id"] for r in membro.roles)
 
 
@@ -170,7 +159,6 @@ async def _atualizar_lista(bot: commands.Bot, chave: str):
         pass
 
 
-# ── Modal que pergunta o país da pessoa ──────────────────────────────────────
 class PaisModal(discord.ui.Modal, title="Inscrição no Torneio"):
     pais = discord.ui.TextInput(label="Qual o seu país?", placeholder="Ex: Brasil", max_length=50)
 
@@ -198,7 +186,6 @@ class PaisModal(discord.ui.Modal, title="Inscrição no Torneio"):
         )
 
 
-# ── View de confirmação quando o rank não bate ───────────────────────────────
 class ConfirmarRankView(discord.ui.View):
     def __init__(self, chave: str, bot: commands.Bot):
         super().__init__(timeout=60)
@@ -214,7 +201,6 @@ class ConfirmarRankView(discord.ui.View):
         await interaction.response.edit_message(content="❌ Inscrição cancelada.", view=None)
 
 
-# ── View fixa no anúncio do campeonato (persistente, sobrevive a restart) ───
 class EntrarTorneioView(discord.ui.View):
     def __init__(self, chave: str, fechado: bool = False):
         super().__init__(timeout=None)
@@ -322,9 +308,7 @@ class Campeonato(commands.Cog):
     def cog_unload(self):
         self.verificar_cargos_torneio.cancel()
 
-    # ── A cada 10 min, confere se todo mundo inscrito ainda tem o cargo do
-    # torneio dele — se por algum motivo sumiu (ex: alguém removeu na mão,
-    # bot caiu no meio da inscrição), devolve o cargo automaticamente.
+
     @tasks.loop(minutes=10)
     async def verificar_cargos_torneio(self):
         dados = ler_campeonatos()
@@ -335,15 +319,15 @@ class Campeonato(commands.Cog):
                 try:
                     await _dar_cargo(self.bot, info, int(uid_str))
                 except Exception as e:
-                    # Um inscrito problemático (ex: saiu do servidor, cargo
-                    # deletado) não pode travar a checagem dos demais.
+
+
                     print(f"[CAMPEONATO] ⚠️ Erro ao verificar cargo de {uid_str}: {e}")
 
     @verificar_cargos_torneio.before_loop
     async def antes_verificar_cargos_torneio(self):
         await self.bot.wait_until_ready()
 
-    # ── /criar-campeonato ────────────────────────────────────────────────────
+
     @app_commands.command(name="criar-campeonato", description="Cria o anúncio de um campeonato com botão de inscrição.")
     @app_commands.describe(
         nome="Nome do campeonato",
@@ -388,8 +372,7 @@ class Campeonato(commands.Cog):
             "inscricoes_abertas": True,
         }
 
-        # Cargo exclusivo do torneio: só enfeite, sem permissão nenhuma,
-        # pra facilitar marcar todo mundo inscrito de uma vez depois
+
         try:
             role = await interaction.guild.create_role(
                 name=f"🏆 {nome}",
@@ -401,8 +384,7 @@ class Campeonato(commands.Cog):
         except discord.Forbidden:
             print(f"[CAMPEONATO] ⚠️ Sem permissão pra criar o cargo do torneio '{nome}'.")
 
-        # Responde só pra você, de forma discreta — o anúncio de verdade vai
-        # como mensagem própria do bot, sem aparecer como resposta ao seu comando
+
         await interaction.response.send_message("✅ Campeonato criado!", ephemeral=True)
 
         canal = interaction.channel
@@ -414,10 +396,10 @@ class Campeonato(commands.Cog):
         dados[chave] = info
         salvar_campeonatos(dados)
 
-        # ── Responde a mensagem informada (opcional), igual ao /resultado ──────
+
         if link_mensagem:
             msg_alvo = None
-            # Extrai IDs do link: .../channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID
+
             try:
                 partes = link_mensagem.strip().split("/")
                 msg_id = int(partes[-1])
@@ -441,7 +423,7 @@ class Campeonato(commands.Cog):
         else:
             await interaction.response.send_message(f"❌ Erro ao criar campeonato: {error}", ephemeral=True)
 
-    # ── /torneiar ────────────────────────────────────────────────────────────
+
     @app_commands.command(name="torneiar", description="Inscreve uma ou mais pessoas manualmente num campeonato (sem checar rank).")
     @app_commands.describe(
         campeonato="Nome do campeonato",
@@ -503,7 +485,7 @@ class Campeonato(commands.Cog):
         else:
             await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
 
-    # ── /deletar-torneio ─────────────────────────────────────────────────────
+
     @app_commands.command(name="deletar-torneio", description="Apaga um campeonato (as duas mensagens e todos os inscritos).")
     @app_commands.describe(campeonato="Qual campeonato apagar")
     @app_commands.autocomplete(campeonato=_autocomplete_campeonato)
@@ -531,7 +513,7 @@ class Campeonato(commands.Cog):
         else:
             await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
 
-    # ── /fechar-inscricoes ───────────────────────────────────────────────────
+
     @app_commands.command(name="fechar-inscricoes", description="Fecha as inscrições de um campeonato (o botão fica travado).")
     @app_commands.describe(campeonato="Qual campeonato fechar")
     @app_commands.autocomplete(campeonato=_autocomplete_campeonato)
@@ -560,7 +542,7 @@ class Campeonato(commands.Cog):
         else:
             await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
 
-    # ── /abrir-inscricoes ────────────────────────────────────────────────────
+
     @app_commands.command(name="abrir-inscricoes", description="Reabre as inscrições de um campeonato.")
     @app_commands.describe(campeonato="Qual campeonato reabrir")
     @app_commands.autocomplete(campeonato=_autocomplete_campeonato)
@@ -589,7 +571,7 @@ class Campeonato(commands.Cog):
         else:
             await interaction.response.send_message(f"❌ Erro: {error}", ephemeral=True)
 
-    # ── !destornear <membro> <nome do campeonato> — tira alguém da lista ────
+
     @commands.command(name="destornear")
     @commands.has_permissions(administrator=True)
     async def destornear(self, ctx: commands.Context, membro: discord.Member, *, nome_campeonato: str):

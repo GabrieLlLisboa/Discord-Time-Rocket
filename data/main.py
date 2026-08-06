@@ -45,20 +45,19 @@ async def registrar_views_persistentes():
     from cogs.notifications import NotificacaoView
     from cogs.friendly import ConfirmarPresencaView, SairAmistosoView
 
-    # Views sem estado (não precisam de argumentos)
+
     bot.add_view(TicketSetupView())
     bot.add_view(NotificacaoView())
     bot.add_view(SairAmistosoView())
 
-    # ConfirmarPresencaView precisa de rank_alvo, rank_id e canal_id
-    # Recria a partir dos amistosos salvos no JSON
+
     try:
         from cogs.backup import ler
         amistosos = ler("amistosos")
         count = 0
         for a in amistosos:
             if a.get("resultado") is not None:
-                continue  # amistoso já encerrado, ignora
+                continue
 
             from cogs.friendly import RANKS, encontrar_rank
             rank_nome = a.get("rank", "")

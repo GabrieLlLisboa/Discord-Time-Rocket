@@ -1,12 +1,6 @@
 import discord
 from discord.ext import commands
 
-# ─────────────────────────────────────────────
-#  Cog: Notificações
-#  Arquivo: cogs/notifications.py
-#  Comando: !notificacoes
-#  Select menu com toggle de cargo
-# ─────────────────────────────────────────────
 
 CARGOS_NOTIFICACAO = {
     "amistosos": {
@@ -42,7 +36,6 @@ CARGOS_NOTIFICACAO = {
 }
 
 
-# ── Select Menu ────────────────────────────────────────────────────────────────
 class NotificacaoSelect(discord.ui.Select):
     def __init__(self):
         opcoes = [
@@ -82,7 +75,7 @@ class NotificacaoSelect(discord.ui.Select):
                 await membro.add_roles(cargo, reason="Toggle notificação")
                 adicionados.append(f"{dados['emoji']} {dados['label']}")
 
-        # Monta resposta
+
         linhas = []
         if adicionados:
             linhas.append("✅ **Ativados:**\n" + "\n".join(f"  {c}" for c in adicionados))
@@ -95,14 +88,12 @@ class NotificacaoSelect(discord.ui.Select):
         )
 
 
-# ── View ───────────────────────────────────────────────────────────────────────
 class NotificacaoView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(NotificacaoSelect())
 
 
-# ── Cog ───────────────────────────────────────────────────────────────────────
 class Notifications(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot

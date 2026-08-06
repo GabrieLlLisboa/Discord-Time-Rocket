@@ -9,19 +9,13 @@ load_dotenv()
 WELCOME_CHANNEL_ID   = int(os.getenv("WELCOME_CHANNEL_ID", 0))
 NOVO_JOGADOR_ROLE_ID = 1514788887300538531
 
-# ─────────────────────────────────────────────
-#  Cog: Boas-vindas
-#  Arquivo: cogs/welcome.py
-#  Evento: on_member_join
-# ─────────────────────────────────────────────
 
-COR_BOAS_VINDAS = 0xFFD700  # dourado vibrante — bem diferente do tom da despedida
+COR_BOAS_VINDAS = 0xFFD700
 
 RANKS = [c for c in CARGOS if c["secao"] == "rank"]
 RANK_IDS = {c["id"] for c in RANKS}
 
 
-# ── Select menu: escolher o rank já dá o cargo na hora ──────────────────────
 class RegistrarRankSelect(discord.ui.Select):
     def __init__(self):
         options = [
@@ -43,7 +37,7 @@ class RegistrarRankSelect(discord.ui.Select):
             await interaction.response.send_message("❌ Não encontrei esse cargo no servidor. Chama a staff!", ephemeral=True)
             return
 
-        # Rank é único — tira qualquer outro rank que a pessoa já tenha antes de dar o novo
+
         cargos_rank_atuais = [r for r in membro.roles if r.id in RANK_IDS and r.id != novo_cargo.id]
 
         try:
@@ -106,11 +100,11 @@ class Welcome(commands.Cog):
         member_count = guild.member_count
         created_at   = discord.utils.format_dt(member.created_at, style="D")
 
-        # Menciona o cargo Notificação Novo Jogador
+
         cargo_novo_jogador = guild.get_role(NOVO_JOGADOR_ROLE_ID)
         mencao_cargo = cargo_novo_jogador.mention if cargo_novo_jogador else ""
 
-        # ── Embed principal ──────────────────────────────
+
         embed = discord.Embed(
             title="🎉 Chegou gente nova!",
             description=(
@@ -134,15 +128,12 @@ class Welcome(commands.Cog):
             icon_url=guild.icon.url if guild.icon else None
         )
 
-        # Menciona a pessoa que entrou + o cargo de Novo Jogador (fora do embed, pra notificar)
+
         conteudo = f"{member.mention} {mencao_cargo}".strip()
 
         await channel.send(content=conteudo, embed=embed, view=BoasVindasView())
         print(f"[WELCOME] ✅ Boas-vindas enviadas para {member} no canal #{channel.name}.")
 
 
-# ─────────────────────────────────────────────
-#  Setup obrigatório para o bot carregar o cog
-# ─────────────────────────────────────────────
 async def setup(bot: commands.Bot):
     await bot.add_cog(Welcome(bot))
