@@ -68,7 +68,6 @@ async def cmd_desligar(bot: discord.Client):
 async def cmd_reiniciar(bot: discord.Client):
     print("[CONSOLE] 🔄 Reiniciando o bot...")
     await _antes_de_matar_o_processo()
-    await bot.close()
     _reiniciar_processo()
 
 
@@ -90,7 +89,6 @@ async def cmd_update(bot: discord.Client):
     await asyncio.sleep(2)
     print("[CONSOLE] 🔄 Reiniciando pra aplicar as mudanças...")
     await _antes_de_matar_o_processo()
-    await bot.close()
     _reiniciar_processo()
 
 
