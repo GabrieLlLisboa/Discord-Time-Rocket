@@ -138,6 +138,7 @@ COGS = [
     "cogs.convites",
     "cogs.whitelist",
     "cogs.staff_tag",
+    "cogs.cargo_equipe_auto",
     "cogs.enquete",
     "cogs.auto_update",
     "cogs.demote",

@@ -78,6 +78,8 @@ class MaisAtivo(commands.Cog):
             print(f"[MAIS_ATIVO] ⚠️ Canal {CANAL_RANKING_ID} não encontrado.")
             return
 
+        controle = _ler_controle()
+
         ranking = sorted(registro_dia.items(), key=lambda par: par[1], reverse=True)
         top_id_str, top_qtd = ranking[0]
 
@@ -114,7 +116,17 @@ class MaisAtivo(commands.Cog):
         embed.set_footer(text="Considera apenas mensagens enviadas — tempo de call não conta aqui.")
 
         try:
-            await canal.send(embed=embed)
+            ultima_id = controle.get("ultima_mensagem_id")
+            if ultima_id:
+                try:
+                    antiga = await canal.fetch_message(ultima_id)
+                    await antiga.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+
+            nova = await canal.send(embed=embed)
+            controle["ultima_mensagem_id"] = nova.id
+            _salvar_controle(controle)
             print(f"[MAIS_ATIVO] ✅ Anunciado usuário mais ativo de {dia}: {top_membro} ({top_qtd} msgs).")
         except discord.HTTPException as e:
             print(f"[MAIS_ATIVO] ⚠️ Erro ao anunciar usuário mais ativo: {e}")
