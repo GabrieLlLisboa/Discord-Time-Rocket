@@ -1,9 +1,11 @@
 import asyncio
 import os
-import subprocess
 import sys
 
 import discord
+
+from update_lock import LOCK
+from git_utils import pull_com_recuperacao_sync
 
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -22,24 +24,13 @@ def _reiniciar_processo():
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
-async def _rodar_git_pull() -> tuple[bool, str]:
-    """Roda git pull em outra thread (é bloqueante) e retorna (sucesso, saida)."""
-    def _executar():
-        return subprocess.run(
-            ["git", "pull"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
+async def _rodar_git_pull() -> tuple[bool, str, bool]:
+    """Roda git pull (com recuperação automática se der conflito de mudança
+    local) em outra thread, já que subprocess é bloqueante."""
     try:
-        resultado = await asyncio.to_thread(_executar)
+        return await asyncio.to_thread(pull_com_recuperacao_sync, REPO_ROOT)
     except Exception as e:
-        return False, str(e)
-
-    saida = (resultado.stdout or "") + (resultado.stderr or "")
-    return resultado.returncode == 0, saida.strip()
+        return False, str(e), False
 
 
 async def _antes_de_matar_o_processo():
@@ -72,24 +63,32 @@ async def cmd_reiniciar(bot: discord.Client):
 
 
 async def cmd_update(bot: discord.Client):
-    print("[CONSOLE] ⬇️  Rodando 'git pull'...")
-    sucesso, saida = await _rodar_git_pull()
-    if saida:
-        print(f"[CONSOLE] {saida}")
-
-    if not sucesso:
-        print("[CONSOLE] ❌ 'git pull' falhou — não vou reiniciar. Resolve o problema (ex: conflito) e tenta de novo.")
+    if LOCK.locked():
+        print("[CONSOLE] ⏳ Já tem uma atualização rolando (provavelmente o auto-update). Espera terminar e tenta de novo.")
         return
 
-    if "Already up to date" in saida or "já está atualizado" in saida.lower():
-        print("[CONSOLE] ✅ Já estava atualizado, nada pra reiniciar.")
-        return
+    async with LOCK:
+        print("[CONSOLE] ⬇️  Rodando 'git pull'...")
+        sucesso, saida, recuperou = await _rodar_git_pull()
+        if saida:
+            print(f"[CONSOLE] {saida}")
 
-    print("[CONSOLE] 🔄 Atualizado! Esperando 2 segundos antes de reiniciar...")
-    await asyncio.sleep(2)
-    print("[CONSOLE] 🔄 Reiniciando pra aplicar as mudanças...")
-    await _antes_de_matar_o_processo()
-    _reiniciar_processo()
+        if not sucesso:
+            print("[CONSOLE] ❌ 'git pull' falhou — não vou reiniciar. Resolve o problema (ex: conflito) e tenta de novo.")
+            return
+
+        if recuperou:
+            print("[CONSOLE] 🩹 O pull tinha travado por causa de mudanças locais, mas eu resolvi sozinho com 'git reset --hard'.")
+
+        if not recuperou and ("Already up to date" in saida or "já está atualizado" in saida.lower()):
+            print("[CONSOLE] ✅ Já estava atualizado, nada pra reiniciar.")
+            return
+
+        print("[CONSOLE] 🔄 Atualizado! Esperando 2 segundos antes de reiniciar...")
+        await asyncio.sleep(2)
+        print("[CONSOLE] 🔄 Reiniciando pra aplicar as mudanças...")
+        await _antes_de_matar_o_processo()
+        _reiniciar_processo()
 
 
 async def executar_comando(bot: discord.Client, comando: str) -> bool:

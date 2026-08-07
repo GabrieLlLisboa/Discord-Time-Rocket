@@ -6,6 +6,9 @@ import subprocess
 import discord
 from discord.ext import commands, tasks
 
+from update_lock import LOCK
+from git_utils import pull_com_recuperacao_sync
+
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,6 +34,12 @@ def _git_sync(*args, timeout: int = 30) -> subprocess.CompletedProcess:
 async def _git(*args, timeout: int = 30) -> subprocess.CompletedProcess:
     """Roda um comando git em outra thread (subprocess é bloqueante)."""
     return await asyncio.to_thread(_git_sync, *args, timeout=timeout)
+
+
+async def _pull_com_recuperacao() -> tuple[bool, str, bool]:
+    """git pull com recuperação automática (git reset --hard) se travar
+    por causa de mudanças locais no working tree."""
+    return await asyncio.to_thread(pull_com_recuperacao_sync, REPO_ROOT)
 
 
 def _repo_valido() -> bool:
@@ -78,29 +87,39 @@ class AutoUpdate(commands.Cog):
     async def checar_atualizacao(self):
         await self.bot.wait_until_ready()
 
+        if LOCK.locked():
+            # já tem um update rolando (manual, via console) — pula esse
+            # ciclo pra não rodar dois "git pull" ao mesmo tempo e corromper
+            # o working tree do git
+            return
+
         local, remoto = await self._commits()
         if local is None or local == remoto:
             return
 
         print(f"[AUTO-UPDATE] 🔄 Commit novo no GitHub detectado ({local[:7]} → {remoto[:7]}). Puxando...")
 
-        pull = await _git("pull")
-        if pull.returncode != 0:
-            print(f"[AUTO-UPDATE] ❌ 'git pull' falhou, não vou reiniciar:\n{pull.stderr.strip()}")
-            return
+        async with LOCK:
+            sucesso, saida, recuperou = await _pull_com_recuperacao()
+            if not sucesso:
+                print(f"[AUTO-UPDATE] ❌ 'git pull' falhou, não vou reiniciar:\n{saida}")
+                return
 
-        if LOG_CHANNEL_ID:
-            canal = self.bot.get_channel(LOG_CHANNEL_ID)
-            if canal is not None:
-                try:
-                    await canal.send(
-                        f"🔄 **Nova versão detectada no GitHub** (`{local[:7]}` → `{remoto[:7]}`). Reiniciando o bot..."
-                    )
-                except discord.HTTPException:
-                    pass
+            if recuperou:
+                print("[AUTO-UPDATE] 🩹 O pull tinha travado por causa de mudanças locais, resolvi sozinho com 'git reset --hard'.")
 
-        print("[AUTO-UPDATE] ✅ Atualizado! Reiniciando...")
-        await self._reiniciar()
+            if LOG_CHANNEL_ID:
+                canal = self.bot.get_channel(LOG_CHANNEL_ID)
+                if canal is not None:
+                    try:
+                        await canal.send(
+                            f"🔄 **Nova versão detectada no GitHub** (`{local[:7]}` → `{remoto[:7]}`). Reiniciando o bot..."
+                        )
+                    except discord.HTTPException:
+                        pass
+
+            print("[AUTO-UPDATE] ✅ Atualizado! Reiniciando...")
+            await self._reiniciar()
 
     @checar_atualizacao.before_loop
     async def antes_do_loop(self):
@@ -108,15 +127,16 @@ class AutoUpdate(commands.Cog):
 
 
     async def _reiniciar(self):
-        try:
-            await self.bot.close()
-        finally:
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
     @commands.command(name="checarupdate", hidden=True)
     async def checar_update_manual(self, ctx: commands.Context):
         if ctx.author.id not in IDS_AUTORIZADOS:
+            return
+
+        if LOCK.locked():
+            await ctx.send("⏳ Já tem uma atualização rolando agora. Espera terminar e tenta de novo.")
             return
 
         msg = await ctx.send("🔎 Checando o GitHub...")
@@ -131,12 +151,16 @@ class AutoUpdate(commands.Cog):
             return
 
         await msg.edit(content=f"🔄 Detectei `{remoto[:7]}` (atual: `{local[:7]}`). Puxando e reiniciando...")
-        pull = await _git("pull")
-        if pull.returncode != 0:
-            await msg.edit(content=f"❌ `git pull` falhou:\n```\n{pull.stderr.strip()[:1800]}\n```")
-            return
+        async with LOCK:
+            sucesso, saida, recuperou = await _pull_com_recuperacao()
+            if not sucesso:
+                await msg.edit(content=f"❌ `git pull` falhou:\n```\n{saida[:1800]}\n```")
+                return
 
-        await self._reiniciar()
+            if recuperou:
+                await ctx.send("🩹 O pull tinha travado por causa de mudanças locais, resolvi sozinho com `git reset --hard`.")
+
+            await self._reiniciar()
 
 
 async def setup(bot: commands.Bot):
