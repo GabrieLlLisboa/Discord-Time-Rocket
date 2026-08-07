@@ -24,6 +24,10 @@ ARQ_CONFIG      = "data/ticket_config.json"
 ARQ_AVALIACOES  = "data/ticket_avaliacoes.json"
 ARQ_TEMPOS      = "data/ticket_tempos.json"
 ARQ_ABERTOS     = "data/ticket_abertos.json"
+ARQ_EXCLUSOES_PENDENTES = "data/ticket_exclusoes_pendentes.json"
+
+# tempo máximo esperando o dono avaliar antes de deletar o canal de qualquer jeito
+TIMEOUT_ESPERA_AVALIACAO_SEGUNDOS = 600
 
 
 def _ler_config() -> dict:
@@ -56,6 +60,14 @@ def _ler_abertos() -> dict:
 
 def _salvar_abertos(dados: dict):
     salvar_json(ARQ_ABERTOS, dados)
+
+
+def _ler_exclusoes_pendentes() -> dict:
+    return ler_json(ARQ_EXCLUSOES_PENDENTES, dict)
+
+
+def _salvar_exclusoes_pendentes(dados: dict):
+    salvar_json(ARQ_EXCLUSOES_PENDENTES, dados)
 
 
 COOLDOWN_SEGUNDOS       = 60
@@ -505,6 +517,40 @@ class ReabrirTicketView(discord.ui.View):
         await cog.reabrir_ticket(interaction)
 
 
+class ForcarExclusaoView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="⏭️ Forçar exclusão (sem esperar avaliação)", style=discord.ButtonStyle.danger, custom_id="ticket_forcar_exclusao")
+    async def forcar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        canal = interaction.channel
+
+        pode_forcar = (
+            interaction.user.guild_permissions.administrator
+            or mu.eh_super_admin(interaction.user.id)
+            or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
+        )
+        if not pode_forcar and canal.name.startswith(f"ticket-{NOMES['dev']}-"):
+            pode_forcar = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+
+        if canal.name.startswith(f"ticket-{NOMES['administracao']}-"):
+            pode_forcar = (
+                interaction.user.guild_permissions.administrator
+                or mu.eh_super_admin(interaction.user.id)
+            )
+
+        if not pode_forcar:
+            await interaction.response.send_message(
+                "❌ Você não tem permissão pra forçar a exclusão deste tíquete.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message("🗑️ Ok, deletando sem esperar a avaliação...", ephemeral=True)
+        cog: "Tickets" = interaction.client.get_cog("Tickets")
+        await cog._deletar_de_fato(canal, motivo=f"exclusão forçada por {interaction.user} (sem avaliação)")
+
+
 class EscolhaFecharView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
@@ -560,11 +606,34 @@ class Tickets(commands.Cog):
             return
 
         dono_id = self._extrair_dono_id(canal.name)
-        if dono_id is None or message.author.id == dono_id:
-            return
 
         abertos = _ler_abertos()
         info = abertos.get(str(canal.id))
+
+        assumido_por = info.get("assumido_por") if info else None
+        if assumido_por and message.author.id not in (dono_id, assumido_por):
+            # ticket assumido por alguém: só o dono do tíquete e quem assumiu
+            # podem falar aqui — mesmo admin sendo admin, a permissão de canal
+            # não segura ele, então apaga a msg na unha
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound):
+                pass
+            try:
+                responsavel = message.guild.get_member(assumido_por)
+                nome = responsavel.mention if responsavel else f"<@{assumido_por}>"
+                aviso = await canal.send(
+                    f"⚠️ {message.author.mention}, esse tíquete já foi assumido por {nome}. "
+                    f"Só ele (ou um admin, clicando em **Assumir Tíquete** de novo) pode responder aqui.",
+                    delete_after=8,
+                )
+            except discord.HTTPException:
+                pass
+            return
+
+        if dono_id is None or message.author.id == dono_id:
+            return
+
         if info is None or info.get("respondido"):
             return
 
@@ -617,6 +686,14 @@ class Tickets(commands.Cog):
 
         await interaction.response.edit_message(embed=embed, view=None)
         await self.registrar_avaliacao(interaction.guild, nota)
+
+        pendentes = _ler_exclusoes_pendentes()
+        if str(interaction.channel.id) in pendentes:
+            try:
+                await interaction.channel.send("🗑️ Valeu pela avaliação! Deletando o tíquete agora...")
+            except discord.HTTPException:
+                pass
+            await self._deletar_de_fato(interaction.channel, motivo="avaliação registrada")
 
 
     async def registrar_avaliacao(self, guild: discord.Guild, nota: int):
@@ -795,17 +872,46 @@ class Tickets(commands.Cog):
         self._remover_ticket_aberto(canal.id)
 
         if deletar:
-            try:
-                await canal.send("🗑️ Este tíquete será **deletado** em instantes. A transcrição foi enviada na sua DM.")
-            except discord.HTTPException:
-                pass
-            try:
-                await interaction.followup.send("🗑️ Tíquete será deletado em alguns segundos...", ephemeral=True)
-            except discord.HTTPException:
-                pass
-            await asyncio.sleep(8)
-            await canal.delete(reason=f"Tíquete deletado por {interaction.user}")
-            print(f"[TICKET] 🗑️ Canal {canal.name} deletado por {interaction.user}.")
+            if dono_id:
+                pendentes = _ler_exclusoes_pendentes()
+                pendentes[str(canal.id)] = {
+                    "dono_id": dono_id,
+                    "guild_id": guild.id,
+                    "solicitado_por": interaction.user.id,
+                    "criado_em": time.time(),
+                }
+                _salvar_exclusoes_pendentes(pendentes)
+
+                try:
+                    await canal.send(
+                        f"🗑️ Esse tíquete vai ser **deletado automaticamente assim que "
+                        f"{dono.mention if dono else 'o dono'} avaliar o atendimento** ali em cima "
+                        f"(ou em até {TIMEOUT_ESPERA_AVALIACAO_SEGUNDOS // 60} minutos, o que vier primeiro).",
+                        view=ForcarExclusaoView(),
+                    )
+                except discord.HTTPException:
+                    pass
+                try:
+                    await interaction.followup.send(
+                        "🗑️ Vou esperar a avaliação antes de deletar (ou forçar depois se precisar).",
+                        ephemeral=True
+                    )
+                except discord.HTTPException:
+                    pass
+
+                asyncio.create_task(self._aguardar_avaliacao_e_deletar(canal.id))
+                print(f"[TICKET] ⏳ Canal {canal.name} aguardando avaliação antes de deletar (pedido por {interaction.user}).")
+            else:
+
+                try:
+                    await canal.send("🗑️ Este tíquete será **deletado** em instantes. A transcrição foi enviada na sua DM.")
+                except discord.HTTPException:
+                    pass
+                try:
+                    await interaction.followup.send("🗑️ Tíquete será deletado em alguns segundos...", ephemeral=True)
+                except discord.HTTPException:
+                    pass
+                await self._deletar_de_fato(canal, motivo=f"tíquete deletado por {interaction.user} (sem dono identificável)")
         else:
             try:
                 if dono:
@@ -826,6 +932,45 @@ class Tickets(commands.Cog):
             except discord.HTTPException:
                 pass
             print(f"[TICKET] 🔒 Canal {canal.name} fechado (não deletado) por {interaction.user}.")
+
+
+    async def _deletar_de_fato(self, canal: discord.TextChannel, motivo: str):
+        pendentes = _ler_exclusoes_pendentes()
+        if str(canal.id) in pendentes:
+            del pendentes[str(canal.id)]
+            _salvar_exclusoes_pendentes(pendentes)
+
+        try:
+            await canal.delete(reason=motivo)
+            print(f"[TICKET] 🗑️ Canal {canal.name} deletado ({motivo}).")
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as e:
+            print(f"[TICKET] ⚠️ Erro ao deletar canal {canal.name}: {e}")
+
+    async def _aguardar_avaliacao_e_deletar(self, canal_id: int):
+        """Se o dono não avaliar em TIMEOUT_ESPERA_AVALIACAO_SEGUNDOS, deleta
+        o canal de qualquer jeito (senão o tíquete ficaria aberto pra sempre
+        caso o dono nunca clique em avaliar)."""
+        await asyncio.sleep(TIMEOUT_ESPERA_AVALIACAO_SEGUNDOS)
+
+        pendentes = _ler_exclusoes_pendentes()
+        if str(canal_id) not in pendentes:
+
+            return
+
+        canal = self.bot.get_channel(canal_id)
+        if canal is None:
+            del pendentes[str(canal_id)]
+            _salvar_exclusoes_pendentes(pendentes)
+            return
+
+        try:
+            await canal.send("⏳ Ninguém avaliou o atendimento a tempo, deletando o tíquete agora.")
+        except discord.HTTPException:
+            pass
+
+        await self._deletar_de_fato(canal, motivo="timeout esperando avaliação")
 
 
     async def assumir_ticket(self, interaction: discord.Interaction):
@@ -945,6 +1090,11 @@ class Tickets(commands.Cog):
         registro_abertos = _ler_abertos()
         registro_abertos[str(canal.id)] = {"criado_em": time.time(), "respondido": False}
         _salvar_abertos(registro_abertos)
+
+        pendentes = _ler_exclusoes_pendentes()
+        if str(canal.id) in pendentes:
+            del pendentes[str(canal.id)]
+            _salvar_exclusoes_pendentes(pendentes)
 
 
         try:

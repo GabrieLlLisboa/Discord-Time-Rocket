@@ -251,7 +251,7 @@ async def registrar_views_persistentes():
     botões de confirmar presença quando houvesse 2+ amistosos abertos
     ao mesmo tempo.
     """
-    from cogs.tickets import TicketSetupView, FecharTicketView, ReabrirTicketView
+    from cogs.tickets import TicketSetupView, FecharTicketView, ReabrirTicketView, ForcarExclusaoView
     from cogs.notifications import NotificacaoView
     from cogs.tracker import TrackerView
     from cogs.welcome import BoasVindasView
@@ -262,6 +262,7 @@ async def registrar_views_persistentes():
     bot.add_view(TicketSetupView())
     bot.add_view(FecharTicketView())
     bot.add_view(ReabrirTicketView())
+    bot.add_view(ForcarExclusaoView())
     bot.add_view(NotificacaoView())
     bot.add_view(TrackerView())
     bot.add_view(BoasVindasView())
