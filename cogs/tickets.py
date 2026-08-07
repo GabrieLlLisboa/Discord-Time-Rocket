@@ -410,10 +410,15 @@ class TicketSelect(discord.ui.Select):
 
 
         view = FecharTicketView()
+        cargo_equipe_no_canal = valor != "administracao" and guild.get_role(CARGO_EQUIPE_ID) is not None
+        conteudo = membro.mention
+        if cargo_equipe_no_canal:
+            conteudo = f"{membro.mention} <@&{CARGO_EQUIPE_ID}>"
+
         if arquivo_imagem:
-            await canal.send(content=membro.mention, embed=embed, view=view, file=arquivo_imagem)
+            await canal.send(content=conteudo, embed=embed, view=view, file=arquivo_imagem)
         else:
-            await canal.send(content=membro.mention, embed=embed, view=view)
+            await canal.send(content=conteudo, embed=embed, view=view)
 
         await interaction.response.send_message(
             f"✅ Tíquete aberto! Acesse: {canal.mention}",
@@ -426,7 +431,12 @@ class FecharTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🔒 Fechar Tíquete", style=discord.ButtonStyle.danger, custom_id="fechar_ticket")
+    @discord.ui.button(label="🙋 Assumir Tíquete", style=discord.ButtonStyle.primary, custom_id="assumir_ticket", row=0)
+    async def assumir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog: "Tickets" = interaction.client.get_cog("Tickets")
+        await cog.assumir_ticket(interaction)
+
+    @discord.ui.button(label="🔒 Fechar Tíquete", style=discord.ButtonStyle.danger, custom_id="fechar_ticket", row=0)
     async def fechar(self, interaction: discord.Interaction, button: discord.ui.Button):
 
 
@@ -575,6 +585,8 @@ class Tickets(commands.Cog):
         abertos[str(canal.id)] = info
         _salvar_abertos(abertos)
 
+        await self.atualizar_embed_tempo(message.guild)
+
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
@@ -677,6 +689,58 @@ class Tickets(commands.Cog):
         _salvar_config(cfg)
 
 
+    async def atualizar_embed_tempo(self, guild: discord.Guild):
+        cfg = _ler_config()
+        canal_id = cfg.get("setup_channel_id")
+        if not canal_id:
+            return
+
+        canal = guild.get_channel(canal_id) or self.bot.get_channel(canal_id)
+        if canal is None:
+            return
+
+        tempos = _ler_tempos()
+        total = tempos.get("total", 0)
+        soma = tempos.get("soma_segundos", 0)
+        media = (soma / total) if total > 0 else None
+
+        embed = discord.Embed(
+            title="⏱️ Tempo médio de resposta da equipe",
+            description=(
+                f"**{_formatar_duracao(media)}** — baseado em {total} atendimento(s)"
+                if total > 0 else
+                "Ainda não temos atendimentos suficientes pra calcular a média."
+            ),
+            color=0x5865F2,
+        )
+        embed.set_footer(text="Atualizado automaticamente sempre que a equipe responde um tíquete pela primeira vez.")
+
+        mensagem = None
+        tempo_msg_id = cfg.get("tempo_message_id")
+        if tempo_msg_id:
+            try:
+                mensagem = await canal.fetch_message(tempo_msg_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                mensagem = None
+
+        if mensagem:
+            try:
+                await mensagem.edit(embed=embed)
+                return
+            except discord.HTTPException:
+                pass
+
+        try:
+            nova = await canal.send(embed=embed)
+        except discord.HTTPException as e:
+            print(f"[TICKET] ⚠️ Não consegui mandar a embed de tempo médio de resposta: {e}")
+            return
+
+        cfg["tempo_message_id"] = nova.id
+        cfg["setup_channel_id"] = canal.id
+        _salvar_config(cfg)
+
+
     async def finalizar_ticket(self, interaction: discord.Interaction, deletar: bool):
         canal = interaction.channel
         guild = interaction.guild
@@ -762,6 +826,100 @@ class Tickets(commands.Cog):
             except discord.HTTPException:
                 pass
             print(f"[TICKET] 🔒 Canal {canal.name} fechado (não deletado) por {interaction.user}.")
+
+
+    async def assumir_ticket(self, interaction: discord.Interaction):
+        canal = interaction.channel
+        guild = interaction.guild
+
+        pode_assumir = (
+            interaction.user.guild_permissions.administrator
+            or mu.eh_super_admin(interaction.user.id)
+            or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
+        )
+        if not pode_assumir and canal.name.startswith(f"ticket-{NOMES['dev']}-"):
+            pode_assumir = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+
+        if canal.name.startswith(f"ticket-{NOMES['administracao']}-"):
+            pode_assumir = (
+                interaction.user.guild_permissions.administrator
+                or mu.eh_super_admin(interaction.user.id)
+            )
+
+        if not pode_assumir:
+            await interaction.response.send_message(
+                "❌ Você não tem permissão para assumir este tíquete.",
+                ephemeral=True
+            )
+            return
+
+        abertos = _ler_abertos()
+        info = abertos.get(str(canal.id), {})
+        assumido_por = info.get("assumido_por")
+
+        if assumido_por and assumido_por != interaction.user.id:
+            responsavel = guild.get_member(assumido_por)
+            nome = responsavel.mention if responsavel else f"<@{assumido_por}>"
+            eh_admin = interaction.user.guild_permissions.administrator or mu.eh_super_admin(interaction.user.id)
+            if not eh_admin:
+                await interaction.response.send_message(
+                    f"⚠️ Esse tíquete já foi assumido por {nome}. Só um administrador pode passar pra outra pessoa.",
+                    ephemeral=True
+                )
+                return
+
+        if assumido_por == interaction.user.id:
+
+            cargos_bloqueados = info.get("cargos_bloqueados", [])
+            for cargo_id in cargos_bloqueados:
+                cargo = guild.get_role(cargo_id)
+                if cargo is not None:
+                    try:
+                        await canal.set_permissions(cargo, view_channel=True, send_messages=True)
+                    except discord.Forbidden:
+                        pass
+            try:
+                await canal.set_permissions(interaction.user, overwrite=None)
+            except discord.Forbidden:
+                pass
+
+            info["assumido_por"] = None
+            info["cargos_bloqueados"] = []
+            abertos[str(canal.id)] = info
+            _salvar_abertos(abertos)
+
+            await interaction.response.send_message(
+                f"🔓 {interaction.user.mention} liberou o tíquete. A equipe toda pode responder de novo.",
+            )
+            return
+
+
+        cargos_bloqueados = []
+        for alvo, overwrite in list(canal.overwrites.items()):
+            if isinstance(alvo, discord.Role) and overwrite.send_messages:
+                try:
+                    await canal.set_permissions(alvo, overwrite=discord.PermissionOverwrite(
+                        view_channel=True, send_messages=False
+                    ))
+                    cargos_bloqueados.append(alvo.id)
+                except discord.Forbidden:
+                    pass
+
+        try:
+            await canal.set_permissions(interaction.user, view_channel=True, send_messages=True)
+        except discord.Forbidden:
+            pass
+
+        info["assumido_por"] = interaction.user.id
+        info["cargos_bloqueados"] = cargos_bloqueados
+        abertos[str(canal.id)] = info
+        _salvar_abertos(abertos)
+
+        await interaction.response.send_message(
+            f"🙋 {interaction.user.mention} assumiu esse tíquete. Só ele vai poder responder por aqui agora "
+            f"(clica em **Assumir Tíquete** de novo pra liberar)."
+        )
+        print(f"[TICKET] 🙋 {interaction.user} assumiu o tíquete {canal.name}.")
 
 
     async def reabrir_ticket(self, interaction: discord.Interaction):
@@ -858,6 +1016,7 @@ class Tickets(commands.Cog):
             print(f"[TICKET] ✅ Painel de tíquetes enviado em #{ctx.channel.name} por {ctx.author}.")
 
         await self.atualizar_embed_media(ctx.guild)
+        await self.atualizar_embed_tempo(ctx.guild)
 
     @setup.error
     async def setup_error(self, ctx, error):
