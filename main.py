@@ -65,7 +65,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from cogs.mod_utils import SUPER_ADMIN_IDS
+from cogs.mod_utils import SUPER_ADMIN_IDS, eh_super_admin_membro
 
 load_dotenv()
 TOKEN    = os.getenv("DISCORD_TOKEN")
@@ -196,7 +196,7 @@ def liberar_super_admins():
             continue
 
         async def _check_liberado(ctx, _checks=checks_originais):
-            if ctx.author.id in SUPER_ADMIN_IDS:
+            if eh_super_admin_membro(ctx.author):
                 return True
             for check in _checks:
                 if not await _resultado_check(check, ctx):
@@ -216,7 +216,7 @@ def liberar_super_admins():
             continue
 
         async def _check_liberado_slash(interaction, _checks=checks_originais):
-            if interaction.user.id in SUPER_ADMIN_IDS:
+            if eh_super_admin_membro(interaction.user):
                 return True
             for check in _checks:
                 if not await _resultado_check(check, interaction):
@@ -252,7 +252,7 @@ async def registrar_views_persistentes():
     botões de confirmar presença quando houvesse 2+ amistosos abertos
     ao mesmo tempo.
     """
-    from cogs.tickets import TicketSetupView, FecharTicketView, ReabrirTicketView, ForcarExclusaoView
+    from cogs.tickets import TicketSetupView, FecharTicketView, ReabrirTicketView, ForcarExclusaoView, AbrirTicketDevView
     from cogs.notifications import NotificacaoView
     from cogs.tracker import TrackerView
     from cogs.welcome import BoasVindasView
@@ -264,6 +264,7 @@ async def registrar_views_persistentes():
     bot.add_view(FecharTicketView())
     bot.add_view(ReabrirTicketView())
     bot.add_view(ForcarExclusaoView())
+    bot.add_view(AbrirTicketDevView())
     bot.add_view(NotificacaoView())
     bot.add_view(TrackerView())
     bot.add_view(BoasVindasView())

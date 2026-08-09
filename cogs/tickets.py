@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
+from discord import app_commands
 
 from cogs import mod_utils as mu
 from cogs.json_store import ler_json, salvar_json
@@ -133,6 +134,11 @@ CORES = {
 
 
 CARGO_DESENVOLVIMENTO_ID = 1525540085112770746
+
+# cargos marcados na abertura de tíquete de desenvolvimento (no lugar do
+# cargo de equipe normal)
+CARGO_DEV_PING_1 = 1532739361198833874
+CARGO_DEV_PING_2 = CARGO_DESENVOLVIMENTO_ID
 
 
 CARGO_EQUIPE_ID = 1532184563491541164
@@ -296,6 +302,142 @@ def _montar_view_avaliacao(dono_id: int) -> discord.ui.View:
     return view
 
 
+async def criar_ticket(interaction: discord.Interaction, valor: str):
+    guild     = interaction.guild
+    membro    = interaction.user
+
+
+    agora  = time.monotonic()
+    ultima = _ultima_criacao.get(membro.id)
+    if ultima is not None and (agora - ultima) < COOLDOWN_SEGUNDOS:
+        restante = int(COOLDOWN_SEGUNDOS - (agora - ultima)) + 1
+        await interaction.response.send_message(
+            f"⏳ Aguarde `{restante}s` antes de abrir outro tíquete.",
+            ephemeral=True
+        )
+        return
+
+
+    nome_canal = f"ticket-{NOMES[valor]}-{membro.id}"
+
+
+    existente = discord.utils.get(guild.text_channels, name=nome_canal)
+    if existente:
+        await interaction.response.send_message(
+            f"⚠️ Você já tem um tíquete aberto: {existente.mention}",
+            ephemeral=True
+        )
+        return
+
+
+    abertos = [
+        c for c in guild.text_channels
+        if c.name.startswith("ticket-") and c.name.endswith(f"-{membro.id}")
+    ]
+    if len(abertos) >= MAX_TICKETS_SIMULTANEOS:
+        await interaction.response.send_message(
+            f"⚠️ Você já possui `{len(abertos)}` tíquete(s) aberto(s) "
+            f"(limite: `{MAX_TICKETS_SIMULTANEOS}`). Feche algum antes de abrir outro.",
+            ephemeral=True
+        )
+        return
+
+
+    _ultima_criacao[membro.id] = agora
+
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        membro:             discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        guild.me:           discord.PermissionOverwrite(view_channel=True, send_messages=True),
+    }
+
+    if valor == "dev":
+
+
+        cargo_dev = guild.get_role(CARGO_DESENVOLVIMENTO_ID)
+        if cargo_dev is not None:
+            overwrites[cargo_dev] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        else:
+            print(f"[TICKET] ⚠️ Cargo de Desenvolvimento ({CARGO_DESENVOLVIMENTO_ID}) não encontrado no servidor.")
+
+        cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
+        if cargo_equipe is not None:
+            overwrites[cargo_equipe] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+    elif valor == "administracao":
+
+
+        for role in guild.roles:
+            if role.permissions.administrator:
+                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+    else:
+
+        for role in guild.roles:
+            if role.permissions.administrator:
+                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+
+        cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
+        if cargo_equipe is not None:
+            overwrites[cargo_equipe] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        else:
+            print(f"[TICKET] ⚠️ Cargo da equipe ({CARGO_EQUIPE_ID}) não encontrado no servidor.")
+
+
+    canal = await guild.create_text_channel(
+        name=nome_canal,
+        overwrites=overwrites,
+        reason=f"Tíquete aberto por {membro} — {valor}"
+    )
+
+
+    registro_abertos = _ler_abertos()
+    registro_abertos[str(canal.id)] = {"criado_em": time.time(), "respondido": False}
+    _salvar_abertos(registro_abertos)
+
+
+    rotulo = next((o.label for o in CATEGORIAS if o.value == valor), valor)
+    embed = discord.Embed(
+        title=f"Tíquete — {rotulo}",
+        description=(
+            f"Olá, {membro.mention}! 👋\n\n"
+            f"A equipe irá te atender em breve.\n"
+            f"Descreva seu problema ou dúvida abaixo."
+        ),
+        color=CORES[valor]
+    )
+    embed.set_footer(text="Pra fechar este tíquete, clique no botão abaixo.")
+    embed.set_thumbnail(url=membro.display_avatar.url)
+
+
+    tempos = _ler_tempos()
+    total_t = tempos.get("total", 0)
+    media_t = (tempos.get("soma_segundos", 0) / total_t) if total_t > 0 else None
+    arquivo_imagem = gerar_imagem_tempo_resposta(media_t, total_t)
+    if arquivo_imagem:
+        embed.set_image(url="attachment://tempo_resposta.png")
+
+
+    view = FecharTicketView()
+    conteudo = membro.mention
+    if valor == "dev":
+        # ticket de dev não marca o cargo de equipe, marca só esses dois
+        # cargos específicos de desenvolvimento
+        conteudo = f"{membro.mention} <@&{CARGO_DEV_PING_1}> <@&{CARGO_DEV_PING_2}>"
+    elif valor != "administracao" and guild.get_role(CARGO_EQUIPE_ID) is not None:
+        conteudo = f"{membro.mention} <@&{CARGO_EQUIPE_ID}>"
+
+    if arquivo_imagem:
+        await canal.send(content=conteudo, embed=embed, view=view, file=arquivo_imagem)
+    else:
+        await canal.send(content=conteudo, embed=embed, view=view)
+
+    await interaction.response.send_message(
+        f"✅ Tíquete aberto! Acesse: {canal.mention}",
+        ephemeral=True
+    )
+    print(f"[TICKET] ✅ Canal {nome_canal} criado para {membro}.")
+
+
 class TicketSelect(discord.ui.Select):
     def __init__(self):
         super().__init__(
@@ -307,136 +449,16 @@ class TicketSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        valor     = self.values[0]
-        guild     = interaction.guild
-        membro    = interaction.user
+        await criar_ticket(interaction, self.values[0])
 
 
-        agora  = time.monotonic()
-        ultima = _ultima_criacao.get(membro.id)
-        if ultima is not None and (agora - ultima) < COOLDOWN_SEGUNDOS:
-            restante = int(COOLDOWN_SEGUNDOS - (agora - ultima)) + 1
-            await interaction.response.send_message(
-                f"⏳ Aguarde `{restante}s` antes de abrir outro tíquete.",
-                ephemeral=True
-            )
-            return
+class AbrirTicketDevView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-
-        nome_canal = f"ticket-{NOMES[valor]}-{membro.id}"
-
-
-        existente = discord.utils.get(guild.text_channels, name=nome_canal)
-        if existente:
-            await interaction.response.send_message(
-                f"⚠️ Você já tem um tíquete aberto: {existente.mention}",
-                ephemeral=True
-            )
-            return
-
-
-        abertos = [
-            c for c in guild.text_channels
-            if c.name.startswith("ticket-") and c.name.endswith(f"-{membro.id}")
-        ]
-        if len(abertos) >= MAX_TICKETS_SIMULTANEOS:
-            await interaction.response.send_message(
-                f"⚠️ Você já possui `{len(abertos)}` tíquete(s) aberto(s) "
-                f"(limite: `{MAX_TICKETS_SIMULTANEOS}`). Feche algum antes de abrir outro.",
-                ephemeral=True
-            )
-            return
-
-
-        _ultima_criacao[membro.id] = agora
-
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            membro:             discord.PermissionOverwrite(view_channel=True, send_messages=True),
-            guild.me:           discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        }
-
-        if valor == "dev":
-
-
-            cargo_dev = guild.get_role(CARGO_DESENVOLVIMENTO_ID)
-            if cargo_dev is not None:
-                overwrites[cargo_dev] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-            else:
-                print(f"[TICKET] ⚠️ Cargo de Desenvolvimento ({CARGO_DESENVOLVIMENTO_ID}) não encontrado no servidor.")
-
-            cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
-            if cargo_equipe is not None:
-                overwrites[cargo_equipe] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-        elif valor == "administracao":
-
-
-            for role in guild.roles:
-                if role.permissions.administrator:
-                    overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-        else:
-
-            for role in guild.roles:
-                if role.permissions.administrator:
-                    overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-
-            cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
-            if cargo_equipe is not None:
-                overwrites[cargo_equipe] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-            else:
-                print(f"[TICKET] ⚠️ Cargo da equipe ({CARGO_EQUIPE_ID}) não encontrado no servidor.")
-
-
-        canal = await guild.create_text_channel(
-            name=nome_canal,
-            overwrites=overwrites,
-            reason=f"Tíquete aberto por {membro} — {valor}"
-        )
-
-
-        registro_abertos = _ler_abertos()
-        registro_abertos[str(canal.id)] = {"criado_em": time.time(), "respondido": False}
-        _salvar_abertos(registro_abertos)
-
-
-        embed = discord.Embed(
-            title=f"Tíquete — {self.options[[o.value for o in self.options].index(valor)].label}",
-            description=(
-                f"Olá, {membro.mention}! 👋\n\n"
-                f"A equipe irá te atender em breve.\n"
-                f"Descreva seu problema ou dúvida abaixo."
-            ),
-            color=CORES[valor]
-        )
-        embed.set_footer(text="Pra fechar este tíquete, clique no botão abaixo.")
-        embed.set_thumbnail(url=membro.display_avatar.url)
-
-
-        tempos = _ler_tempos()
-        total_t = tempos.get("total", 0)
-        media_t = (tempos.get("soma_segundos", 0) / total_t) if total_t > 0 else None
-        arquivo_imagem = gerar_imagem_tempo_resposta(media_t, total_t)
-        if arquivo_imagem:
-            embed.set_image(url="attachment://tempo_resposta.png")
-
-
-        view = FecharTicketView()
-        cargo_equipe_no_canal = valor != "administracao" and guild.get_role(CARGO_EQUIPE_ID) is not None
-        conteudo = membro.mention
-        if cargo_equipe_no_canal:
-            conteudo = f"{membro.mention} <@&{CARGO_EQUIPE_ID}>"
-
-        if arquivo_imagem:
-            await canal.send(content=conteudo, embed=embed, view=view, file=arquivo_imagem)
-        else:
-            await canal.send(content=conteudo, embed=embed, view=view)
-
-        await interaction.response.send_message(
-            f"✅ Tíquete aberto! Acesse: {canal.mention}",
-            ephemeral=True
-        )
-        print(f"[TICKET] ✅ Canal {nome_canal} criado para {membro}.")
+    @discord.ui.button(label="📂 Abrir Tíquete de Desenvolvimento", style=discord.ButtonStyle.primary, custom_id="abrir_ticket_dev")
+    async def abrir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await criar_ticket(interaction, "dev")
 
 
 class FecharTicketView(discord.ui.View):
@@ -1121,6 +1143,32 @@ class Tickets(commands.Cog):
             pass
 
         print(f"[TICKET] 🔓 Canal {canal.name} reaberto por {interaction.user}.")
+
+    @app_commands.command(name="chamado", description="Chama um usuário pra abrir um tíquete de desenvolvimento.")
+    @app_commands.describe(user="Quem você quer chamar")
+    async def chamado(self, interaction: discord.Interaction, user: discord.Member):
+        pode_usar = (
+            interaction.user.guild_permissions.administrator
+            or mu.eh_super_admin_membro(interaction.user)
+            or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
+            or any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+        )
+        if not pode_usar:
+            await interaction.response.send_message(
+                "❌ Você não tem permissão para usar este comando.",
+                ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            description=(
+                f"Olá {user.mention}!\n"
+                "Se você ainda não abriu um tíquete na seção de desenvolvimento, eu não posso te ajudar! "
+                "Clique no botão abaixo pra abrir um tíquete na seção de desenvolvimento e eu te ajudar no seu problema."
+            ),
+            color=0x9B59B6
+        )
+        await interaction.response.send_message(content=user.mention, embed=embed, view=AbrirTicketDevView())
 
     @commands.command(name="setup")
     @commands.has_permissions(administrator=True)

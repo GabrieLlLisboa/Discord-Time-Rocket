@@ -259,9 +259,26 @@ def punicoes_ativas_temporarias(guild_id: int) -> list:
 
 SUPER_ADMIN_IDS = {1487452210605588592}
 
+# cargo(s) que funcionam como "dono" — quem tiver um desses cargos passa a
+# ter acesso liberado nos comandos igual quem tá em SUPER_ADMIN_IDS, sem
+# precisar cadastrar o ID da pessoa na mão
+SUPER_ADMIN_ROLE_IDS = {1523835085475020932}
+
 
 def eh_super_admin(user_id: int) -> bool:
     return user_id in SUPER_ADMIN_IDS
+
+
+def eh_super_admin_membro(membro) -> bool:
+    """Igual eh_super_admin, mas também libera quem tem um dos cargos
+    listados em SUPER_ADMIN_ROLE_IDS (não precisa nem ser o dono de fato,
+    só ter o cargo)."""
+    if eh_super_admin(getattr(membro, "id", None)):
+        return True
+    cargos = getattr(membro, "roles", None)
+    if not cargos:
+        return False
+    return any(cargo.id in SUPER_ADMIN_ROLE_IDS for cargo in cargos)
 
 
 def eh_staff(member: discord.Member, guild_id: int) -> bool:
