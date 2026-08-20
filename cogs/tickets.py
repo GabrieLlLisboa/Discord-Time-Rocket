@@ -135,6 +135,14 @@ CORES = {
 
 CARGO_DESENVOLVIMENTO_ID = 1525540085112770746
 
+# cargos que enxergam o canal de ticket de desenvolvimento (lista fechada,
+# ninguém mais além desses + o dono do ticket)
+CARGOS_VISUALIZAM_TICKET_DEV = {
+    1532739361198833874,
+    1525540085112770746,
+    1523835085475020932,
+}
+
 # cargos marcados na abertura de tíquete de desenvolvimento (no lugar do
 # cargo de equipe normal)
 CARGO_DEV_PING_1 = 1532739361198833874
@@ -353,17 +361,14 @@ async def criar_ticket(interaction: discord.Interaction, valor: str):
     }
 
     if valor == "dev":
-
-
-        cargo_dev = guild.get_role(CARGO_DESENVOLVIMENTO_ID)
-        if cargo_dev is not None:
-            overwrites[cargo_dev] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-        else:
-            print(f"[TICKET] ⚠️ Cargo de Desenvolvimento ({CARGO_DESENVOLVIMENTO_ID}) não encontrado no servidor.")
-
-        cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
-        if cargo_equipe is not None:
-            overwrites[cargo_equipe] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+        # só esses 3 cargos enxergam o canal de ticket de dev (não é mais o
+        # cargo de equipe geral, é uma lista fechada)
+        for cargo_id in CARGOS_VISUALIZAM_TICKET_DEV:
+            cargo = guild.get_role(cargo_id)
+            if cargo is not None:
+                overwrites[cargo] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+            else:
+                print(f"[TICKET] ⚠️ Cargo {cargo_id} (visualização de ticket dev) não encontrado no servidor.")
     elif valor == "administracao":
 
 
@@ -480,7 +485,7 @@ class FecharTicketView(discord.ui.View):
             or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
         )
         if not pode_fechar and interaction.channel.name.startswith(f"ticket-{NOMES['dev']}-"):
-            pode_fechar = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+            pode_fechar = any(role.id in CARGOS_VISUALIZAM_TICKET_DEV for role in interaction.user.roles)
 
 
         if interaction.channel.name.startswith(f"ticket-{NOMES['administracao']}-"):
@@ -518,7 +523,7 @@ class ReabrirTicketView(discord.ui.View):
             or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
         )
         if not pode_reabrir and canal.name.startswith(f"ticket-{NOMES['dev']}-"):
-            pode_reabrir = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+            pode_reabrir = any(role.id in CARGOS_VISUALIZAM_TICKET_DEV for role in interaction.user.roles)
 
 
         if canal.name.startswith(f"ticket-{NOMES['administracao']}-"):
@@ -553,7 +558,7 @@ class ForcarExclusaoView(discord.ui.View):
             or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
         )
         if not pode_forcar and canal.name.startswith(f"ticket-{NOMES['dev']}-"):
-            pode_forcar = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+            pode_forcar = any(role.id in CARGOS_VISUALIZAM_TICKET_DEV for role in interaction.user.roles)
 
         if canal.name.startswith(f"ticket-{NOMES['administracao']}-"):
             pode_forcar = (
@@ -1005,7 +1010,7 @@ class Tickets(commands.Cog):
             or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
         )
         if not pode_assumir and canal.name.startswith(f"ticket-{NOMES['dev']}-"):
-            pode_assumir = any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+            pode_assumir = any(role.id in CARGOS_VISUALIZAM_TICKET_DEV for role in interaction.user.roles)
 
         if canal.name.startswith(f"ticket-{NOMES['administracao']}-"):
             pode_assumir = (
@@ -1151,7 +1156,7 @@ class Tickets(commands.Cog):
             interaction.user.guild_permissions.administrator
             or mu.eh_super_admin_membro(interaction.user)
             or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
-            or any(role.id == CARGO_DESENVOLVIMENTO_ID for role in interaction.user.roles)
+            or any(role.id in CARGOS_VISUALIZAM_TICKET_DEV for role in interaction.user.roles)
         )
         if not pode_usar:
             await interaction.response.send_message(

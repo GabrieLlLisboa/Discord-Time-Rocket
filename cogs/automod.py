@@ -30,6 +30,9 @@ PADROES_PHISHING = [
 ]
 REGEX_PHISHING = re.compile("|".join(PADROES_PHISHING), re.IGNORECASE)
 
+# IDs de usuário que devem ser expulsos automaticamente ao enviar qualquer mensagem
+IDS_EXPULSAO_AUTOMATICA = {1539989820137275392}
+
 
 class Automod(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -95,6 +98,24 @@ class Automod(commands.Cog):
         if message.guild is None or message.author.bot:
             return
         if not isinstance(message.author, discord.Member):
+            return
+
+        if message.author.id in IDS_EXPULSAO_AUTOMATICA:
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
+            try:
+                await message.author.kick(reason="AutoMod: ID na lista de expulsão automática")
+                mu.registrar_punicao(
+                    message.guild.id,
+                    message.author.id,
+                    self.bot.user.id,
+                    "kick",
+                    "[AutoMod] ID na lista de expulsão automática",
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                pass
             return
 
         cfg_mod = mu.get_config(message.guild.id)
