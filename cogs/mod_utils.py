@@ -496,6 +496,41 @@ class ConfirmarView(discord.ui.View):
         self.valor = False
 
 
+# IDs dos canais de voz "lobby" pra onde o pessoal é realocado quando um
+# amistoso termina e a call dele vai ser apagada.
+CANAIS_VOZ_POS_AMISTOSO = [1514777010293964830, 1532926276464279563]
+
+
+async def mover_membros_pos_amistoso(bot: discord.Client, canal_voz: discord.VoiceChannel):
+    """Move todo mundo que ainda tá na call do amistoso pra um canal de voz
+    'lobby' antes da call do amistoso ser apagada. Chame isso ANTES de
+    deletar o canal de voz do amistoso, senão os membros só são
+    desconectados (não são transferidos)."""
+    if canal_voz is None:
+        return
+
+    membros = list(canal_voz.members)
+    if not membros:
+        return
+
+    guild = canal_voz.guild
+    destinos = [guild.get_channel(cid) for cid in CANAIS_VOZ_POS_AMISTOSO]
+    destinos = [c for c in destinos if isinstance(c, discord.VoiceChannel)]
+    if not destinos:
+        print("[AMISTOSO] ⚠️ Nenhum dos canais de voz de destino (lobby) foi encontrado.")
+        return
+
+    destino = next((c for c in destinos if len(c.members) == 0), destinos[0])
+
+    for membro in membros:
+        try:
+            await membro.move_to(destino, reason="Fim do amistoso — realocado da call do amistoso.")
+        except discord.Forbidden:
+            print(f"[AMISTOSO] ⚠️ Sem permissão pra mover {membro} pra {destino.name}.")
+        except discord.HTTPException as e:
+            print(f"[AMISTOSO] ⚠️ Erro ao mover {membro} pra {destino.name}: {e}")
+
+
 async def confirmar_acao(interaction: discord.Interaction, titulo: str, descricao: str,
                           exigir: bool = True) -> tuple[bool, discord.Interaction]:
     """

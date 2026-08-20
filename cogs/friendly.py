@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
+from cogs import mod_utils as mu
 
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
@@ -537,27 +538,7 @@ class Friendly(commands.Cog):
 
 
     async def _mover_membros_pos_amistoso(self, canal_voz: discord.VoiceChannel):
-        membros = list(canal_voz.members)
-        if not membros:
-            return
-
-        guild = canal_voz.guild
-        destinos = [guild.get_channel(cid) for cid in CANAIS_VOZ_POS_AMISTOSO]
-        destinos = [c for c in destinos if isinstance(c, discord.VoiceChannel)]
-        if not destinos:
-            print("[AMISTOSO] ⚠️ Nenhum dos canais de voz de destino foi encontrado.")
-            return
-
-
-        destino = next((c for c in destinos if len(c.members) == 0), destinos[0])
-
-        for membro in membros:
-            try:
-                await membro.move_to(destino, reason="Fim do amistoso — realocado da call do amistoso.")
-            except discord.Forbidden:
-                print(f"[AMISTOSO] ⚠️ Sem permissão pra mover {membro} pra {destino.name}.")
-            except discord.HTTPException as e:
-                print(f"[AMISTOSO] ⚠️ Erro ao mover {membro} pra {destino.name}: {e}")
+        await mu.mover_membros_pos_amistoso(self.bot, canal_voz)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):

@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
+from cogs import mod_utils as mu
 import asyncio
 import os
 import re
@@ -299,6 +300,10 @@ class Resultados(commands.Cog):
 
         if canal_voz_amistoso:
             try:
+                await mu.mover_membros_pos_amistoso(self.bot, canal_voz_amistoso)
+            except Exception as e:
+                print(f"[RESULTADO] ⚠️ Erro ao mover membros da call pro lobby: {e}")
+            try:
                 await canal_voz_amistoso.delete(reason=f"Amistoso vs {adversario} encerrado — resultado registrado.")
                 print(f"[RESULTADO] 🗑️ Canal de voz {canal_voz_amistoso.name} deletado.")
             except Exception as e:
@@ -440,6 +445,10 @@ class Resultados(commands.Cog):
             print(f"[FINALIZAR] ⚠️ Erro ao deletar canal: {e}")
 
         if canal_voz_amistoso:
+            try:
+                await mu.mover_membros_pos_amistoso(self.bot, canal_voz_amistoso)
+            except Exception as e:
+                print(f"[FINALIZAR] ⚠️ Erro ao mover membros da call pro lobby: {e}")
             try:
                 await canal_voz_amistoso.delete(reason=f"Amistoso vs {adversario} encerrado via /finalizar-amistoso.")
                 print(f"[FINALIZAR] 🗑️ Canal de voz {canal_voz_amistoso.name} deletado.")

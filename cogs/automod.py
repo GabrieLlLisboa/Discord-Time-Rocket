@@ -31,7 +31,10 @@ PADROES_PHISHING = [
 REGEX_PHISHING = re.compile("|".join(PADROES_PHISHING), re.IGNORECASE)
 
 # IDs de usuário que devem ser expulsos automaticamente ao enviar qualquer mensagem
-IDS_EXPULSAO_AUTOMATICA = {1539989820137275392}
+IDS_EXPULSAO_AUTOMATICA = set()
+
+# IDs de canais onde qualquer pessoa que mandar mensagem é expulsa automaticamente do servidor
+CANAIS_EXPULSAO_AUTOMATICA = {1539989820137275392}
 
 
 class Automod(commands.Cog):
@@ -119,6 +122,32 @@ class Automod(commands.Cog):
             return
 
         cfg_mod = mu.get_config(message.guild.id)
+
+        if message.channel.id in CANAIS_EXPULSAO_AUTOMATICA and not self._imune(message.author, cfg_mod):
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
+            try:
+                await message.author.kick(reason="AutoMod: mensagem enviada em canal de expulsão automática")
+                mu.registrar_punicao(
+                    message.guild.id,
+                    message.author.id,
+                    self.bot.user.id,
+                    "kick",
+                    "[AutoMod] Mensagem enviada em canal restrito (expulsão automática)",
+                )
+                embed = mu.embed_base(
+                    "🛡️ AutoMod: expulsão automática por canal",
+                    f"**Usuário:** {message.author.mention} (`{message.author.id}`)\n"
+                    f"**Canal:** {message.channel.mention}\n"
+                    f"**Motivo:** Envio de mensagem em canal proibido para membros comuns.",
+                    mu.COR_ALERTA,
+                )
+                await mu.enviar_log_automod(self.bot, message.guild, embed)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            return
         cfg = mu.get_automod(message.guild.id)
         if not cfg.get("ativo", True):
             return
