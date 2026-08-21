@@ -1189,5 +1189,116 @@ class Whitelist(commands.Cog):
             )
 
 
+    @app_commands.command(
+        name="editar-whitelist",
+        description="[Admin] Cria ou edita a whitelist de um membro na mão (rank, maior rank, nick, etc).",
+    )
+    @app_commands.describe(
+        membro="Membro que vai ter a whitelist criada/editada",
+        nick="Nick do jogador no Rocket League",
+        rank="Rank atual no Rocket League",
+        maior_rank="Maior rank já alcançado (peak)",
+        peak_div="Divisão do maior rank alcançado",
+        plataforma="Plataforma que o jogador usa",
+    )
+    @app_commands.choices(
+        rank=[app_commands.Choice(name=r, value=r) for r in CARGO_RANKS.keys()],
+        maior_rank=[app_commands.Choice(name=r, value=r) for r in PEAK_RANKS],
+        peak_div=[app_commands.Choice(name=d, value=d) for d in DIVISOES],
+        plataforma=[app_commands.Choice(name=p, value=p) for p in PLATAFORMAS],
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def editar_whitelist(
+        self,
+        interaction: discord.Interaction,
+        membro: discord.Member,
+        nick: str | None = None,
+        rank: app_commands.Choice[str] | None = None,
+        maior_rank: app_commands.Choice[str] | None = None,
+        peak_div: app_commands.Choice[str] | None = None,
+        plataforma: app_commands.Choice[str] | None = None,
+    ):
+        """Comando pensado pra cadastrar/ajustar na mão a whitelist de jogadores
+        que entraram antes do sistema existir (ou corrigir dados de quem já
+        tem). Cria o registro como 'aprovada' se ainda não existir nenhum."""
+
+        if not any([nick, rank, maior_rank, peak_div, plataforma]):
+            await interaction.response.send_message(
+                "⚠️ Informe pelo menos um campo pra alterar (nick, rank, maior rank, divisão ou plataforma).",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        uid = str(membro.id)
+        registro_novo = uid not in self.dados
+        registro = self.dados.setdefault(uid, {"respostas": {}, "status": "aprovada"})
+        registro.setdefault("respostas", {})
+
+        if registro_novo:
+            registro["status"] = "aprovada"
+            registro["decidido_por_nome"] = str(interaction.user)
+            registro["decidido_por_id"] = interaction.user.id
+
+        avisos = []
+
+        if nick:
+            registro["respostas"]["nick"] = nick
+            try:
+                await membro.edit(nick=nick, reason=f"Whitelist editada manualmente por {interaction.user}")
+            except discord.Forbidden:
+                avisos.append("⚠️ Não consegui atualizar o apelido do membro (permissão/hierarquia).")
+
+        if rank:
+            registro["respostas"]["rank"] = rank.value
+            erro = await self.dar_cargo_rank(interaction.guild, membro, rank.value)
+            if erro:
+                avisos.append(erro)
+
+        if maior_rank:
+            registro["respostas"]["peak_rank"] = maior_rank.value
+
+        if peak_div:
+            registro["respostas"]["peak_div"] = peak_div.value
+
+        if maior_rank and maior_rank.value == "Supersonic Legend":
+            registro["respostas"]["peak_div"] = "—"
+
+        if plataforma:
+            registro["respostas"]["plataforma"] = plataforma.value
+
+        salvar("whitelist", self.dados)
+
+        try:
+            await self.atualizar_status_board(interaction.guild, membro.id)
+        except discord.HTTPException:
+            pass
+
+        r = registro["respostas"]
+        embed = discord.Embed(
+            title=f"✅ Whitelist {'criada' if registro_novo else 'atualizada'} — {membro}",
+            color=0x57F287,
+        )
+        embed.set_thumbnail(url=membro.display_avatar.url)
+        embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
+        embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
+        embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
+        embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
+        embed.set_footer(text=f"Editado por {interaction.user}")
+
+        if avisos:
+            embed.add_field(name="⚠️ Avisos", value="\n".join(avisos), inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @editar_whitelist.error
+    async def editar_whitelist_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "❌ Apenas **Administradores** podem usar este comando.", ephemeral=True
+            )
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Whitelist(bot))

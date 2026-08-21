@@ -67,7 +67,7 @@ class MaisAtivo(commands.Cog):
             _salvar_dados(self.dados)
 
 
-    async def _anunciar_mais_ativo(self, guild: discord.Guild, dia: str):
+    async def _anunciar_mais_ativo(self, guild: discord.Guild, dia: str, apagar_apos: bool = False):
         registro_dia = self.dados.get(dia, {})
         if not registro_dia:
             print(f"[MAIS_ATIVO] ℹ️ Ninguém mandou mensagem em {dia}, nada pra anunciar.")
@@ -128,6 +128,11 @@ class MaisAtivo(commands.Cog):
             controle["ultima_mensagem_id"] = nova.id
             _salvar_controle(controle)
             print(f"[MAIS_ATIVO] ✅ Anunciado usuário mais ativo de {dia}: {top_membro} ({top_qtd} msgs).")
+
+            if apagar_apos and dia in self.dados:
+                del self.dados[dia]
+                _salvar_dados(self.dados)
+                print(f"[MAIS_ATIVO] 🗑️ Dados de {dia} apagados após o anúncio.")
         except discord.HTTPException as e:
             print(f"[MAIS_ATIVO] ⚠️ Erro ao anunciar usuário mais ativo: {e}")
 
@@ -148,7 +153,7 @@ class MaisAtivo(commands.Cog):
             return
 
         try:
-            await self._anunciar_mais_ativo(canal.guild, ontem)
+            await self._anunciar_mais_ativo(canal.guild, ontem, apagar_apos=True)
         except Exception as e:
             print(f"[MAIS_ATIVO] ⚠️ Erro ao anunciar em {canal.guild}: {e}")
 
@@ -163,8 +168,10 @@ class MaisAtivo(commands.Cog):
     @commands.command(name="mais-ativo")
     @commands.has_permissions(administrator=True)
     async def mais_ativo_manual(self, ctx: commands.Context, quando: str = "ontem"):
-        dia = _hoje_str() if quando.strip().lower() == "hoje" else _ontem_str()
-        await self._anunciar_mais_ativo(ctx.guild, dia)
+        eh_hoje = quando.strip().lower() == "hoje"
+        dia = _hoje_str() if eh_hoje else _ontem_str()
+        # só apaga os dados do dia se não for "hoje" (hoje ainda tá em andamento)
+        await self._anunciar_mais_ativo(ctx.guild, dia, apagar_apos=not eh_hoje)
         await ctx.send(f"✅ Ranking de `{dia}` verificado (veja o canal de jogadores).", delete_after=6)
 
     @mais_ativo_manual.error

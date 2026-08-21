@@ -134,6 +134,7 @@ COGS = [
     "cogs.atividade",
     "cogs.mais_ativo",
     "cogs.campeonato",
+    "cogs.campeonato_partida",
     "cogs.logs",
     "cogs.convites",
     "cogs.whitelist",

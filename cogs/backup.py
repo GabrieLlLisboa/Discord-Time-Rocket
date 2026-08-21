@@ -20,13 +20,14 @@ FILES = {
 
 
     "campeonatos":  "data/campeonatos.json",
+    "partidas_campeonato": "data/partidas_campeonato.json",
 }
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
 
 def ler(chave: str) -> dict | list:
-    padrao = [] if chave in ("amistosos", "treinos") else {}
+    padrao = [] if chave in ("amistosos", "treinos", "partidas_campeonato") else {}
     return ler_json(FILES[chave], padrao)
 
 
