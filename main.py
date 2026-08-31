@@ -151,6 +151,12 @@ COGS = [
     "cogs.aleatory",
     "cogs.webterminal",
 
+    "cogs.perfil_gestao",
+    "cogs.emprestimo",
+    "cogs.ranking",
+    "cogs.disponibilidade",
+    "cogs.anunciar",
+
 
     "cogs.mod_config",
     "cogs.mod_setup",

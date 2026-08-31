@@ -27,16 +27,22 @@ def obter_rank(member: discord.Member) -> str:
 
 
 def garantir_perfil(member_id: int, member_name: str):
+    """Garante que o perfil existe e tem todos os campos usados pelo /perfil
+    (perfis criados antes de campos novos existirem não tinham esses campos —
+    mesmo padrão de defesa usado em cogs/medalhas.py)."""
     perfis = ler("perfis")
     sid = str(member_id)
     if sid not in perfis:
-        perfis[sid] = {
-            "nome":              member_name,
-            "amistosos":         0,
-            "vitorias":          0,
-            "derrotas":          0,
-        }
-        salvar("perfis", perfis)
+        perfis[sid] = {"nome": member_name, "amistosos": 0, "vitorias": 0, "derrotas": 0}
+    dados = perfis[sid]
+    dados.setdefault("amistosos", 0)
+    dados.setdefault("vitorias", 0)
+    dados.setdefault("derrotas", 0)
+    dados.setdefault("divisao", None)
+    dados.setdefault("titulo", None)
+    dados.setdefault("mvps", 0)
+    dados.setdefault("destaques", [])
+    salvar("perfis", perfis)
     return perfis
 
 
@@ -52,29 +58,42 @@ class Stats(commands.Cog):
         perfis = garantir_perfil(membro.id, membro.display_name)
         dados  = perfis.get(str(membro.id), {})
 
-        rank        = obter_rank(membro)
-        amistosos   = dados.get("amistosos", 0)
-        vitorias    = dados.get("vitorias",  0)
-        derrotas    = dados.get("derrotas",  0)
-        entrou_em   = discord.utils.format_dt(membro.joined_at, style="D") if membro.joined_at else "Desconhecido"
+        rank         = obter_rank(membro)
+        divisao      = dados.get("divisao") or "—"
+        titulo       = dados.get("titulo") or "—"
+        amistosos    = dados.get("amistosos", 0)
+        vitorias     = dados.get("vitorias",  0)
+        derrotas     = dados.get("derrotas",  0)
+        mvps         = dados.get("mvps", 0)
+        destaques    = dados.get("destaques", [])
+        entrou_em    = discord.utils.format_dt(membro.joined_at, style="D") if membro.joined_at else "Desconhecido"
         conta_criada = discord.utils.format_dt(membro.created_at, style="D")
 
         winrate = f"{round((vitorias / amistosos) * 100)}%" if amistosos > 0 else "—"
 
+        if destaques:
+            destaques_txt = "\n".join(f"⭐ {d}" for d in destaques[-5:])
+        else:
+            destaques_txt = "_Nenhum destaque registrado ainda._"
+
         embed = discord.Embed(
             title=f"👤  {membro.display_name}",
+            description=f"🏵️  **{titulo}**" if titulo != "—" else None,
             color=0xD4A843,
         )
         embed.set_thumbnail(url=membro.display_avatar.url)
         embed.add_field(name="\u200b", value="```╔══════════  📋  PERFIL  ══════════╗```", inline=False)
         embed.add_field(name="🏷️  Cargo",          value=rank,         inline=True)
+        embed.add_field(name="🎚️  Divisão",        value=divisao,      inline=True)
         embed.add_field(name="📅  Entrou em",       value=entrou_em,    inline=True)
-        embed.add_field(name="🗓️  Conta criada",    value=conta_criada, inline=True)
-        embed.add_field(name="\u200b", value="```╔══════════  ⚽  AMISTOSOS  ══════════╗```", inline=False)
-        embed.add_field(name="🎮  Disputados", value=f"`{amistosos}`", inline=True)
+        embed.add_field(name="\u200b", value="```╔══════════  ⚽  DESEMPENHO  ══════════╗```", inline=False)
+        embed.add_field(name="🎮  Partidas",   value=f"`{amistosos}`", inline=True)
         embed.add_field(name="✅  Vitórias",   value=f"`{vitorias}`",  inline=True)
         embed.add_field(name="❌  Derrotas",   value=f"`{derrotas}`",  inline=True)
         embed.add_field(name="📊  Winrate",    value=f"`{winrate}`",   inline=True)
+        embed.add_field(name="🌟  MVPs",       value=f"`{mvps}`",      inline=True)
+        embed.add_field(name="\u200b", value="```╔══════════  ⭐  DESTAQUES  ══════════╗```", inline=False)
+        embed.add_field(name="\u200b", value=destaques_txt, inline=False)
         embed.set_footer(text=f"TryHarders RL • {agora_str()}")
 
         await interaction.response.send_message(embed=embed)
