@@ -156,6 +156,7 @@ COGS = [
     "cogs.ranking",
     "cogs.disponibilidade",
     "cogs.anunciar",
+    "cogs.loja",
 
 
     "cogs.mod_config",
