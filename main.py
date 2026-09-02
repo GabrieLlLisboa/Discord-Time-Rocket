@@ -159,6 +159,7 @@ COGS = [
     "cogs.anunciar",
     "cogs.mandar_pv",
     "cogs.conversar_pv",
+    "cogs.conversar_pv",
     "cogs.loja",
 
 
