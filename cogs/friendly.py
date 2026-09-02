@@ -7,6 +7,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 from cogs import mod_utils as mu
+from cogs.players import CARGOS_RANK
 
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
@@ -67,23 +68,14 @@ ADMIN_ROLE_IDS = {
     1511894837790769204,
 }
 
-RANKS = {
-    "Super Sonic Legend": 1514772134327488642,
-    "Grand Champion":     1513343857125752992,
-    "Champion":           1512304793534861313,
-    "Diamante":           1512305401075466320,
-    "Platina":            1512305547544625273,
-    "Ouro":               1512571913849933956,
-}
+# Ranks (com divisão 1/2/3, exceto Super Sonic Legend) vindos direto de
+# cogs/players.py — fonte única de verdade — + Ouro, que só existe aqui
+# pra permitir marcar amistoso contra times desse rank.
+RANKS = {c["nome"]: c["id"] for c in CARGOS_RANK}
+RANKS["Ouro"] = 1512571913849933956
 
-RANK_EMOJIS = {
-    "Super Sonic Legend": "🌌",
-    "Grand Champion":     "👑",
-    "Champion":           "🏅",
-    "Diamante":           "💎",
-    "Platina":            "🪙",
-    "Ouro":               "🥇",
-}
+RANK_EMOJIS = {c["nome"]: c["emoji"] for c in CARGOS_RANK}
+RANK_EMOJIS["Ouro"] = "🥇"
 
 
 def rank_info(role: discord.Role):
@@ -250,6 +242,7 @@ async def criar_amistoso(
     rank1: discord.Role,
     info_extra: str,
     rank2: discord.Role = None,
+    rank3: discord.Role = None,
 ):
     guild = interaction.guild
 
@@ -262,7 +255,7 @@ async def criar_amistoso(
     nomes_ranks  = [info1[0]]
     emojis_ranks = [info1[1]]
 
-    if rank2 and rank2.id != rank1.id:
+    if rank2 and rank2.id not in ranks_ids:
         info2 = rank_info(rank2)
         if info2 is None:
             await interaction.response.send_message(f"❌ O cargo {rank2.mention} não é um rank válido.", ephemeral=True)
@@ -270,6 +263,15 @@ async def criar_amistoso(
         ranks_ids.append(rank2.id)
         nomes_ranks.append(info2[0])
         emojis_ranks.append(info2[1])
+
+    if rank3 and rank3.id not in ranks_ids:
+        info3 = rank_info(rank3)
+        if info3 is None:
+            await interaction.response.send_message(f"❌ O cargo {rank3.mention} não é um rank válido.", ephemeral=True)
+            return
+        ranks_ids.append(rank3.id)
+        nomes_ranks.append(info3[0])
+        emojis_ranks.append(info3[1])
 
     rank_display = " + ".join(f"{e} {n}" for e, n in zip(emojis_ranks, nomes_ranks))
     mencao_str   = " ".join(guild.get_role(rid).mention for rid in ranks_ids if guild.get_role(rid))
@@ -568,6 +570,7 @@ class Friendly(commands.Cog):
         data_hora="Data e horário (ex: 15/06 às 20h00)",
         rank1="Cargo do rank principal",
         rank2="Segundo cargo de rank (opcional)",
+        rank3="Terceiro cargo de rank (opcional)",
         info_extra="Informações extras (opcional)",
     )
     async def amistoso(
@@ -577,9 +580,10 @@ class Friendly(commands.Cog):
         data_hora: str,
         rank1: discord.Role,
         rank2: discord.Role = None,
+        rank3: discord.Role = None,
         info_extra: str = "",
     ):
-        await criar_amistoso(interaction, adversario, data_hora, rank1, info_extra, rank2)
+        await criar_amistoso(interaction, adversario, data_hora, rank1, info_extra, rank2, rank3)
 
     @amistoso.error
     async def amistoso_error(self, interaction: discord.Interaction, error):

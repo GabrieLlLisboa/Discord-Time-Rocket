@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone
+import re
 
 from cogs.backup import ler, salvar
 from cogs.players import STAFF_IDS
@@ -54,11 +55,36 @@ def _hoje_str() -> str:
     return datetime.now(timezone.utc).strftime("%d/%m/%Y")
 
 
+def _preco_numerico(preco: str) -> float:
+    """Extrai um valor numérico aproximado de uma string de preço tipo
+    '1.100 créditos', '800 créditos', 'R$ 50' — usado só pra ordenar os
+    itens da loja do mais caro pro mais barato. Se não achar número
+    nenhum, considera 0 (o item vai pro final da lista)."""
+    m = re.search(r"[\d][\d.,]*", preco or "")
+    if not m:
+        return 0.0
+    bruto = m.group(0)
+    # remove separador de milhar (ponto/vírgula seguido de exatamente 3 dígitos)
+    normalizado = re.sub(r"[.,](?=\d{3}(\D|$))", "", bruto)
+    normalizado = normalizado.replace(",", ".")
+    try:
+        return float(normalizado)
+    except ValueError:
+        return 0.0
+
+
+def _ordenar_por_preco(itens: list) -> list:
+    """Do mais caro pro mais barato — os que não têm preço reconhecível
+    (0) ficam no final, na ordem em que foram cadastrados."""
+    return sorted(itens, key=lambda it: _preco_numerico(it.get("preco", "")), reverse=True)
+
+
 def _garantir_loja() -> dict:
     dados = ler("loja")
     dados.setdefault("categorias", {})
     for chave in CATEGORIAS:
-        dados["categorias"].setdefault(chave, [])
+        itens = dados["categorias"].setdefault(chave, [])
+        dados["categorias"][chave] = _ordenar_por_preco(itens)
     dados.setdefault("destaque", None)
     dados.setdefault("atualizado_em", None)
     return dados
@@ -158,11 +184,12 @@ class Loja(commands.Cog):
     ):
         if not await self._checar_staff(interaction):
             return
+        await interaction.response.defer(ephemeral=True)
 
         dados = _garantir_loja()
         itens = dados["categorias"][categoria.value]
         if len(itens) >= MAX_ITENS_POR_CATEGORIA:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ A categoria **{categoria.name}** já tem {MAX_ITENS_POR_CATEGORIA} itens (limite). "
                 f"Remova algum com `/loja-item-remover` antes de adicionar outro.",
                 ephemeral=True,
@@ -170,11 +197,12 @@ class Loja(commands.Cog):
             return
 
         itens.append({"nome": nome.strip()[:100], "preco": preco.strip()[:50]})
+        dados["categorias"][categoria.value] = _ordenar_por_preco(itens)
         dados["atualizado_em"] = _hoje_str()
         salvar("loja", dados)
         await self._atualizar_canal()
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Item adicionado em **{categoria.name}**: **{nome.strip()}** — 💰 {preco.strip()}",
             ephemeral=True,
         )
@@ -192,12 +220,13 @@ class Loja(commands.Cog):
     ):
         if not await self._checar_staff(interaction):
             return
+        await interaction.response.defer(ephemeral=True)
 
         dados = _garantir_loja()
         itens = dados["categorias"][categoria.value]
 
         if not (1 <= numero <= len(itens)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ Número inválido. A categoria **{categoria.name}** tem {len(itens)} item(ns) — use `/loja` pra conferir.",
                 ephemeral=True,
             )
@@ -208,7 +237,7 @@ class Loja(commands.Cog):
         salvar("loja", dados)
         await self._atualizar_canal()
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"🗑️ Removido de **{categoria.name}**: {removido['nome']} — 💰 {removido['preco']}",
             ephemeral=True,
         )
@@ -227,6 +256,7 @@ class Loja(commands.Cog):
     ):
         if not await self._checar_staff(interaction):
             return
+        await interaction.response.defer(ephemeral=True)
 
         dados = _garantir_loja()
         dados["destaque"] = {
@@ -238,7 +268,7 @@ class Loja(commands.Cog):
         salvar("loja", dados)
         await self._atualizar_canal()
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Destaque da loja definido: **{nome.strip()}** — 💰 {preco.strip()}", ephemeral=True
         )
         print(f"[LOJA] 🌟 {interaction.user} definiu o destaque: {nome}")
@@ -248,6 +278,7 @@ class Loja(commands.Cog):
     async def loja_limpar(self, interaction: discord.Interaction):
         if not await self._checar_staff(interaction):
             return
+        await interaction.response.defer(ephemeral=True)
 
         dados = {
             "categorias": {chave: [] for chave in CATEGORIAS},
@@ -257,7 +288,7 @@ class Loja(commands.Cog):
         salvar("loja", dados)
         await self._atualizar_canal()
 
-        await interaction.response.send_message("🧹 Loja limpa! Pronta pra cadastrar a nova rotação.", ephemeral=True)
+        await interaction.followup.send("🧹 Loja limpa! Pronta pra cadastrar a nova rotação.", ephemeral=True)
         print(f"[LOJA] 🧹 {interaction.user} limpou a loja para nova rotação.")
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
