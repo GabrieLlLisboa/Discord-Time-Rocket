@@ -7,6 +7,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 from cogs import mod_utils as mu
+from cogs.players import CARGOS_RANK
 
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
@@ -67,23 +68,14 @@ ADMIN_ROLE_IDS = {
     1511894837790769204,
 }
 
-RANKS = {
-    "Super Sonic Legend": 1514772134327488642,
-    "Grand Champion":     1513343857125752992,
-    "Champion":           1512304793534861313,
-    "Diamante":           1512305401075466320,
-    "Platina":            1512305547544625273,
-    "Ouro":               1512571913849933956,
-}
+# Ranks (com divisão 1/2/3, exceto Super Sonic Legend) vindos direto de
+# cogs/players.py — fonte única de verdade — + Ouro, que só existe aqui
+# pra permitir marcar amistoso contra times desse rank.
+RANKS = {c["nome"]: c["id"] for c in CARGOS_RANK}
+RANKS["Ouro"] = 1512571913849933956
 
-RANK_EMOJIS = {
-    "Super Sonic Legend": "🌌",
-    "Grand Champion":     "👑",
-    "Champion":           "🏅",
-    "Diamante":           "💎",
-    "Platina":            "🪙",
-    "Ouro":               "🥇",
-}
+RANK_EMOJIS = {c["nome"]: c["emoji"] for c in CARGOS_RANK}
+RANK_EMOJIS["Ouro"] = "🥇"
 
 
 def rank_info(role: discord.Role):

@@ -8,10 +8,14 @@ import time
 
 from cogs.backup import ler, salvar
 from cogs.players import CARGOS as PLAYER_CARGOS
+from cogs.players import RANK_TIERS_ORDEM, RANK_TIERS_COM_DIVISAO, RANK_TIER_EMOJIS
 from cogs import mod_utils as mu
 
 
 CARGO_RANKS = {c["nome"]: c["id"] for c in PLAYER_CARGOS if c["secao"] == "rank"}
+
+# divisões possíveis pra quem escolhe um rank com divisão (todo mundo, menos SSL)
+RANK_DIVISOES_OPCOES = ["1", "2", "3"]
 
 
 INCENTIVO_ESPERA_INICIAL_SEGUNDOS = 15 * 60
@@ -277,9 +281,30 @@ class EscolhaSelect(discord.ui.Select):
                 f"🌐 Mais **{contagem}** pessoa(s) falam o mesmo idioma que você.{cargo_msg}"
             )
         elif self.step == "rank":
+            if valor in RANK_TIERS_COM_DIVISAO:
+                await interaction.response.send_message(
+                    f"✅ Rank registrado: **{valor}**. Agora escolhe a divisão! 🔢"
+                )
+                await self.cog.enviar_pergunta(interaction.channel, membro, "rank_divisao")
+            else:
+                # Super Sonic Legend não tem divisão, já vai direto pra próxima etapa
+                await interaction.response.send_message(
+                    f"✅ Rank registrado: **{valor}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
+                )
+                await self.cog.enviar_pergunta(interaction.channel, membro, "plataforma")
+            return
+
+        elif self.step == "rank_divisao":
+            registro = self.cog.dados.get(str(membro.id), {})
+            tier = registro.get("respostas", {}).get("rank", "")
+            rank_completo = f"{tier} {valor}".strip()
+            self.cog.salvar_resposta(membro.id, "rank", rank_completo)
             await interaction.response.send_message(
-                f"✅ Rank registrado: **{valor}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
+                f"✅ Divisão registrada: **{rank_completo}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
             )
+            await self.cog.enviar_pergunta(interaction.channel, membro, "plataforma")
+            return
+
         else:
             await interaction.response.send_message(f"✅ Resposta registrada: **{valor}**")
 
@@ -770,8 +795,14 @@ class Whitelist(commands.Cog):
             await canal.send("🌐 **Qual é a sua linguagem?**\n(Português ou Inglês — só pode escolher uma)", view=view)
 
         elif step == "rank":
-            view = EscolhaView(self, "rank", list(CARGO_RANKS.keys()), "Escolha seu rank atual...", "plataforma")
+            view = EscolhaView(self, "rank", RANK_TIERS_ORDEM, "Escolha seu rank atual...", "rank_divisao", emojis=RANK_TIER_EMOJIS)
             await canal.send("🎮 **Qual o seu rank atual no Rocket League?**", view=view)
+
+        elif step == "rank_divisao":
+            registro = self.dados.get(str(membro.id), {})
+            tier = registro.get("respostas", {}).get("rank", "")
+            view = EscolhaView(self, "rank_divisao", RANK_DIVISOES_OPCOES, "Escolha a divisão...", "plataforma")
+            await canal.send(f"🔢 **Qual divisão do seu rank {tier}?** (1, 2 ou 3)", view=view)
 
         elif step == "plataforma":
             view = EscolhaView(self, "plataforma", PLATAFORMAS, "Escolha sua plataforma...", "peak_rank")

@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 
 JOGADORES_CHANNEL_ID = 1514775408124367149
 
-CARGOS = [
+STAFF_CARGOS = [
     {"nome": "Dono do Clube",      "id": 1511895253777649704, "emoji": "👑", "secao": "staff"},
     {"nome": "Sub-Dono",           "id": 1511894837790769204, "emoji": "🥈", "secao": "staff"},
     {"nome": "Diretor",            "id": 1523835085475020932, "emoji": "🎖️", "secao": "staff"},
@@ -13,12 +13,53 @@ CARGOS = [
     {"nome": "Suporte",            "id": 1523833330175442954, "emoji": "🎧", "secao": "staff"},
     {"nome": "Coach",              "id": 1513356584946896946, "emoji": "📋", "secao": "staff"},
     {"nome": "Editor de vídeo",    "id": 1513240072139309317, "emoji": "🎬", "secao": "staff"},
-    {"nome": "Super Sonic Legend", "id": 1514772134327488642, "emoji": "🌌", "secao": "rank"},
-    {"nome": "Grand Champion",     "id": 1513343857125752992, "emoji": "👑", "secao": "rank"},
-    {"nome": "Champion",           "id": 1512304793534861313, "emoji": "🏅", "secao": "rank"},
-    {"nome": "Diamante",           "id": 1512305401075466320, "emoji": "💎", "secao": "rank"},
-    {"nome": "Platina",            "id": 1512305547544625273, "emoji": "🪙", "secao": "rank"},
 ]
+
+# ── Ranks divididos por divisão (1, 2, 3) ────────────────────────────────
+# Super Sonic Legend é o único que não tem divisão (é o topo absoluto).
+RANK_SSL_ID = 1514772134327488642
+
+RANK_TIER_EMOJIS = {
+    "Super Sonic Legend": "🌌",
+    "Grand Champion":     "👑",
+    "Champion":           "🏅",
+    "Diamante":           "💎",
+    "Platina":            "🪙",
+}
+
+# ordem do melhor pro pior tier (sem contar divisão)
+RANK_TIERS_ORDEM = ["Super Sonic Legend", "Grand Champion", "Champion", "Diamante", "Platina"]
+
+# tiers que têm divisão 1/2/3 — todos, menos o Super Sonic Legend
+RANK_TIERS_COM_DIVISAO = ["Grand Champion", "Champion", "Diamante", "Platina"]
+
+RANK_DIVISAO_IDS = {
+    "Platina":        {1: 1512305547544625273, 2: 1544205321751232574, 3: 1544205635871051786},
+    "Diamante":       {1: 1512305401075466320, 2: 1544206278082039890, 3: 1544207340570546226},
+    "Champion":       {1: 1512304793534861313, 2: 1544207872488116284, 3: 1544208446986002542},
+    "Grand Champion": {1: 1513343857125752992, 2: 1544208903233871872, 3: 1544209080053145711},
+}
+
+RANK_CARGOS = [
+    {"nome": "Super Sonic Legend", "id": RANK_SSL_ID, "emoji": RANK_TIER_EMOJIS["Super Sonic Legend"], "secao": "rank"},
+]
+for _tier in ["Grand Champion", "Champion", "Diamante"]:
+    for _div in (3, 2, 1):
+        RANK_CARGOS.append({
+            "nome": f"{_tier} {_div}",
+            "id": RANK_DIVISAO_IDS[_tier][_div],
+            "emoji": RANK_TIER_EMOJIS[_tier],
+            "secao": "rank",
+        })
+for _div in (3, 2, 1):
+    RANK_CARGOS.append({
+        "nome": f"Platina {_div}",
+        "id": RANK_DIVISAO_IDS["Platina"][_div],
+        "emoji": RANK_TIER_EMOJIS["Platina"],
+        "secao": "rank",
+    })
+
+CARGOS = STAFF_CARGOS + RANK_CARGOS
 
 IDS_MONITORADOS  = {c["id"] for c in CARGOS}
 CARGO_MAP        = {c["id"]: c for c in CARGOS}
