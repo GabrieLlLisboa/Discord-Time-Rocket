@@ -2,20 +2,40 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
+from cogs.players import CARGOS_RANK
 
 
-RANKS_IDS = {
-    1514772134327488642: ("🌌", "Super Sonic Legend"),
-    1513343857125752992: ("👑", "Grand Champion"),
-    1512304793534861313: ("🏅", "Champion"),
-    1512305401075466320: ("💎", "Diamante"),
-    1512305547544625273: ("🪙", "Platina"),
+# Ranks (com divisão 1/2/3, exceto Super Sonic Legend) + alguns cargos de
+# staff que também aparecem no campo "Cargo" do /perfil. Os ranks vêm
+# direto de cogs/players.py — fonte única de verdade dos cargos de rank —
+# pra nunca ficar desatualizado quando um rank/divisão for adicionado lá.
+RANKS_IDS = {c["id"]: (c["emoji"], c["nome"]) for c in CARGOS_RANK}
+RANKS_IDS.update({
     1512571913849933956: ("🥇", "Ouro"),
     1513356584946896946: ("📋", "Coach"),
     1513240072139309317: ("🎬", "Editor de vídeo"),
     1511894837790769204: ("🥈", "Sub-Dono"),
-}
+})
 ADMIN_ROLE_ID = 1511894837790769204
+
+
+# ── Biografias fixas ─────────────────────────────────────────────────────
+# Texto de bio "hard-coded" pra certos usuários específicos, que aparece
+# no /perfil deles independente do que estiver salvo em data/perfis.json.
+BIOS_FIXAS = {
+    1487452210605588592: (
+        "Desenvolvedor do BOT, experiente em Python e DevOps. Configurador "
+        "principal do servidor do Discord e Ex-SubDono."
+    ),
+    1421693641184772147: (
+        "O maioral, o fundador do projeto Tryharders RL, administra a rede, "
+        "os servidores, e traz novas idéias ao projeto."
+    ),
+    1190705463310942208: (
+        "O melhor jogador que temos, inova com suas mecânicas e visão de "
+        "jogo, e passa por cima de quem estiver na frente, este é whei."
+    ),
+}
 
 
 def obter_rank(member: discord.Member) -> str:
@@ -82,6 +102,11 @@ class Stats(commands.Cog):
             color=0xD4A843,
         )
         embed.set_thumbnail(url=membro.display_avatar.url)
+
+        bio_fixa = BIOS_FIXAS.get(membro.id)
+        if bio_fixa:
+            embed.add_field(name="📜  Biografia", value=bio_fixa, inline=False)
+
         embed.add_field(name="\u200b", value="```╔══════════  📋  PERFIL  ══════════╗```", inline=False)
         embed.add_field(name="🏷️  Cargo",          value=rank,         inline=True)
         embed.add_field(name="🎚️  Divisão",        value=divisao,      inline=True)
