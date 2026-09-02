@@ -1,0 +1,12 @@
+# ─────────────────────────────────────────────
+#  Arquivos de dados/estado do bot — cada servidor
+#  (Windows dev / Ubuntu produção) tem os seus próprios,
+#  não fazem sentido no controle de versão.
+# ─────────────────────────────────────────────
+data/*.json
+last_tiktok.txt
+
+# Ambiente local
+.env
+__pycache__/
+*.pyc
