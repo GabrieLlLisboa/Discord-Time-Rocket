@@ -109,20 +109,21 @@ class ConversarPV(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
-        categoria = await self.get_categoria(guild)
 
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-        }
-        for staff_id in STAFF_IDS:
-            role = guild.get_role(staff_id)
-            if role:
-                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-
-        nome_canal = f"pv-{_slug(membro.name)}"[:95]
         try:
+            categoria = await self.get_categoria(guild)
+
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            }
+            for staff_id in STAFF_IDS:
+                role = guild.get_role(staff_id)
+                if role:
+                    overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+
+            nome_canal = f"pv-{_slug(membro.name)}"[:95]
             canal = await guild.create_text_channel(
                 name=nome_canal,
                 category=categoria,
@@ -130,7 +131,13 @@ class ConversarPV(commands.Cog):
                 reason=f"Conversa privada com {membro} aberta por {interaction.user}",
             )
         except discord.Forbidden:
-            await interaction.followup.send("❌ Não tenho permissão pra criar canais.", ephemeral=True)
+            await interaction.followup.send(
+                "❌ Não tenho permissão pra criar a categoria/canal. Preciso de **Gerenciar Canais** no servidor.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException as e:
+            await interaction.followup.send(f"❌ Erro do Discord ao criar o canal: {e}", ephemeral=True)
             return
 
         self.dados["canais"][str(canal.id)] = {
@@ -280,6 +287,17 @@ class ConversarPV(commands.Cog):
         if self.dados["membros"].get(str(membro_id)) == channel.id:
             self.dados["membros"].pop(str(membro_id), None)
         self._salvar()
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+        msg = f"❌ Deu erro nesse comando: {error}"
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+        except discord.HTTPException:
+            pass
+        print(f"[CONVERSAR_PV] ❌ Erro: {error}")
 
 
 async def setup(bot: commands.Bot):
