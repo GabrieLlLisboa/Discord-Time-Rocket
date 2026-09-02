@@ -158,7 +158,10 @@ COGS = [
     "cogs.disponibilidade",
     "cogs.anunciar",
     "cogs.mandar_pv",
+<<<<<<< HEAD
     "cogs.conversar_pv",
+=======
+>>>>>>> abe1d0e5faebaa44f9441416c17f84f832c2026c
     "cogs.loja",
 
 
