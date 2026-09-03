@@ -26,6 +26,15 @@ _PADRAO_DATA_HORA = re.compile(
     r"(?P<hora>\d{1,2})[:h](?P<minuto>\d{2})?"
 )
 
+DIAS_SEMANA = ["Hoje", "Amanhã", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+
+_DIA_SEMANA_INDICE = {
+    "Segunda-feira": 0, "Terça-feira": 1, "Quarta-feira": 2, "Quinta-feira": 3,
+    "Sexta-feira": 4, "Sábado": 5, "Domingo": 6,
+}
+
+_PADRAO_HORARIO = re.compile(r"(?P<hora>\d{1,2})[:h](?P<minuto>\d{2})?")
+
 
 def _parse_data_hora(texto: str, agora_local: datetime | None = None) -> float | None:
     """Tenta extrair um timestamp real de um texto livre de data/hora, pra
@@ -61,6 +70,50 @@ def _parse_data_hora(texto: str, agora_local: datetime | None = None) -> float |
         return dt.timestamp()
     except ValueError:
         return None
+
+
+def _calcular_data_hora(dia_semana: str, horario: str, agora_local: datetime | None = None) -> tuple[str, float | None]:
+    """Recebe um dia da semana (ou 'Hoje'/'Amanhã') + um horário livre tipo
+    '20h00', e devolve (texto_amigavel, timestamp_ou_None) já calculando a
+    próxima data real que cai nesse dia — sempre olhando pra frente
+    (nunca agenda um dia que já passou nessa semana)."""
+    agora_local = agora_local or datetime.now(FUSO_BRASILIA)
+    horario = (horario or "").strip()
+
+    if dia_semana == "Hoje":
+        data_alvo = agora_local.date()
+    elif dia_semana == "Amanhã":
+        data_alvo = (agora_local + timedelta(days=1)).date()
+    else:
+        alvo_idx = _DIA_SEMANA_INDICE.get(dia_semana)
+        if alvo_idx is None:
+            data_alvo = None
+        else:
+            dias_a_frente = (alvo_idx - agora_local.weekday()) % 7
+            data_alvo = (agora_local + timedelta(days=dias_a_frente)).date()
+
+    m = _PADRAO_HORARIO.search(horario)
+    hora_valida = False
+    hora = minuto = 0
+    if m:
+        hora = int(m.group("hora"))
+        minuto = int(m.group("minuto") or 0)
+        hora_valida = 0 <= hora <= 23 and 0 <= minuto <= 59
+
+    dt = None
+    if data_alvo and hora_valida:
+        dt = datetime(data_alvo.year, data_alvo.month, data_alvo.day, hora, minuto, tzinfo=FUSO_BRASILIA)
+        if dia_semana not in ("Hoje", "Amanhã") and dt < agora_local:
+            dt += timedelta(days=7)
+            data_alvo = dt.date()
+
+    texto = dia_semana
+    if data_alvo:
+        texto += f" ({data_alvo.strftime('%d/%m')})"
+    if horario:
+        texto += f" às {horario}"
+
+    return texto, (dt.timestamp() if dt else None)
 
 
 ADMIN_ROLE_IDS = {
@@ -238,7 +291,8 @@ class ConfirmarPresencaView(discord.ui.View):
 async def criar_amistoso(
     interaction: discord.Interaction,
     adversario: str,
-    data_hora: str,
+    dia_semana: str,
+    horario: str,
     rank1: discord.Role,
     info_extra: str,
     rank2: discord.Role = None,
@@ -276,6 +330,8 @@ async def criar_amistoso(
     rank_display = " + ".join(f"{e} {n}" for e, n in zip(emojis_ranks, nomes_ranks))
     mencao_str   = " ".join(guild.get_role(rid).mention for rid in ranks_ids if guild.get_role(rid))
     rank_salvo   = " + ".join(nomes_ranks)
+
+    data_hora, data_hora_ts = _calcular_data_hora(dia_semana, horario)
 
     nome_canal = "amistoso-" + "".join(c if c.isalnum() or c == "-" else "-" for c in adversario.lower().strip())
     nome_canal = nome_canal[:50]
@@ -345,7 +401,6 @@ async def criar_amistoso(
         cog.registrar(msg_anuncio.id, canal_amistoso.id, canal_voz.id)
 
     amistosos = ler("amistosos")
-    data_hora_ts = _parse_data_hora(data_hora)
     amistosos.append({
         "id": len(amistosos) + 1, "adversario": adversario, "data": data_hora,
         "rank": rank_salvo, "resultado": None, "placar": "", "confirmados": [],
@@ -375,8 +430,8 @@ async def criar_amistoso(
 
     if data_hora_ts is None:
         aviso_lembretes = (
-            "\n⚠️ Não consegui reconhecer a data/horário pra agendar os lembretes automáticos "
-            "(use algo tipo `15/06 às 20h00`). O amistoso foi criado normalmente, só sem os avisos automáticos."
+            "\n⚠️ Não consegui reconhecer o horário digitado pra agendar os lembretes automáticos "
+            "(use algo tipo `20h00` ou `20:00`). O amistoso foi criado normalmente, só sem os avisos automáticos."
         )
     else:
         aviso_lembretes = ""
@@ -567,23 +622,28 @@ class Friendly(commands.Cog):
     @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     @app_commands.describe(
         adversario="Nome do time adversário",
-        data_hora="Data e horário (ex: 15/06 às 20h00)",
+        dia_semana="Dia do amistoso",
+        horario="Horário (ex: 20h00)",
         rank1="Cargo do rank principal",
         rank2="Segundo cargo de rank (opcional)",
         rank3="Terceiro cargo de rank (opcional)",
         info_extra="Informações extras (opcional)",
     )
+    @app_commands.choices(
+        dia_semana=[app_commands.Choice(name=d, value=d) for d in DIAS_SEMANA],
+    )
     async def amistoso(
         self,
         interaction: discord.Interaction,
         adversario: str,
-        data_hora: str,
+        dia_semana: app_commands.Choice[str],
+        horario: str,
         rank1: discord.Role,
         rank2: discord.Role = None,
         rank3: discord.Role = None,
         info_extra: str = "",
     ):
-        await criar_amistoso(interaction, adversario, data_hora, rank1, info_extra, rank2, rank3)
+        await criar_amistoso(interaction, adversario, dia_semana.value, horario, rank1, info_extra, rank2, rank3)
 
     @amistoso.error
     async def amistoso_error(self, interaction: discord.Interaction, error):

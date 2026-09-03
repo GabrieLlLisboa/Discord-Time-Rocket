@@ -1222,21 +1222,33 @@ class Whitelist(commands.Cog):
 
     @app_commands.command(
         name="editar-whitelist",
-        description="[Admin] Cria ou edita a whitelist de um membro na mão (rank, maior rank, nick, etc).",
+        description="[Admin] Cria ou edita a whitelist de um membro na mão (todos os campos do questionário).",
     )
     @app_commands.describe(
         membro="Membro que vai ter a whitelist criada/editada",
         nick="Nick do jogador no Rocket League",
+        idioma="Idioma do jogador",
         rank="Rank atual no Rocket League",
         maior_rank="Maior rank já alcançado (peak)",
         peak_div="Divisão do maior rank alcançado",
         plataforma="Plataforma que o jogador usa",
+        tempo="Há quanto tempo joga Rocket League",
+        microfone="Se o jogador tem microfone",
+        ativo="Se o jogador pretende ser ativo na equipe",
+        tem_tiktok="Se o jogador tem TikTok",
+        tiktok="Link do TikTok (se tiver)",
+        habilidades="Habilidades extras (texto livre, ex: Designer, Editor de vídeo)",
     )
     @app_commands.choices(
         rank=[app_commands.Choice(name=r, value=r) for r in CARGO_RANKS.keys()],
+        idioma=[app_commands.Choice(name=i, value=i) for i in IDIOMAS],
         maior_rank=[app_commands.Choice(name=r, value=r) for r in PEAK_RANKS],
         peak_div=[app_commands.Choice(name=d, value=d) for d in DIVISOES],
         plataforma=[app_commands.Choice(name=p, value=p) for p in PLATAFORMAS],
+        tempo=[app_commands.Choice(name=t, value=t) for t in TEMPOS_JOGANDO],
+        microfone=[app_commands.Choice(name="Sim", value="Sim"), app_commands.Choice(name="Não", value="Não")],
+        ativo=[app_commands.Choice(name="Sim", value="Sim"), app_commands.Choice(name="Não", value="Não")],
+        tem_tiktok=[app_commands.Choice(name="Sim", value="Sim"), app_commands.Choice(name="Não", value="Não")],
     )
     @app_commands.checks.has_permissions(administrator=True)
     async def editar_whitelist(
@@ -1244,18 +1256,26 @@ class Whitelist(commands.Cog):
         interaction: discord.Interaction,
         membro: discord.Member,
         nick: str | None = None,
+        idioma: app_commands.Choice[str] | None = None,
         rank: app_commands.Choice[str] | None = None,
         maior_rank: app_commands.Choice[str] | None = None,
         peak_div: app_commands.Choice[str] | None = None,
         plataforma: app_commands.Choice[str] | None = None,
+        tempo: app_commands.Choice[str] | None = None,
+        microfone: app_commands.Choice[str] | None = None,
+        ativo: app_commands.Choice[str] | None = None,
+        tem_tiktok: app_commands.Choice[str] | None = None,
+        tiktok: str | None = None,
+        habilidades: str | None = None,
     ):
         """Comando pensado pra cadastrar/ajustar na mão a whitelist de jogadores
         que entraram antes do sistema existir (ou corrigir dados de quem já
         tem). Cria o registro como 'aprovada' se ainda não existir nenhum."""
 
-        if not any([nick, rank, maior_rank, peak_div, plataforma]):
+        campos = [nick, idioma, rank, maior_rank, peak_div, plataforma, tempo, microfone, ativo, tem_tiktok, tiktok, habilidades]
+        if not any(campos):
             await interaction.response.send_message(
-                "⚠️ Informe pelo menos um campo pra alterar (nick, rank, maior rank, divisão ou plataforma).",
+                "⚠️ Informe pelo menos um campo pra alterar.",
                 ephemeral=True,
             )
             return
@@ -1281,6 +1301,9 @@ class Whitelist(commands.Cog):
             except discord.Forbidden:
                 avisos.append("⚠️ Não consegui atualizar o apelido do membro (permissão/hierarquia).")
 
+        if idioma:
+            registro["respostas"]["idioma"] = idioma.value
+
         if rank:
             registro["respostas"]["rank"] = rank.value
             erro = await self.dar_cargo_rank(interaction.guild, membro, rank.value)
@@ -1299,6 +1322,26 @@ class Whitelist(commands.Cog):
         if plataforma:
             registro["respostas"]["plataforma"] = plataforma.value
 
+        if tempo:
+            registro["respostas"]["tempo"] = tempo.value
+
+        if microfone:
+            registro["respostas"]["microfone"] = microfone.value
+
+        if ativo:
+            registro["respostas"]["ativo"] = ativo.value
+
+        if tem_tiktok:
+            registro["respostas"]["tem_tiktok"] = tem_tiktok.value
+            if tem_tiktok.value == "Não" and not tiktok:
+                registro["respostas"]["tiktok"] = "Não possui"
+
+        if tiktok:
+            registro["respostas"]["tiktok"] = tiktok
+
+        if habilidades:
+            registro["respostas"]["habilidades"] = habilidades
+
         salvar("whitelist", self.dados)
 
         try:
@@ -1312,10 +1355,16 @@ class Whitelist(commands.Cog):
             color=0x57F287,
         )
         embed.set_thumbnail(url=membro.display_avatar.url)
+        embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
         embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
         embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
-        embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
         embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
+        embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
+        embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
+        embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
+        embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
+        embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
+        embed.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
         embed.set_footer(text=f"Editado por {interaction.user}")
 
         if avisos:
