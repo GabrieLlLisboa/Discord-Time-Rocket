@@ -132,6 +132,60 @@ class Ranking(commands.Cog):
         view = PaginacaoView(embeds) if len(embeds) > 1 else None
         await interaction.followup.send(embed=embeds[0], view=view)
 
+    @app_commands.command(
+        name="jogadores-rank",
+        description="Veja os jogadores ordenados pelo rank, do maior pro menor.",
+    )
+    async def jogadores_rank_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+
+        guild = interaction.guild
+
+        linhas = []
+        for membro in guild.members:
+            if membro.bot:
+                continue
+
+            idx_rank, rank_nome = _posicao_rank(membro)
+            if idx_rank == len(CARGOS_RANK):
+                continue  # sem cargo de rank, não entra nessa lista
+
+            linhas.append({
+                "membro": membro,
+                "rank_idx": idx_rank,
+                "rank_nome": rank_nome,
+            })
+
+        if not linhas:
+            await interaction.followup.send(
+                "📭 Nenhum jogador com cargo de rank encontrado ainda."
+            )
+            return
+
+        linhas.sort(key=lambda l: l["rank_idx"])
+
+        medalhas_pos = ["🥇", "🥈", "🥉"]
+
+        def montar_pagina(pagina, total, fatia, offset):
+            embed = discord.Embed(
+                title="🏆 Jogadores por Rank",
+                color=0xD4A843,
+            )
+            for i, l in enumerate(fatia):
+                posicao = offset + i
+                prefixo = medalhas_pos[posicao] if posicao < 3 else f"`#{posicao + 1}`"
+                embed.add_field(
+                    name=f"{prefixo}  {l['membro'].display_name}",
+                    value=l["rank_nome"],
+                    inline=False,
+                )
+            embed.set_footer(text=f"Página {pagina}/{total}  •  {len(linhas)} jogador(es)")
+            return embed
+
+        embeds = paginar(linhas, 15, montar_pagina)
+        view = PaginacaoView(embeds) if len(embeds) > 1 else None
+        await interaction.followup.send(embed=embeds[0], view=view)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Ranking(bot))

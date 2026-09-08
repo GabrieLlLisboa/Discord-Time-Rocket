@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from cogs.json_store import ler_json, salvar_json
 
 
-CANAL_RANKING_ID = 1514775408124367149
+CANAL_RANKING_ID = 1533186035364921464
 
 BR_TZ = timezone(timedelta(hours=-3))
 
