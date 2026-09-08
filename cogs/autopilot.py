@@ -95,6 +95,26 @@ CURIOSIDADES_RL = [
     "🎮 Você sabia? Rocket League oferece suporte a controle e teclado ao mesmo tempo dentro da mesma partida, sem desvantagem oficial entre eles.",
     "🏆 Curiosidade: o primeiro Mundial oficial de Rocket League aconteceu em 2016, ainda nos primeiros anos do jogo.",
     "🎊 Você sabia? A comunidade de Rocket League é conhecida por ser uma das mais ativas em criar conteúdo de tutorial de mecânicas no YouTube.",
+    "🦶 Curiosidade: a Travinha é uma técnica em que o jogador usa um contato extremamente preciso entre o carro e a bola para manter o controle e preparar outro toque.",
+    "🎡 Curiosidade: existem resets em que o jogador recupera o flip usando apenas parte do conjunto de rodas, dependendo do tipo de contato e da situação.",
+    "🌀 Curiosidade: o Stall Reset utiliza um stall para alinhar o carro com a bola e conseguir o contato necessário para recuperar o flip.",
+    "🦘 Curiosidade: no Pogo Reset, o carro utiliza um contato incomum com a bola para criar uma situação em que o jogador pode recuperar o flip.",
+    "🚁 Curiosidade: o Helicopter Reset utiliza a rotação do carro para conseguir um contato de rodas extremamente específico com a bola.",
+    "🎯 Curiosidade: um reset pode ser usado para passar a bola em vez de finalizar, permitindo que um companheiro aproveite o novo ângulo.",
+    "🤏 Curiosidade: jogadores profissionais muitas vezes fazem um toque propositalmente mais fraco para manter a posse em vez de simplesmente tentar acelerar a jogada.",
+    "🎭 Curiosidade: alguns dos maiores nomes do cenário profissional ficaram conhecidos por estilos mecânicos completamente diferentes, mesmo competindo no mesmo nível.",
+    "🎪 Curiosidade: o Freestyle e o jogo competitivo utilizam muitas das mesmas mecânicas, mas a aplicação e o risco delas são completamente diferentes.",
+    "📐 Curiosidade: uma bola que bate no poste pode criar um rebote mais perigoso do que um chute direto, porque o defensor precisa reagir à nova trajetória.",
+    "🌆 Curiosidade: Neo Tokyo possui elementos de cenário que podem alterar visualmente a percepção dos rebotes, tornando algumas leituras mais difíceis.",
+    "🛰️ Curiosidade: Starbase ARC começou como uma arena experimental do Rocket Labs antes de aparecer em outros formatos do jogo.",
+    "🏟️ Curiosidade: Champions Field possui versões temáticas diferentes, mantendo a mesma estrutura básica da arena.",
+    "🚙 Curiosidade: carros com designs completamente diferentes podem ter exatamente a mesma hitbox, fazendo com que tenham propriedades físicas semelhantes.",
+    "🛍️ Curiosidade: alguns itens de equipes da RLCS já chegaram à Loja de Itens como parte das coleções oficiais de organizações profissionais.",
+    "🎨 Curiosidade: a aparência de um carro não determina sua hitbox; é possível escolher um carro visualmente diferente sem mudar sua categoria física.",
+    "⚡ Curiosidade: em níveis profissionais, pequenas diferenças no primeiro toque podem decidir se uma jogada continua em posse do atacante ou vira um contra-ataque.",
+    "🔄 Curiosidade: alguns jogadores usam um flip reset apenas para mudar a direção do carro, sem necessariamente usar o flip para bater forte na bola.",
+    "⏱️ Curiosidade: o momento em que o flip é recuperado pode ser usado pelo jogador para alterar completamente a decisão da jogada em poucos frames.",
+    "💨 Curiosidade: recuperações avançadas depois de um aerial podem preservar mais velocidade do que simplesmente aterrissar de qualquer jeito, algo extremamente importante no jogo profissional.",
 ]
 
 CURIOSIDADES_GERAIS = [
@@ -223,6 +243,12 @@ ENQUETES_RL = [
     {"pergunta": "Qual mecânica você mais quer aprender?", "opcoes": [("🌀", "Flip reset"), ("🎯", "Air dribble"), ("🔺", "Ceiling shot"), ("↩️", "Half-flip")]},
     {"pergunta": "Você joga mais no controle ou teclado?", "opcoes": [("🎮", "Controle"), ("⌨️", "Teclado/Mouse")]},
     {"pergunta": "Qual time você torce no RLCS?", "opcoes": [("🌎", "Time das Américas"), ("🌍", "Time da Europa"), ("🌏", "Time da Ásia/Oceania"), ("🤷", "Não acompanho")]},
+    {"pergunta": "O que você mais treina no momento?", "opcoes": [("🌀", "Flip reset"), ("🎯", "Mira/finalização"), ("🛡️", "Posicionamento"), ("⚡", "Velocidade de rotação")]},
+    {"pergunta": "Qual sua arena favorita?", "opcoes": [("🏟️", "DFH Stadium"), ("🌆", "Neo Tokyo"), ("🛰️", "Starbase ARC"), ("🏆", "Champions Field")]},
+    {"pergunta": "O que mais te irrita numa partida?", "opcoes": [("😤", "Whiff no gol"), ("🎣", "Ser demolido"), ("📶", "Lag/ping alto"), ("🙄", "Time sem rotação")]},
+    {"pergunta": "Qual sua categoria de hitbox favorita?", "opcoes": [("🚗", "Octane"), ("🏎️", "Dominus"), ("📦", "Plank"), ("🛞", "Breakout")]},
+    {"pergunta": "O que você prioriza pra evoluir de rank?", "opcoes": [("🎓", "Treino de mecânica"), ("🧠", "Game sense"), ("🗣️", "Comunicação"), ("🏋️", "Consistência")]},
+    {"pergunta": "Freestyle ou competitivo puro?", "opcoes": [("🎪", "Freestyle"), ("🏆", "Competitivo")]},
 ]
 
 ENQUETES_GERAIS = [
@@ -234,6 +260,12 @@ ENQUETES_GERAIS = [
     {"pergunta": "Filme ou série?", "opcoes": [("🎬", "Filme"), ("📺", "Série")]},
     {"pergunta": "Você é mais dia ou noite?", "opcoes": [("☀️", "Dia"), ("🌙", "Noite")]},
     {"pergunta": "Pizza com ou sem borda recheada?", "opcoes": [("🧀", "Com borda"), ("🍕", "Sem borda")]},
+    {"pergunta": "Trabalho remoto ou presencial?", "opcoes": [("🏠", "Remoto"), ("🏢", "Presencial")]},
+    {"pergunta": "Prefere academia ou esporte?", "opcoes": [("🏋️", "Academia"), ("⚽", "Esporte")]},
+    {"pergunta": "Você é mais organizado ou espontâneo?", "opcoes": [("📋", "Organizado"), ("🎲", "Espontâneo")]},
+    {"pergunta": "Chuva ou sol?", "opcoes": [("🌧️", "Chuva"), ("☀️", "Sol")]},
+    {"pergunta": "Prefere ler ou assistir?", "opcoes": [("📖", "Ler"), ("🎬", "Assistir")]},
+    {"pergunta": "Silêncio ou música tocando?", "opcoes": [("🤫", "Silêncio"), ("🎵", "Música")]},
 ]
 
 
