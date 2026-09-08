@@ -28,6 +28,7 @@ pro lugar original.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 
@@ -339,6 +340,30 @@ def _cache_set(texto: str, destino: str, valor: str) -> None:
     _CACHE[(texto, destino)] = (valor, time.monotonic() + _CACHE_TTL)
 
 
+# ── Limitador de taxa ────────────────────────────────────────────────────
+# O endpoint não-oficial do Google Tradutor derruba o pedido com 429 se a
+# gente mandar requisições rápido demais (comum quando várias mensagens
+# chegam em sequência nos canais PT/EN). Duas camadas de proteção:
+#   1. Espaçamento mínimo entre requisições, pra não estourar o limite.
+#   2. Backoff de verdade em cima de 429, respeitando o "Retry-After" do
+#      Google quando ele manda, ou backoff exponencial quando não manda.
+_RATE_LIMIT_LOCK = asyncio.Lock()
+_INTERVALO_MINIMO = 0.4  # segundos entre requisições ao Google Tradutor
+_ultima_requisicao = 0.0
+
+_MAX_TENTATIVAS = 4
+
+
+async def _aguardar_intervalo_minimo() -> None:
+    global _ultima_requisicao
+    async with _RATE_LIMIT_LOCK:
+        agora = time.monotonic()
+        espera = _ultima_requisicao + _INTERVALO_MINIMO - agora
+        if espera > 0:
+            await asyncio.sleep(espera)
+        _ultima_requisicao = time.monotonic()
+
+
 async def _traduzir(client: httpx.AsyncClient, texto: str, idioma_origem: str, idioma_destino: str) -> str | None:
     """Traduz `texto` do idioma `idioma_origem` pro `idioma_destino` ('en' ou 'pt').
     Retorna None se der qualquer erro (rede fora do ar, resposta
@@ -360,7 +385,8 @@ async def _traduzir(client: httpx.AsyncClient, texto: str, idioma_origem: str, i
     if em_cache is not None:
         return em_cache
 
-    for tentativa in range(2):
+    for tentativa in range(_MAX_TENTATIVAS):
+        await _aguardar_intervalo_minimo()
         try:
             resp = await client.get(
                 "https://translate.googleapis.com/translate_a/single",
@@ -379,8 +405,25 @@ async def _traduzir(client: httpx.AsyncClient, texto: str, idioma_origem: str, i
             traduzido = "".join(segmento[0] for segmento in dados[0] if segmento[0])
             _cache_set(texto, chave_cache, traduzido)
             return traduzido
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and tentativa < _MAX_TENTATIVAS - 1:
+                retry_after = e.response.headers.get("Retry-After")
+                try:
+                    espera = float(retry_after) if retry_after else (2 ** tentativa)
+                except ValueError:
+                    espera = 2 ** tentativa
+                print(
+                    f"[TRADUTOR] ⏳ Rate limit (429) do Google Tradutor — "
+                    f"aguardando {espera:.1f}s (tentativa {tentativa + 1}/{_MAX_TENTATIVAS})..."
+                )
+                await asyncio.sleep(espera)
+                continue
+            if tentativa < _MAX_TENTATIVAS - 1:
+                continue
+            print(f"[TRADUTOR] ⚠️ Erro ao traduzir: {e}")
+            return None
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
-            if tentativa == 0:
+            if tentativa < _MAX_TENTATIVAS - 1:
                 continue
             print(f"[TRADUTOR] ⚠️ Erro ao traduzir: {e}")
             return None
