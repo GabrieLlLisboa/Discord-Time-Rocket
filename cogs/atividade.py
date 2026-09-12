@@ -430,7 +430,7 @@ class Atividade(commands.Cog):
         print(f"[ATIVIDADE] 🔄 Novo período aplicado por {interaction.user}: {dias} dias, meta={msgs_min}pts, {call_min}min/pt, reset={reiniciar}.")
 
 
-    @commands.command(name="setup-sistema-atividade", hidden=True)
+    @commands.command(name="atividade", aliases=["setup-sistema-atividade"], hidden=True)
     async def setup_sistema_atividade(self, ctx: commands.Context):
         if ctx.author.id not in IDS_AUTORIZADOS:
             return
@@ -519,7 +519,7 @@ class Atividade(commands.Cog):
             await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
 
 
-    @commands.command(name="listar-inativos", hidden=True)
+    @commands.command(name="periodo-inativos", aliases=["listar-inativos"], hidden=True)
     async def listar_inativos(self, ctx: commands.Context):
 
         if ctx.author.id not in IDS_AUTORIZADOS:
@@ -611,7 +611,7 @@ class Atividade(commands.Cog):
             await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
 
 
-    @commands.command(name="ranking-pontos", aliases=["rankingpontos", "pontos-ranking"])
+    @commands.command(name="pontuacao-total", aliases=["ranking-pontos", "rankingpontos", "pontos-ranking"])
     async def ranking_pontos(self, ctx: commands.Context):
         """
         Mostra o ranking de PONTOS TOTAIS ACUMULADOS (nunca reseta, mesmo quando
@@ -662,6 +662,58 @@ class Atividade(commands.Cog):
 
     @ranking_pontos.error
     async def ranking_pontos_error(self, ctx, error):
+        await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
+
+
+    @commands.command(name="periodo-pontuacao", aliases=["pontuacao-periodo"])
+    async def periodo_pontuacao(self, ctx: commands.Context):
+        """
+        Mostra o ranking de pontos SÓ DO PERÍODO ATUAL (esse contador zera
+        quando um novo período começa — diferente do !pontuacao-total, que
+        nunca reseta). Aberto pra qualquer membro usar.
+        """
+        guild = ctx.guild
+
+        linhas_ranking = []
+        for user_id, registro in self.dados.items():
+            membro = guild.get_member(int(user_id))
+            if membro is None or membro.bot:
+                continue
+            pontos = pontos_do_periodo(registro)
+            if pontos <= 0:
+                continue
+            linhas_ranking.append((membro, pontos))
+
+        if not linhas_ranking:
+            await ctx.send("📊 Ainda ninguém pontuou neste período.")
+            return
+
+        linhas_ranking.sort(key=lambda t: t[1], reverse=True)
+
+        medalhas = {1: "🥇", 2: "🥈", 3: "🥉"}
+        linhas = []
+        for i, (membro, pontos) in enumerate(linhas_ranking[:25], start=1):
+            prefixo = medalhas.get(i, f"**{i}.**")
+            marcador_meta = " ✅" if pontos > META_PONTOS else ""
+            linhas.append(f"{prefixo} {membro.mention} — **{pontos}**/{META_PONTOS} pts{marcador_meta}")
+
+        embed = discord.Embed(
+            title="📊 Ranking do Período Atual",
+            description="\n".join(linhas),
+            color=0x5865F2,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_footer(
+            text=(
+                f"Esses pontos zeram quando o período reiniciar • "
+                f"Período: {INICIO_PERIODO.strftime('%d/%m/%Y')} até {FIM_PERIODO.strftime('%d/%m/%Y')} "
+                f"(meta: {META_PONTOS} pts)"
+            )
+        )
+        await ctx.send(embed=embed)
+
+    @periodo_pontuacao.error
+    async def periodo_pontuacao_error(self, ctx, error):
         await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
 
 
