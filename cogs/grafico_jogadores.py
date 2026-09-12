@@ -14,7 +14,7 @@ except ImportError:
     MATPLOTLIB_OK = False
 
 from cogs.players import JOGADORES_CHANNEL_ID, _esta_oculto
-from cogs.atividade import _ler as ler_atividade, limites_atuais
+from cogs.atividade import _ler as ler_atividade, atingiu_meta
 
 
 TITULO_EMBED = "📈 Novatos da Semana"
@@ -58,15 +58,12 @@ class GraficoJogadores(commands.Cog):
         ]
 
         atividade_dados = ler_atividade()
-        mensagens_minimas, segundos_call_minimo = limites_atuais()
         ativos = 0
         for m in novatos:
             registro = atividade_dados.get(str(m.id))
             if not registro:
                 continue
-            bateu_msgs = registro.get("mensagens", 0) > mensagens_minimas
-            bateu_call = registro.get("voz_segundos", 0) > segundos_call_minimo
-            if bateu_msgs or bateu_call:
+            if atingiu_meta(registro):
                 ativos += 1
 
         return novatos, ativos

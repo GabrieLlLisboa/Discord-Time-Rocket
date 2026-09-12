@@ -20,12 +20,28 @@ DATA_PATH = "data/atividade.json"
 CONFIG_PATH = "data/atividade_config.json"
 
 
+def _somar_meses(dt: datetime, meses: int) -> datetime:
+    """Soma `meses` meses numa data, ajustando ano/mês corretamente (sem depender de dateutil)."""
+    mes_total = dt.month - 1 + meses
+    ano = dt.year + mes_total // 12
+    mes = mes_total % 12 + 1
+    import calendar
+    ultimo_dia = calendar.monthrange(ano, mes)[1]
+    dia = min(dt.day, ultimo_dia)
+    return dt.replace(year=ano, month=mes, day=dia)
+
+
 def _config_padrao() -> dict:
+    # Período de atividade: começa hoje e dura 2 meses.
+    inicio = datetime(2026, 9, 12, 0, 0, tzinfo=BR_TZ)
     return {
-        "inicio": datetime(2026, 7, 1, 0, 0, tzinfo=BR_TZ).isoformat(),
-        "fim": datetime(2026, 7, 10, 0, 0, tzinfo=BR_TZ).isoformat(),
-        "mensagens_minimas": 10,
-        "segundos_call_minimo": 15 * 60,
+        "inicio": inicio.isoformat(),
+        "fim": _somar_meses(inicio, 2).isoformat(),
+        # Sistema de PONTOS: 1 mensagem = 1 ponto; a cada N segundos em call = 1 ponto.
+        # Pontos de mensagem + pontos de call se somam. Meta: mais de `meta_pontos`.
+        "meta_pontos": 25,
+        "pontos_por_mensagem": 1,
+        "segundos_por_ponto_call": 5 * 60,  # 5 minutos de call = 1 ponto
     }
 
 
@@ -40,13 +56,33 @@ def _salvar_config(config: dict):
 _config_inicial = _ler_config()
 INICIO_PERIODO = datetime.fromisoformat(_config_inicial["inicio"])
 FIM_PERIODO = datetime.fromisoformat(_config_inicial["fim"])
-MENSAGENS_MINIMAS = _config_inicial["mensagens_minimas"]
-SEGUNDOS_CALL_MINIMO = _config_inicial["segundos_call_minimo"]
+META_PONTOS = _config_inicial.get("meta_pontos", 25)
+PONTOS_POR_MENSAGEM = _config_inicial.get("pontos_por_mensagem", 1)
+SEGUNDOS_POR_PONTO_CALL = _config_inicial.get("segundos_por_ponto_call", 5 * 60)
 
 
 def limites_atuais() -> tuple:
-    """(mensagens_minimas, segundos_call_minimo) atuais — sempre em dia, mesmo após um /recomeçar período."""
-    return MENSAGENS_MINIMAS, SEGUNDOS_CALL_MINIMO
+    """(meta_pontos, segundos_por_ponto_call) atuais — sempre em dia, mesmo após um /recomeçar período.
+    Mantido por compatibilidade com outros cogs (ex: grafico_jogadores.py)."""
+    return META_PONTOS, SEGUNDOS_POR_PONTO_CALL
+
+
+def pontos_do_periodo(registro: dict) -> int:
+    """Quantos pontos de atividade o membro tem NO PERÍODO ATUAL (reseta quando o período reinicia)."""
+    pontos_msg = registro.get("mensagens", 0) * PONTOS_POR_MENSAGEM
+    pontos_call = registro.get("voz_segundos", 0) // SEGUNDOS_POR_PONTO_CALL
+    return int(pontos_msg + pontos_call)
+
+
+def pontos_totais_acumulados(registro: dict) -> int:
+    """Pontos ACUMULADOS de todos os tempos (nunca reseta, mesmo quando o período reinicia)."""
+    pontos_msg = registro.get("mensagens_total", 0) * PONTOS_POR_MENSAGEM
+    pontos_call = registro.get("voz_segundos_total", 0) // SEGUNDOS_POR_PONTO_CALL
+    return int(pontos_msg + pontos_call)
+
+
+def atingiu_meta(registro: dict) -> bool:
+    return pontos_do_periodo(registro) > META_PONTOS
 
 
 def entrou_durante_periodo(membro: discord.Member) -> bool:
@@ -91,10 +127,10 @@ class ConfirmarResetAtivosView(discord.ui.View):
 
 
 class NovoPeriodoModal(discord.ui.Modal, title="🔄 Novo Período de Avaliação"):
-    dias = discord.ui.TextInput(label="Quantos dias vai durar?", placeholder="Ex: 10", max_length=4)
+    dias = discord.ui.TextInput(label="Quantos dias vai durar?", placeholder="Ex: 60 (2 meses)", max_length=4)
     reiniciar = discord.ui.TextInput(label="Reiniciar os ativos também? (sim/não)", placeholder="sim ou não", max_length=5)
-    mensagens = discord.ui.TextInput(label="Mensagens mínimas p/ ser ativo", placeholder="Ex: 10", max_length=6)
-    minutos_call = discord.ui.TextInput(label="Minutos de call p/ ser ativo", placeholder="Ex: 15", max_length=6)
+    mensagens = discord.ui.TextInput(label="Meta de pontos p/ ser ativo", placeholder="Ex: 25", max_length=6)
+    minutos_call = discord.ui.TextInput(label="Minutos de call = 1 ponto", placeholder="Ex: 5", max_length=6)
 
     async def on_submit(self, interaction: discord.Interaction):
         cog: "Atividade" = interaction.client.get_cog("Atividade")
@@ -145,7 +181,17 @@ class Atividade(commands.Cog):
     def _registro(self, user_id: int) -> dict:
         chave = str(user_id)
         if chave not in self.dados:
-            self.dados[chave] = {"mensagens": 0, "voz_segundos": 0, "anunciado": False}
+            self.dados[chave] = {
+                "mensagens": 0,
+                "voz_segundos": 0,
+                "mensagens_total": 0,
+                "voz_segundos_total": 0,
+                "anunciado": False,
+            }
+        else:
+            # Migração: registros antigos podem não ter os campos "_total" (acumulado histórico).
+            self.dados[chave].setdefault("mensagens_total", self.dados[chave].get("mensagens", 0))
+            self.dados[chave].setdefault("voz_segundos_total", self.dados[chave].get("voz_segundos", 0))
         return self.dados[chave]
 
     async def _checar_e_anunciar(self, membro: discord.Member):
@@ -153,10 +199,8 @@ class Atividade(commands.Cog):
         if registro["anunciado"]:
             return
 
-        bateu_mensagens = registro["mensagens"] > MENSAGENS_MINIMAS
-        bateu_call = registro["voz_segundos"] > SEGUNDOS_CALL_MINIMO
-
-        if not (bateu_mensagens or bateu_call):
+        pontos = pontos_do_periodo(registro)
+        if pontos <= META_PONTOS:
             return
 
         registro["anunciado"] = True
@@ -168,20 +212,21 @@ class Atividade(commands.Cog):
             return
 
         minutos_call = int(registro["voz_segundos"] // 60)
-        motivo = []
-        if bateu_mensagens:
-            motivo.append(f"💬 **{registro['mensagens']}** mensagens")
-        if bateu_call:
-            motivo.append(f"🎙️ **{minutos_call}** minutos em call")
+        pontos_msg = registro["mensagens"] * PONTOS_POR_MENSAGEM
+        pontos_call = registro["voz_segundos"] // SEGUNDOS_POR_PONTO_CALL
+        motivo = [
+            f"💬 **{registro['mensagens']}** mensagens (**{pontos_msg}** pts)",
+            f"🎙️ **{minutos_call}** minutos em call (**{pontos_call}** pts)",
+        ]
 
         embed = discord.Embed(
             title="✅ Jogador ativo!",
-            description=f"{membro.mention} se demonstrou **ativo** no servidor!",
+            description=f"{membro.mention} bateu a meta de atividade do período com **{pontos}** pontos!",
             color=0x57F287,
             timestamp=datetime.now(timezone.utc),
         )
-        embed.add_field(name="Motivo", value=" • ".join(motivo), inline=False)
-        embed.set_footer(text=f"Período: {INICIO_PERIODO.strftime('%d/%m/%Y')} até {FIM_PERIODO.strftime('%d/%m/%Y')}")
+        embed.add_field(name="Como conseguiu os pontos", value=" • ".join(motivo), inline=False)
+        embed.set_footer(text=f"Período: {INICIO_PERIODO.strftime('%d/%m/%Y')} até {FIM_PERIODO.strftime('%d/%m/%Y')} • Meta: {META_PONTOS} pontos")
 
         try:
             await canal.send(embed=embed)
@@ -199,6 +244,7 @@ class Atividade(commands.Cog):
 
         registro = self._registro(message.author.id)
         registro["mensagens"] += 1
+        registro["mensagens_total"] += 1
         _salvar(self.dados)
 
         await self._checar_e_anunciar(message.author)
@@ -216,9 +262,10 @@ class Atividade(commands.Cog):
             elif not acompanhado and m.id in self.voz_entrada:
                 entrada = self.voz_entrada.pop(m.id)
                 if _periodo_ativo():
-                    decorrido = (agora - entrada).total_seconds()
+                    decorrido = max((agora - entrada).total_seconds(), 0)
                     registro = self._registro(m.id)
-                    registro["voz_segundos"] += max(decorrido, 0)
+                    registro["voz_segundos"] += decorrido
+                    registro["voz_segundos_total"] += decorrido
                     mudou = True
 
         if mudou:
@@ -244,9 +291,10 @@ class Atividade(commands.Cog):
         if membro.id in self.voz_entrada:
             entrada = self.voz_entrada.pop(membro.id)
             if _periodo_ativo():
-                decorrido = (agora - entrada).total_seconds()
+                decorrido = max((agora - entrada).total_seconds(), 0)
                 registro = self._registro(membro.id)
-                registro["voz_segundos"] += max(decorrido, 0)
+                registro["voz_segundos"] += decorrido
+                registro["voz_segundos_total"] += decorrido
                 _salvar(self.dados)
                 await self._checar_e_anunciar(membro)
 
@@ -285,9 +333,10 @@ class Atividade(commands.Cog):
             if self.voz_entrada:
                 agora_utc = datetime.now(timezone.utc)
                 for user_id, entrada in list(self.voz_entrada.items()):
-                    decorrido = (agora_utc - entrada).total_seconds()
+                    decorrido = max((agora_utc - entrada).total_seconds(), 0)
                     registro = self._registro(user_id)
-                    registro["voz_segundos"] += max(decorrido, 0)
+                    registro["voz_segundos"] += decorrido
+                    registro["voz_segundos_total"] += decorrido
                     self.voz_entrada.pop(user_id, None)
                 _salvar(self.dados)
 
@@ -310,13 +359,21 @@ class Atividade(commands.Cog):
 
 
     async def reiniciar_ativos(self, interaction: discord.Interaction):
-        self.dados = {}
+        # Zera só o progresso DO PERÍODO (mensagens/call/anunciado). Os pontos
+        # acumulados de todos os tempos (mensagens_total/voz_segundos_total)
+        # são preservados — é assim que o ranking de pontos totais continua
+        # somando de período em período.
+        for registro in self.dados.values():
+            registro["mensagens"] = 0
+            registro["voz_segundos"] = 0
+            registro["anunciado"] = False
         _salvar(self.dados)
         await interaction.response.edit_message(
-            content="✅ Ativos reiniciados! Todo mundo volta a contar mensagens/call do zero.",
+            content="✅ Ativos reiniciados! Todo mundo volta a contar mensagens/call do zero neste período "
+                    "(os **pontos totais acumulados** do ranking continuam guardados, sem resetar).",
             view=None,
         )
-        print(f"[ATIVIDADE] 🔁 Ativos reiniciados por {interaction.user}.")
+        print(f"[ATIVIDADE] 🔁 Ativos reiniciados por {interaction.user} (pontos acumulados preservados).")
 
 
     async def aplicar_novo_periodo(self, interaction: discord.Interaction, dias_str: str, msgs_str: str, call_min_str: str, reiniciar_str: str):
@@ -334,21 +391,26 @@ class Atividade(commands.Cog):
 
         reiniciar = reiniciar_str.strip().lower() in ("sim", "s", "yes", "y")
 
-        global INICIO_PERIODO, FIM_PERIODO, MENSAGENS_MINIMAS, SEGUNDOS_CALL_MINIMO
+        global INICIO_PERIODO, FIM_PERIODO, META_PONTOS, SEGUNDOS_POR_PONTO_CALL
         INICIO_PERIODO = datetime.now(BR_TZ)
         FIM_PERIODO = INICIO_PERIODO + timedelta(days=dias)
-        MENSAGENS_MINIMAS = msgs_min
-        SEGUNDOS_CALL_MINIMO = call_min * 60
+        META_PONTOS = msgs_min
+        SEGUNDOS_POR_PONTO_CALL = call_min * 60
 
         _salvar_config({
             "inicio": INICIO_PERIODO.isoformat(),
             "fim": FIM_PERIODO.isoformat(),
-            "mensagens_minimas": MENSAGENS_MINIMAS,
-            "segundos_call_minimo": SEGUNDOS_CALL_MINIMO,
+            "meta_pontos": META_PONTOS,
+            "pontos_por_mensagem": PONTOS_POR_MENSAGEM,
+            "segundos_por_ponto_call": SEGUNDOS_POR_PONTO_CALL,
         })
 
         if reiniciar:
-            self.dados = {}
+            # Preserva os pontos acumulados de todos os tempos, zera só o período.
+            for registro in self.dados.values():
+                registro["mensagens"] = 0
+                registro["voz_segundos"] = 0
+                registro["anunciado"] = False
             _salvar(self.dados)
 
 
@@ -358,15 +420,14 @@ class Atividade(commands.Cog):
         await interaction.response.send_message(
             "✅ **Novo período de avaliação iniciado!**\n\n"
             f"📅 **{dias}** dias — até <t:{int(FIM_PERIODO.timestamp())}:F>\n"
-            f"💬 Meta: mais de **{msgs_min}** mensagens\n"
-            f"🎙️ Ou mais de **{call_min}** minutos em call\n"
-            f"🔁 Ativos reiniciados: **{'Sim' if reiniciar else 'Não'}**\n\n"
+            f"🏆 Meta: mais de **{msgs_min}** pontos (1 msg = 1 pt, {call_min} min de call = 1 pt)\n"
+            f"🔁 Ativos reiniciados: **{'Sim' if reiniciar else 'Não'}** (pontos acumulados no ranking nunca são apagados)\n\n"
             "ℹ️ Quem entrar no servidor **durante** esse período fica de fora da "
             "contagem de ativos/inativos (não é justo cobrar atividade de quem "
             "não teve o período inteiro pra jogar).",
             ephemeral=True,
         )
-        print(f"[ATIVIDADE] 🔄 Novo período aplicado por {interaction.user}: {dias} dias, msgs>{msgs_min}, call>{call_min}min, reset={reiniciar}.")
+        print(f"[ATIVIDADE] 🔄 Novo período aplicado por {interaction.user}: {dias} dias, meta={msgs_min}pts, {call_min}min/pt, reset={reiniciar}.")
 
 
     @commands.command(name="setup-sistema-atividade", hidden=True)
@@ -380,8 +441,10 @@ class Atividade(commands.Cog):
                 "Painel de controle do período de avaliação de atividade.\n\n"
                 f"📅 Período atual: **{INICIO_PERIODO.strftime('%d/%m/%Y %H:%M')}** até "
                 f"**{FIM_PERIODO.strftime('%d/%m/%Y %H:%M')}**\n"
-                f"💬 Meta: mais de **{MENSAGENS_MINIMAS}** mensagens\n"
-                f"🎙️ Ou mais de **{SEGUNDOS_CALL_MINIMO // 60}** minutos em call\n\n"
+                f"🏆 Meta: mais de **{META_PONTOS}** pontos\n"
+                f"💬 1 mensagem = **{PONTOS_POR_MENSAGEM}** ponto\n"
+                f"🎙️ A cada **{SEGUNDOS_POR_PONTO_CALL // 60}** minutos em call = **1** ponto\n"
+                f"(mensagens e tempo em call se somam)\n\n"
                 "🔁 **Reiniciar os Ativos** — zera o progresso de todo mundo, mantendo o período atual.\n"
                 "🔄 **Recomeçar Período de Avaliação** — abre um formulário pra configurar um período novo "
                 "(quantos dias, meta de mensagens, meta de call, e se reinicia os ativos junto)."
@@ -510,8 +573,9 @@ class Atividade(commands.Cog):
         for membro in inativos:
             registro = self.dados.get(str(membro.id), {"mensagens": 0, "voz_segundos": 0})
             minutos_call = int(registro.get("voz_segundos", 0) // 60)
+            pontos = pontos_do_periodo(registro)
             linhas.append(
-                f"{membro.mention} — 💬 {registro.get('mensagens', 0)} msgs • 🎙️ {minutos_call} min"
+                f"{membro.mention} — 🏆 {pontos}/{META_PONTOS} pts • 💬 {registro.get('mensagens', 0)} msgs • 🎙️ {minutos_call} min"
             )
 
 
@@ -545,6 +609,60 @@ class Atividade(commands.Cog):
     async def listar_inativos_error(self, ctx, error):
         if ctx.author.id in IDS_AUTORIZADOS:
             await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
+
+
+    @commands.command(name="ranking-pontos", aliases=["rankingpontos", "pontos-ranking"])
+    async def ranking_pontos(self, ctx: commands.Context):
+        """
+        Mostra o ranking de PONTOS TOTAIS ACUMULADOS (nunca reseta, mesmo quando
+        o período de avaliação reinicia — só o progresso do período atual reseta).
+        Aberto pra qualquer membro usar.
+        """
+        guild = ctx.guild
+
+        linhas_ranking = []
+        for user_id, registro in self.dados.items():
+            membro = guild.get_member(int(user_id))
+            if membro is None or membro.bot:
+                continue
+            total = pontos_totais_acumulados(registro)
+            if total <= 0:
+                continue
+            linhas_ranking.append((membro, total, pontos_do_periodo(registro)))
+
+        if not linhas_ranking:
+            await ctx.send("📊 Ainda ninguém tem pontos registrados.")
+            return
+
+        linhas_ranking.sort(key=lambda t: t[1], reverse=True)
+
+        medalhas = {1: "🥇", 2: "🥈", 3: "🥉"}
+        linhas = []
+        for i, (membro, total, pontos_periodo) in enumerate(linhas_ranking[:25], start=1):
+            prefixo = medalhas.get(i, f"**{i}.**")
+            linhas.append(
+                f"{prefixo} {membro.mention} — **{total}** pontos totais "
+                f"*({pontos_periodo} neste período)*"
+            )
+
+        embed = discord.Embed(
+            title="🏆 Ranking de Pontos de Atividade",
+            description="\n".join(linhas),
+            color=0xD4A843,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_footer(
+            text=(
+                f"Pontos totais nunca resetam entre períodos • Período atual: "
+                f"{INICIO_PERIODO.strftime('%d/%m/%Y')} até {FIM_PERIODO.strftime('%d/%m/%Y')} "
+                f"(meta: {META_PONTOS} pts)"
+            )
+        )
+        await ctx.send(embed=embed)
+
+    @ranking_pontos.error
+    async def ranking_pontos_error(self, ctx, error):
+        await ctx.send(f"❌ Erro ao usar o comando: {error}", delete_after=8)
 
 
 async def setup(bot: commands.Bot):
