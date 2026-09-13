@@ -102,6 +102,17 @@ def _periodo_ativo() -> bool:
     return INICIO_PERIODO <= agora < FIM_PERIODO
 
 
+def _esta_mutado(voice_state) -> bool:
+    """
+    True se o membro está mutado (self-mute OU mute do servidor) ou se
+    simplesmente não tem voice_state (não está em call). Enquanto mutado,
+    o tempo em call não conta ponto.
+    """
+    if voice_state is None:
+        return True
+    return bool(voice_state.self_mute or voice_state.mute)
+
+
 def _ler() -> dict:
     return ler_json(DATA_PATH, {})
 
@@ -256,10 +267,14 @@ class Atividade(commands.Cog):
         mudou = False
 
         for m in humanos:
-            if acompanhado and m.id not in self.voz_entrada:
+            # Só conta ponto de call se: tiver mais alguém no canal (não sozinho)
+            # E o próprio membro estiver desmutado (nem self-mute, nem mute do servidor).
+            pode_contar = acompanhado and not _esta_mutado(m.voice)
+
+            if pode_contar and m.id not in self.voz_entrada:
                 if _periodo_ativo():
                     self.voz_entrada[m.id] = agora
-            elif not acompanhado and m.id in self.voz_entrada:
+            elif not pode_contar and m.id in self.voz_entrada:
                 entrada = self.voz_entrada.pop(m.id)
                 if _periodo_ativo():
                     decorrido = max((agora - entrada).total_seconds(), 0)
@@ -284,11 +299,14 @@ class Atividade(commands.Cog):
         antes_canal = antes.channel if (antes.channel is not None and antes.channel != canal_afk) else None
         depois_canal = depois.channel if (depois.channel is not None and depois.channel != canal_afk) else None
 
-        if antes_canal == depois_canal:
+        # Se o membro só mutou/desmutou (sem trocar de canal), precisamos
+        # recalcular mesmo assim — é isso que liga/desliga a contagem de pontos.
+        mudou_mute = _esta_mutado(antes) != _esta_mutado(depois)
+
+        if antes_canal == depois_canal and not mudou_mute:
             return
 
-
-        if membro.id in self.voz_entrada:
+        if antes_canal != depois_canal and membro.id in self.voz_entrada:
             entrada = self.voz_entrada.pop(membro.id)
             if _periodo_ativo():
                 decorrido = max((agora - entrada).total_seconds(), 0)
