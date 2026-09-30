@@ -1,0 +1,120 @@
+"""
+Módulo: Conteúdo extra do Autopilot
+Arquivo: cogs/autopilot_conteudo.py
+
+Curiosidades e enquetes ADICIONAIS do autopilot. O cogs/autopilot.py junta
+estas listas com as que já existem lá e remove duplicatas, então pra
+acrescentar mais conteúdo é só colocar um item novo aqui (o bot passa a
+sorteá-lo sem repetir e sem mexer no resto).
+
+Enquete = {"pergunta": str, "opcoes": [(emoji, texto), ...]} — 2 a 4 opções,
+cada uma com um emoji diferente (é com ele que o pessoal vota).
+"""
+
+CURIOSIDADES_RL_EXTRA: list[str] = [
+    "⚡ Você sabia? O carro só fica **supersônico** quando passa de 2.200 unidades por segundo — e o limite máximo de velocidade é 2.300.",
+    "🔋 Curiosidade: todo carro começa cada saída de bola com **33 de boost**, um terço do tanque.",
+    "🟡 Você sabia? O campo padrão tem **34 boost pads**: 6 grandes (100 de boost) e 28 pequenos (12 de boost).",
+    "⏱️ Curiosidade: depois de coletado, o boost pad grande volta em cerca de **10 segundos**, e o pequeno em cerca de **4 segundos**.",
+    "🏢 Você sabia? A Epic Games comprou a Psyonix, estúdio criador do Rocket League, em 2019.",
+    "🎯 Curiosidade: o 'kuxir pinch' ganhou esse nome por causa do jogador Kuxir97, que popularizou a mecânica.",
+    "🌊 Você sabia? O 'wave dash' é uma mecânica que ajuda a manter a velocidade ao pousar, usando um pulo com flip logo no toque no chão.",
+    "🚀 Curiosidade: o 'speed flip' é uma técnica de saída de bola que usa um flip diagonal cancelado pra chegar na bola mais rápido.",
+    "🖥️ Você sabia? Rocket League tem tela dividida local pra até **4 jogadores** no mesmo console.",
+    "🎥 Curiosidade: a 'ball cam' faz a câmera acompanhar a bola — saber a hora certa de ligar e desligar é uma habilidade básica de quem sobe de rank.",
+    "📦 Você sabia? As caixas pagas (crates) foram removidas do jogo em dezembro de 2019 e substituídas pelas Blueprints.",
+    "🏅 Curiosidade: no jogo, cada rank (menos o Supersonic Legend) tem 3 níveis, e cada nível tem 4 divisões.",
+    "💥 Você sabia? Quando um carro é demolido, ele reaparece em cerca de **3 segundos**.",
+    "📱 Curiosidade: existe o Rocket League Sideswipe, uma versão mobile do jogo em 2D, feita pra celular.",
+    "🌀 Você sabia? O 'powerslide' (derrapada) ajuda a virar rápido e a se reposicionar sem perder muita velocidade.",
+    "💬 Curiosidade: 'What a save!' é um dos quick chats mais famosos do jogo e virou meme por ser usado em qualquer situação.",
+    "🛫 Você sabia? Um 'fast aerial' combina o primeiro pulo, o boost e o segundo pulo pra ganhar altura no ar mais rápido que um aéreo comum.",
+    "🚙 Curiosidade: o Fennec usa a mesma hitbox do Octane — o que muda é só o visual.",
+    "🏎️ Você sabia? A hitbox do Dominus é mais longa e achatada, o que ajuda muito em flicks e dribles.",
+    "🧪 Curiosidade: o modo Treino Livre (Free Play) deixa você praticar qualquer jogada sem tempo e sem adversário, sem pressão nenhuma.",
+    "⏳ Você sabia? Depois do primeiro pulo, você tem cerca de **1,5 segundo** pra usar o segundo pulo ou o flip.",
+    "🧭 Curiosidade: existem **cinco posições** diferentes de saída de bola, e cada uma tem um jeito ideal de ser jogada.",
+    "🎾 Você sabia? 'Dribble' é a técnica de conduzir a bola em cima do carro, controlando ela no capô.",
+    "🌪️ Curiosidade: o modo Chaos coloca **4 jogadores por time**, deixando as partidas bem mais bagunçadas que o 3v3.",
+    "🏆 Você sabia? Dentro do próprio jogo existe o modo Torneios, com chaves onde você compete contra outros jogadores.",
+    "🛡️ Curiosidade: uma boa rotação em dupla ou trio evita que dois jogadores disputem a mesma bola ao mesmo tempo, o famoso 'double commit'.",
+    "🔁 Você sabia? Uma 'redirect' é quando você toca uma bola que veio de um passe ou chute e muda a direção dela, em vez de dominá-la.",
+    "🎮 Curiosidade: 'ball chasing' é o vício de correr atrás da bola o tempo todo, e é um dos erros mais comuns de quem está subindo de rank.",
+    "📈 Você sabia? Boost management (saber quando pegar e quando gastar boost) costuma separar muito jogadores de ranks parecidos.",
+]
+
+CURIOSIDADES_GERAIS_EXTRA: list[str] = [
+    "🪐 Você sabia? Em Vênus, um dia dura mais que um ano: ele leva cerca de 243 dias terrestres pra girar em torno de si e cerca de 225 pra dar a volta no Sol.",
+    "🟫 Curiosidade: os vombates são os únicos animais que fazem cocô em formato de cubo.",
+    "🪼 Você sabia? A água-viva Turritopsis dohrnii consegue voltar a uma fase jovem da vida depois de adulta, por isso é chamada de 'imortal'.",
+    "🗼 Curiosidade: a Torre Eiffel pode crescer até 15 cm no verão, porque o metal se dilata com o calor.",
+    "☀️ Você sabia? O Sol concentra cerca de 99,8% de toda a massa do Sistema Solar.",
+    "🌌 Curiosidade: Plutão ainda não completou uma volta inteira em torno do Sol desde que foi descoberto, em 1930, porque sua órbita dura cerca de 248 anos.",
+    "❤️ Você sabia? O coração humano bate cerca de 100 mil vezes por dia.",
+    "🦴 Curiosidade: um bebê nasce com cerca de 300 ossos, mas um adulto tem 206, porque muitos se fundem durante o crescimento.",
+    "👂 Você sabia? O menor osso do corpo humano é o estribo, que fica dentro do ouvido.",
+    "🧍 Curiosidade: a pele é o maior órgão do corpo humano.",
+    "🐜 Você sabia? Já foram descritas mais de 12 mil espécies de formigas no mundo todo.",
+    "🧊 Curiosidade: a Antártida é o maior deserto do planeta — deserto é definido por pouca chuva, não por calor.",
+    "🏜️ Você sabia? O Saara já foi uma região verde, com lagos e vegetação, há alguns milhares de anos.",
+    "🔇 Curiosidade: o som não se propaga no vácuo, por isso no espaço ninguém ouve explosões.",
+    "🌊 Você sabia? O rio Amazonas é o maior do mundo em volume de água.",
+    "🐕 Curiosidade: o focinho de cada cachorro tem um padrão único, como se fosse uma impressão digital.",
+    "😺 Você sabia? Gatos passam de 12 a 16 horas por dia dormindo.",
+    "🐘 Curiosidade: elefantes são um dos poucos mamíferos grandes que não conseguem pular.",
+    "🦎 Você sabia? Camaleões mudam de cor mais pra se comunicar e regular a temperatura do que só pra se camuflar.",
+    "✨ Curiosidade: um ano-luz é a distância que a luz percorre em um ano, cerca de 9,5 trilhões de quilômetros.",
+    "🎋 Você sabia? Algumas espécies de bambu chegam a crescer quase 1 metro em um único dia.",
+    "🐠 Curiosidade: a Grande Barreira de Corais, na Austrália, tem mais de 2.000 km e é considerada a maior estrutura viva do planeta.",
+    "⚡ Você sabia? Um raio esquenta o ar ao redor a cerca de 30.000 °C, várias vezes a temperatura da superfície do Sol.",
+    "☁️ Curiosidade: uma nuvem cúmulo comum pode pesar cerca de 500 toneladas, mesmo flutuando no céu.",
+    "🔴 Você sabia? Um dia em Marte dura cerca de 24 horas e 40 minutos, bem parecido com o da Terra.",
+    "🇧🇷 Curiosidade: o Brasil é o maior país da América do Sul e o quinto maior do mundo em área.",
+    "🌍 Você sabia? A água cobre cerca de 71% da superfície da Terra.",
+    "🧠 Curiosidade: o cérebro humano tem cerca de 86 bilhões de neurônios.",
+    "👁️ Você sabia? Nós piscamos, em média, de 15 a 20 vezes por minuto.",
+    "🌠 Curiosidade: a maioria das estrelas cadentes são pedacinhos de poeira ou rocha do tamanho de um grão de areia, queimando na atmosfera.",
+    "🪐 Você sabia? Saturno é tão pouco denso que, em teoria, boiaria na água se existisse uma banheira grande o bastante.",
+    "🐴 Curiosidade: nos cavalos-marinhos, é o macho que fica grávido e carrega os filhotes.",
+    "🦇 Você sabia? Os morcegos são os únicos mamíferos capazes de voar de verdade.",
+    "🐯 Curiosidade: as listras dos tigres existem também na pele deles, não só nos pelos, e cada tigre tem um padrão único.",
+    "🐦 Você sabia? O olho de um avestruz é maior que o cérebro dela.",
+]
+
+ENQUETES_RL_EXTRA: list[dict] = [
+    {"pergunta": "Você joga com ball cam ligada?", "opcoes": [("✅", "Sempre"), ("🔀", "Só às vezes"), ("🎥", "Prefiro câmera livre")]},
+    {"pergunta": "Qual seu maior ponto forte no jogo?", "opcoes": [("🛡️", "Defesa"), ("⚔️", "Ataque"), ("🌀", "Mecânicas"), ("🧠", "Leitura de jogo")]},
+    {"pergunta": "Qual seu mapa favorito?", "opcoes": [("🏟️", "DFH Stadium"), ("🌆", "Mannfield"), ("🌌", "Utopia Coliseum"), ("🏙️", "Champions Field")]},
+    {"pergunta": "Qual mecânica você domina melhor?", "opcoes": [("🌀", "Flip reset"), ("🎯", "Air dribble"), ("🔺", "Ceiling shot"), ("⚡", "Speed flip")]},
+    {"pergunta": "Em que período você mais joga?", "opcoes": [("🌅", "Manhã"), ("☀️", "Tarde"), ("🌙", "Noite"), ("🦉", "Madrugada")]},
+    {"pergunta": "Qual playlist você mais joga?", "opcoes": [("⚽", "Casual"), ("🏆", "Competitivo"), ("🎪", "Modos extras"), ("🏋️", "Treino")]},
+    {"pergunta": "Qual o rank mais alto que você já chegou?", "opcoes": [("🥈", "Até Platina"), ("💎", "Diamante"), ("🏅", "Champion"), ("🏆", "GC ou acima")]},
+    {"pergunta": "Qual power-up do Rumble é o mais divertido?", "opcoes": [("🧊", "Freezer"), ("🌪️", "Tornado"), ("🪝", "Plunger"), ("🔩", "Spikes")]},
+    {"pergunta": "Como você treina?", "opcoes": [("🏋️", "Treino livre"), ("📦", "Custom training"), ("🛠️", "Workshop"), ("🚫", "Não treino")]},
+    {"pergunta": "Você joga mais…", "opcoes": [("👤", "Solo queue"), ("🤝", "Com dupla"), ("👥", "Com time fixo")]},
+    {"pergunta": "No 2v2, você costuma ser…", "opcoes": [("⚔️", "O que vai na frente"), ("🛡️", "O que cobre atrás"), ("🔄", "Alterno bastante")]},
+    {"pergunta": "O que mais tira você do sério no Rocket League?", "opcoes": [("🏃", "Ball chasing do time"), ("📶", "Ping alto"), ("💬", "Chat tóxico"), ("😤", "Perder 50/50")]},
+    {"pergunta": "Em qual plataforma você joga?", "opcoes": [("💻", "PC"), ("🎮", "PlayStation"), ("🟢", "Xbox"), ("🔴", "Switch")]},
+    {"pergunta": "Você já fez um flip reset em partida?", "opcoes": [("🔥", "Sim, várias vezes"), ("😎", "Uma vez"), ("🏋️", "Só no treino"), ("🙈", "Ainda não")]},
+    {"pergunta": "O que vale mais: mecânica ou tomada de decisão?", "opcoes": [("🌀", "Mecânica"), ("🧠", "Tomada de decisão"), ("⚖️", "Os dois igual")]},
+    {"pergunta": "Qual modo extra você mais joga?", "opcoes": [("🏀", "Hoops"), ("🥊", "Rumble"), ("🕳️", "Dropshot"), ("🏒", "Snow Day")]},
+]
+
+ENQUETES_GERAIS_EXTRA: list[dict] = [
+    {"pergunta": "Gato ou cachorro?", "opcoes": [("🐱", "Gato"), ("🐶", "Cachorro")]},
+    {"pergunta": "Pizza ou hambúrguer?", "opcoes": [("🍕", "Pizza"), ("🍔", "Hambúrguer")]},
+    {"pergunta": "Teletransporte ou ler mentes?", "opcoes": [("🌀", "Teletransporte"), ("🧠", "Ler mentes")]},
+    {"pergunta": "Qual sua estação do ano favorita?", "opcoes": [("☀️", "Verão"), ("🍂", "Outono"), ("❄️", "Inverno"), ("🌸", "Primavera")]},
+    {"pergunta": "Sorvete ou açaí?", "opcoes": [("🍦", "Sorvete"), ("🍇", "Açaí")]},
+    {"pergunta": "Refri ou suco?", "opcoes": [("🥤", "Refri"), ("🧃", "Suco")]},
+    {"pergunta": "Cinema ou maratona em casa?", "opcoes": [("🍿", "Cinema"), ("🛋️", "Em casa")]},
+    {"pergunta": "Jogar no PC ou no console?", "opcoes": [("💻", "PC"), ("🎮", "Console")]},
+    {"pergunta": "Qual seu fim de semana ideal?", "opcoes": [("🚶", "Sair com a galera"), ("🎮", "Jogar"), ("😴", "Dormir"), ("📺", "Maratonar algo")]},
+    {"pergunta": "Que tipo de música você mais ouve?", "opcoes": [("🎤", "Rap / Trap"), ("🥁", "Funk"), ("🎸", "Rock"), ("🎧", "Eletrônica")]},
+    {"pergunta": "Dinheiro infinito ou tempo infinito?", "opcoes": [("💰", "Dinheiro"), ("⏳", "Tempo")]},
+    {"pergunta": "Uma semana sem internet ou sem celular?", "opcoes": [("📵", "Sem internet"), ("📴", "Sem celular")]},
+    {"pergunta": "Chocolate ao leite ou amargo?", "opcoes": [("🍫", "Ao leite"), ("🖤", "Amargo")]},
+    {"pergunta": "Campo ou cidade?", "opcoes": [("🌾", "Campo"), ("🏙️", "Cidade")]},
+    {"pergunta": "Anime ou série live-action?", "opcoes": [("🍥", "Anime"), ("🎭", "Live-action")]},
+    {"pergunta": "Ler ou assistir?", "opcoes": [("📚", "Ler"), ("📺", "Assistir")]},
+]

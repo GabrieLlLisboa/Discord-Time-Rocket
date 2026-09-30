@@ -1,11 +1,18 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
+import hashlib
 import os
 import random
 import time
 from datetime import datetime, timezone, timedelta
 from cogs.json_store import ler_json, salvar_json
+from cogs.autopilot_conteudo import (
+    CURIOSIDADES_RL_EXTRA,
+    CURIOSIDADES_GERAIS_EXTRA,
+    ENQUETES_RL_EXTRA,
+    ENQUETES_GERAIS_EXTRA,
+)
 
 
 CONFIG_PATH = "data/autopilot.json"
@@ -212,7 +219,6 @@ CURIOSIDADES_GERAIS = [
 ]
 
 
-CHANCE_ENQUETE = 0.2
 
 ENQUETES_RL = [
     {"pergunta": "Qual seu rank atual?", "opcoes": [("🥉", "Bronze / Prata"), ("🥈", "Ouro / Platina"), ("💎", "Diamante / Champion"), ("🏆", "GC ou acima")]},
@@ -235,6 +241,52 @@ ENQUETES_GERAIS = [
     {"pergunta": "Você é mais dia ou noite?", "opcoes": [("☀️", "Dia"), ("🌙", "Noite")]},
     {"pergunta": "Pizza com ou sem borda recheada?", "opcoes": [("🧀", "Com borda"), ("🍕", "Sem borda")]},
 ]
+
+
+CHANCE_ENQUETE = 0.25
+
+
+def _chave_item(item) -> str:
+    """Identificador estável de uma curiosidade (texto) ou enquete (pergunta).
+    Baseado no texto e não na posição, então adicionar/remover itens da lista
+    não bagunça o histórico de quais já foram enviadas."""
+    texto = item["pergunta"] if isinstance(item, dict) else item
+    return hashlib.md5(texto.encode("utf-8")).hexdigest()[:12]
+
+
+def _sem_duplicatas(itens: list) -> list:
+    vistos: set[str] = set()
+    unicos = []
+    for item in itens:
+        chave = _chave_item(item)
+        if chave not in vistos:
+            vistos.add(chave)
+            unicos.append(item)
+    return unicos
+
+
+def sortear_sem_repetir(itens: list, usados: list[str]) -> tuple:
+    """Sorteia um item que ainda NÃO foi enviado neste ciclo. Só depois de
+    todos terem saído o ciclo recomeça — e o primeiro do novo ciclo nunca é o
+    último enviado. Devolve (item_escolhido, nova_lista_de_usados)."""
+    validas = {_chave_item(i) for i in itens}
+    usados = [u for u in usados if u in validas]  # esquece itens que saíram da lista
+
+    restantes = [i for i in itens if _chave_item(i) not in usados]
+    if not restantes:
+        ultimo = usados[-1] if usados else None
+        usados = []
+        restantes = [i for i in itens if _chave_item(i) != ultimo] or list(itens)
+
+    escolhido = random.choice(restantes)
+    return escolhido, usados + [_chave_item(escolhido)]
+
+
+# Junta o conteúdo original com o de cogs/autopilot_conteudo.py (sem duplicatas)
+CURIOSIDADES_RL = _sem_duplicatas(CURIOSIDADES_RL + CURIOSIDADES_RL_EXTRA)
+CURIOSIDADES_GERAIS = _sem_duplicatas(CURIOSIDADES_GERAIS + CURIOSIDADES_GERAIS_EXTRA)
+ENQUETES_RL = _sem_duplicatas(ENQUETES_RL + ENQUETES_RL_EXTRA)
+ENQUETES_GERAIS = _sem_duplicatas(ENQUETES_GERAIS + ENQUETES_GERAIS_EXTRA)
 
 
 CANAIS = {
@@ -304,7 +356,7 @@ class Autopilot(commands.Cog):
                     continue
 
                 try:
-                    await self._enviar_mensagem(chave)
+                    await self._enviar_mensagem(chave, estado)
                 except Exception as e:
 
 
@@ -363,7 +415,10 @@ class Autopilot(commands.Cog):
         if mudou:
             salvar_config(config)
 
-    async def _enviar_mensagem(self, chave: str):
+    async def _enviar_mensagem(self, chave: str, estado: dict):
+        """Envia uma curiosidade ou enquete SEM repetir: o histórico do que já
+        saiu fica em `estado` (data/autopilot.json) e só zera quando todas
+        as opções da lista já foram usadas."""
         cfg_canal = CANAIS[chave]
         canal = self.bot.get_channel(cfg_canal["canal_id"])
         if canal is None:
@@ -373,13 +428,16 @@ class Autopilot(commands.Cog):
         enquetes = cfg_canal.get("enquetes")
 
         if enquetes and random.random() < CHANCE_ENQUETE:
-            await self._enviar_enquete(canal, random.choice(enquetes))
+            enquete, usadas = sortear_sem_repetir(enquetes, estado.get("enquetes_usadas", []))
+            if await self._enviar_enquete(canal, enquete):
+                estado["enquetes_usadas"] = usadas
             return
 
-        mensagem = random.choice(cfg_canal["mensagens"])
+        mensagem, usadas = sortear_sem_repetir(cfg_canal["mensagens"], estado.get("mensagens_usadas", []))
         await canal.send(mensagem)
+        estado["mensagens_usadas"] = usadas
 
-    async def _enviar_enquete(self, canal: discord.abc.Messageable, enquete: dict):
+    async def _enviar_enquete(self, canal: discord.abc.Messageable, enquete: dict) -> bool:
         opcoes_texto = "\n".join(f"{emoji}  {texto}" for emoji, texto in enquete["opcoes"])
         embed = discord.Embed(
             title="📊 Enquete rápida!",
@@ -392,13 +450,14 @@ class Autopilot(commands.Cog):
             msg = await canal.send(embed=embed)
         except discord.HTTPException as e:
             print(f"[AUTOPILOT] ⚠️ Erro ao enviar enquete: {e}")
-            return
+            return False
 
         for emoji, _ in enquete["opcoes"]:
             try:
                 await msg.add_reaction(emoji)
             except discord.HTTPException:
                 pass
+        return True
 
 
     @app_commands.command(name="autopilot_toggle", description="[Staff] Liga ou desliga as mensagens automáticas do bot.")
@@ -421,11 +480,10 @@ class Autopilot(commands.Cog):
     async def autopilot_testar(self, interaction: discord.Interaction, canal: app_commands.Choice[str]):
         chave = "geral" if canal.value == "geral" else "rocket_league"
 
-        await self._enviar_mensagem(chave)
-
         config = ler_config()
         canais_cfg = config.setdefault("canais", {})
         estado = canais_cfg.setdefault(chave, {})
+        await self._enviar_mensagem(chave, estado)
         self._agendar_proximo(chave, estado)
         salvar_config(config)
 
