@@ -1,9 +1,12 @@
+import random
+
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 
 from cogs.players import CARGOS as _CARGOS_JOGADORES
 from cogs.json_store import ler_json, salvar_json
+from cogs.atividade_incentivos import MENSAGENS_INCENTIVO
 
 RANKS_ORDENADOS = [c for c in _CARGOS_JOGADORES if c["secao"] == "rank"]
 RANK_IDS_SET = {c["id"] for c in RANKS_ORDENADOS}
@@ -18,6 +21,17 @@ IDS_AUTORIZADOS = {1487452210605588592, 1421693641184772147}
 
 DATA_PATH = "data/atividade.json"
 CONFIG_PATH = "data/atividade_config.json"
+
+# Incentivo aos inativos: o bot manda uma das 32 mensagens de
+# cogs/atividade_incentivos.py neste canal, a cada INCENTIVO_INTERVALO_MIN..MAX
+# minutos, só entre INCENTIVO_HORA_INICIO e INCENTIVO_HORA_FIM (horário de
+# Brasília) e só enquanto houver inativos no período.
+CANAL_INCENTIVO_ID = 1511910275618443314
+INCENTIVO_PATH = "data/atividade_incentivo.json"
+INCENTIVO_INTERVALO_MIN = 240
+INCENTIVO_INTERVALO_MAX = 360
+INCENTIVO_HORA_INICIO = 12
+INCENTIVO_HORA_FIM = 22
 
 
 def _somar_meses(dt: datetime, meses: int) -> datetime:
@@ -184,9 +198,11 @@ class Atividade(commands.Cog):
         self.dados = _ler()
         self.voz_entrada = {}
         self.verificar_fim_periodo.start()
+        self.incentivar_inativos.start()
 
     def cog_unload(self):
         self.verificar_fim_periodo.cancel()
+        self.incentivar_inativos.cancel()
 
 
     def _registro(self, user_id: int) -> dict:
@@ -373,6 +389,72 @@ class Atividade(commands.Cog):
 
     @verificar_fim_periodo.before_loop
     async def antes_verificar(self):
+        await self.bot.wait_until_ready()
+
+
+    def _contar_inativos(self) -> int:
+        """Mesmo critério do !periodo-inativos: não bateu a meta e não entrou
+        durante o período (esses ainda estão em carência)."""
+        total = 0
+        for guild in self.bot.guilds:
+            for membro in guild.members:
+                if membro.bot or entrou_durante_periodo(membro):
+                    continue
+                registro = self.dados.get(str(membro.id))
+                if registro is None or not registro.get("anunciado", False):
+                    total += 1
+        return total
+
+    @staticmethod
+    def _dias_restantes_texto() -> str:
+        dias = max((FIM_PERIODO - datetime.now(BR_TZ)).days, 0)
+        return "1 dia" if dias == 1 else f"{dias} dias"
+
+    @tasks.loop(minutes=1)
+    async def incentivar_inativos(self):
+        if not _periodo_ativo():
+            return
+
+        hora = datetime.now(BR_TZ).hour
+        if not (INCENTIVO_HORA_INICIO <= hora < INCENTIVO_HORA_FIM):
+            return
+
+        estado = ler_json(INCENTIVO_PATH, dict)
+        agora = datetime.now(timezone.utc).timestamp()
+        if agora < estado.get("proximo_envio_ts", 0):
+            return
+
+        # agenda o próximo ANTES de enviar: se der erro, não fica tentando a cada minuto
+        estado["proximo_envio_ts"] = agora + random.randint(INCENTIVO_INTERVALO_MIN, INCENTIVO_INTERVALO_MAX) * 60
+
+        try:
+            inativos = self._contar_inativos()
+            canal = self.bot.get_channel(CANAL_INCENTIVO_ID)
+            if inativos == 0:
+                return
+            if canal is None:
+                print(f"[ATIVIDADE] ⚠️ Canal de incentivo ({CANAL_INCENTIVO_ID}) não encontrado.")
+                return
+
+            # sorteia uma mensagem diferente da última enviada
+            indices = [i for i in range(len(MENSAGENS_INCENTIVO)) if i != estado.get("ultima_mensagem")]
+            indice = random.choice(indices)
+            texto = MENSAGENS_INCENTIVO[indice].format(
+                meta=META_PONTOS,
+                min_call=max(SEGUNDOS_POR_PONTO_CALL // 60, 1),
+                dias=self._dias_restantes_texto(),
+                inativos="1 membro" if inativos == 1 else f"{inativos} membros",
+            )
+            await canal.send(texto)
+            estado["ultima_mensagem"] = indice
+            print(f"[ATIVIDADE] 📣 Incentivo #{indice + 1} enviado ({inativos} inativos).")
+        except discord.HTTPException as e:
+            print(f"[ATIVIDADE] ⚠️ Erro ao enviar incentivo: {e}")
+        finally:
+            salvar_json(INCENTIVO_PATH, estado)
+
+    @incentivar_inativos.before_loop
+    async def antes_incentivar(self):
         await self.bot.wait_until_ready()
 
 

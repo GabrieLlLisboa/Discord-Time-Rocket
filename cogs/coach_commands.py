@@ -26,6 +26,8 @@ from discord.ext import commands
 from cogs.coach_config import COACHES, coach_por_channel_id, adicionar_coach, CoachJaExisteError
 from cogs.coach_storage import (
     obter_ticket,
+    obter_coach_data,
+    set_anuncio_coach,
     finalizar_ticket,
     TicketNaoEncontradoError,
     TicketJaFinalizadoError,
@@ -33,6 +35,7 @@ from cogs.coach_storage import (
 from cogs.coach_manager import finalizar_atendimento
 from cogs.coach_stats import garantir_mensagens_existem, reordenar_mensagens_finais
 from cogs.coach_utils import pode_finalizar, eh_gerente
+from cogs.coach_anuncios import ANUNCIOS
 
 
 class Coaches(commands.Cog):
@@ -53,6 +56,37 @@ class Coaches(commands.Cog):
                 await garantir_mensagens_existem(self.bot, coach_key)
             except Exception as e:
                 print(f"[COACH] ⚠️ Erro ao garantir mensagens do coach '{coach_key}': {e}")
+
+            try:
+                await self._enviar_anuncio_se_preciso(coach_key)
+            except Exception as e:
+                print(f"[COACH] ⚠️ Erro ao enviar anúncio do coach '{coach_key}': {e}")
+
+    async def _enviar_anuncio_se_preciso(self, coach_key: str) -> None:
+        """Envia o texto de divulgação do coach (cogs/coach_anuncios.py) uma
+        única vez e recoloca Estatísticas/Comprar como as duas últimas
+        mensagens do canal, abaixo do anúncio."""
+        texto = ANUNCIOS.get(coach_key)
+        if not texto:
+            return
+
+        coach_data = await obter_coach_data(coach_key)
+        if coach_data.get("anuncio_message_id"):
+            return
+
+        coach = COACHES[coach_key]
+        canal = self.bot.get_channel(coach["channel_id"])
+        if canal is None:
+            try:
+                canal = await self.bot.fetch_channel(coach["channel_id"])
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
+                print(f"[COACH] ⚠️ Canal do coach '{coach_key}' inacessível pra enviar o anúncio: {e}")
+                return
+
+        msg = await canal.send(texto)
+        await set_anuncio_coach(coach_key, msg.id)
+        await reordenar_mensagens_finais(self.bot, coach_key)
+        print(f"[COACH] 📣 Anúncio do coach '{coach_key}' enviado no canal {canal.id}.")
 
 
     @app_commands.command(name="adicionar-coach", description="Cadastra um novo coach no sistema de atendimentos.")
@@ -86,6 +120,11 @@ class Coaches(commands.Cog):
             await garantir_mensagens_existem(self.bot, chave)
         except Exception as e:
             print(f"[COACH] ⚠️ Erro ao criar mensagens iniciais do coach '{chave}': {e}")
+
+        try:
+            await self._enviar_anuncio_se_preciso(chave)
+        except Exception as e:
+            print(f"[COACH] ⚠️ Erro ao enviar anúncio do coach '{chave}': {e}")
 
         from cogs.coach_views import ComprarAtendimentoView
 

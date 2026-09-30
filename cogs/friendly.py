@@ -131,6 +131,12 @@ RANK_EMOJIS = {c["nome"]: c["emoji"] for c in CARGOS_RANK}
 RANK_EMOJIS["Ouro"] = "🥇"
 
 
+# Divisões do Champion: se quem anuncia marcar as três (C1, C2 e C3), o
+# amistoso é tratado como "Champion" (todos os ranks Champion) — pra não
+# ficar "Champion 1 + Champion 2 + Champion 3" repetido em tudo.
+CHAMPION_DIVISOES_IDS = {RANKS[f"Champion {d}"] for d in (1, 2, 3)}
+
+
 def rank_info(role: discord.Role):
     for nome, rid in RANKS.items():
         if role.id == rid:
@@ -326,6 +332,16 @@ async def criar_amistoso(
         ranks_ids.append(rank3.id)
         nomes_ranks.append(info3[0])
         emojis_ranks.append(info3[1])
+
+    if CHAMPION_DIVISOES_IDS <= set(ranks_ids):
+        # C1 + C2 + C3 marcados = todos os ranks Champion: junta num item só.
+        # ranks_ids continua com os 3 cargos (menção e confirmação de presença).
+        restantes = [
+            (e, n) for rid, e, n in zip(ranks_ids, emojis_ranks, nomes_ranks)
+            if rid not in CHAMPION_DIVISOES_IDS
+        ]
+        emojis_ranks = [RANK_EMOJIS["Champion 1"]] + [e for e, _ in restantes]
+        nomes_ranks  = ["Champion"] + [n for _, n in restantes]
 
     rank_display = " + ".join(f"{e} {n}" for e, n in zip(emojis_ranks, nomes_ranks))
     mencao_str   = " ".join(guild.get_role(rid).mention for rid in ranks_ids if guild.get_role(rid))

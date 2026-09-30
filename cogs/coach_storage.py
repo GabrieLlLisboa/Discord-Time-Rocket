@@ -44,6 +44,7 @@ def _coach_data_padrao() -> dict:
     return {
         "stats_message_id": None,
         "buy_message_id": None,
+        "anuncio_message_id": None,
         "notas": {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0},
     }
 
@@ -264,4 +265,14 @@ async def set_mensagens_coach(
             coach_data["stats_message_id"] = stats_message_id
         if buy_message_id != "__manter__":
             coach_data["buy_message_id"] = buy_message_id
+        _salvar(dados)
+
+
+async def set_anuncio_coach(coach_key: str, anuncio_message_id: Optional[int]) -> None:
+    """Guarda o ID da mensagem de anúncio (divulgação) do coach, pra ela
+    ser enviada uma única vez."""
+    async with _lock:
+        dados = _ler()
+        coach_data = _garantir_coach_data(dados, coach_key)
+        coach_data["anuncio_message_id"] = anuncio_message_id
         _salvar(dados)
