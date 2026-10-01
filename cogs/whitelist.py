@@ -426,6 +426,46 @@ def _checar_admin(interaction: discord.Interaction) -> bool:
     return mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator
 
 
+class ConfirmarRecusaView(discord.ui.View):
+    """Confirmação antes de recusar uma whitelist (recusar EXPULSA o membro),
+    pra evitar clique ou comando acidental. Só quem pediu a recusa confirma."""
+    def __init__(self, membro_id: int, autor_id: int, forcar_publico: bool = False):
+        super().__init__(timeout=60)
+        self.membro_id = membro_id
+        self.autor_id = autor_id
+        self.forcar_publico = forcar_publico
+        self.message: discord.Message | None = None            # quando enviada como mensagem normal
+        self.interaction: discord.Interaction | None = None    # quando enviada como resposta efêmera
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.autor_id:
+            await interaction.response.send_message("❌ Só quem pediu a recusa pode confirmar.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="✅ Sim, recusar", style=discord.ButtonStyle.danger)
+    async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="⏳ Recusando a whitelist...", view=None)
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        ephemeral, mensagem = await cog.recusar_core(interaction.guild, self.membro_id, interaction.user, interaction.channel)
+        await interaction.followup.send(mensagem, ephemeral=ephemeral and not self.forcar_publico)
+
+    @discord.ui.button(label="↩️ Cancelar", style=discord.ButtonStyle.secondary)
+    async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="Beleza, a whitelist continua como estava. 👍", view=None)
+
+    async def on_timeout(self):
+        try:
+            if self.interaction is not None:
+                await self.interaction.edit_original_response(content="⌛ Confirmação expirada — nada foi feito.", view=None)
+            elif self.message is not None:
+                await self.message.edit(content="⌛ Confirmação expirada — nada foi feito.", view=None)
+        except discord.HTTPException:
+            pass
+
+
 class RevisaoWhitelistView(discord.ui.View):
     def __init__(self, membro_id: int):
         super().__init__(timeout=None)
@@ -454,8 +494,7 @@ class RevisaoWhitelistView(discord.ui.View):
             await interaction.response.send_message("❌ Só administradores podem revisar whitelists.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        ephemeral, mensagem = await cog.recusar_core(interaction.guild, self.membro_id, interaction.user, interaction.channel)
-        await interaction.response.send_message(mensagem, ephemeral=ephemeral)
+        await cog.pedir_confirmacao_recusa(interaction, self.membro_id)
 
 
 class Whitelist(commands.Cog):
@@ -1020,6 +1059,47 @@ class Whitelist(commands.Cog):
         return False, mensagem
 
 
+    def _bloqueio_recusa(self, membro_id: int, autor_id: int) -> str | None:
+        """Mesmas travas do recusar_core, checadas ANTES de pedir confirmação
+        (não adianta perguntar 'tem certeza?' se a recusa nem é possível)."""
+        registro = self.dados.get(str(membro_id))
+        if not registro:
+            return "⚠️ Não achei os dados dessa whitelist."
+        if registro.get("status") in ("aprovada", "recusada"):
+            acao = "aprovada" if registro["status"] == "aprovada" else "recusada"
+            quem = registro.get("decidido_por_nome", "outro administrador")
+            return f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela."
+        visualizado_por_id = registro.get("visualizado_por_id")
+        if visualizado_por_id is not None and visualizado_por_id != autor_id:
+            nome = registro.get("visualizado_por_nome", "outro administrador")
+            return f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar."
+        return None
+
+    @staticmethod
+    def _texto_confirmacao_recusa(guild: discord.Guild | None, membro_id: int) -> str:
+        membro = guild.get_member(membro_id) if guild else None
+        quem = membro.mention if membro else f"<@{membro_id}>"
+        return (
+            f"⚠️ **Tem certeza que quer recusar a whitelist de {quem}?**\n"
+            f"Isso vai **expulsar** a pessoa do servidor automaticamente."
+        )
+
+    async def pedir_confirmacao_recusa(self, interaction: discord.Interaction, membro_id: int):
+        """Botão ❌ Recusar: pergunta antes de recusar (mensagem só pra quem clicou)."""
+        bloqueio = self._bloqueio_recusa(membro_id, interaction.user.id)
+        if bloqueio:
+            await interaction.response.send_message(bloqueio, ephemeral=True)
+            return
+
+        view = ConfirmarRecusaView(membro_id, interaction.user.id)
+        await interaction.response.send_message(
+            self._texto_confirmacao_recusa(interaction.guild, membro_id),
+            view=view,
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        view.interaction = interaction
+
     async def recusar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel) -> tuple[bool, str]:
         registro = self.dados.get(str(membro_id))
         if not registro:
@@ -1167,8 +1247,16 @@ class Whitelist(commands.Cog):
         if membro_id is None:
             await ctx.send("⚠️ Esse comando só funciona dentro do canal de whitelist de um membro.", delete_after=8)
             return
-        _, mensagem = await self.recusar_core(ctx.guild, membro_id, ctx.author, ctx.channel)
-        await ctx.send(mensagem)
+        bloqueio = self._bloqueio_recusa(membro_id, ctx.author.id)
+        if bloqueio:
+            await ctx.send(bloqueio)
+            return
+        view = ConfirmarRecusaView(membro_id, ctx.author.id, forcar_publico=True)
+        view.message = await ctx.send(
+            self._texto_confirmacao_recusa(ctx.guild, membro_id),
+            view=view,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @reprovar_whitelist_cmd.error
     async def reprovar_whitelist_cmd_error(self, ctx, error):

@@ -147,6 +147,7 @@ COGS = [
     "cogs.tradutor",
     "cogs.quiz",
     "cogs.autopilot",
+    "cogs.noticias",
     "cogs.conversar",
     "cogs.aleatory",
     "cogs.webterminal",

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from cogs.players import CARGOS as _CARGOS_JOGADORES
 from cogs.json_store import ler_json, salvar_json
-from cogs.atividade_incentivos import MENSAGENS_INCENTIVO
+from cogs.atividade_incentivos import MENSAGENS_INCENTIVO, MENSAGENS_MARCANDO
 
 RANKS_ORDENADOS = [c for c in _CARGOS_JOGADORES if c["secao"] == "rank"]
 RANK_IDS_SET = {c["id"] for c in RANKS_ORDENADOS}
@@ -32,6 +32,11 @@ INCENTIVO_INTERVALO_MIN = 240
 INCENTIVO_INTERVALO_MAX = 360
 INCENTIVO_HORA_INICIO = 12
 INCENTIVO_HORA_FIM = 22
+# Chance de o incentivo ser uma mensagem que MARCA um inativo (senão vai uma das
+# mensagens gerais, sem marcar ninguém). Quem foi marcado só pode ser marcado
+# de novo depois de MARCACAO_COOLDOWN_DIAS.
+INCENTIVO_CHANCE_MARCAR = 0.6
+MARCACAO_COOLDOWN_DIAS = 3
 
 
 def _somar_meses(dt: datetime, meses: int) -> datetime:
@@ -392,18 +397,22 @@ class Atividade(commands.Cog):
         await self.bot.wait_until_ready()
 
 
-    def _contar_inativos(self) -> int:
+    def _listar_inativos(self, guild: discord.Guild | None = None) -> list[discord.Member]:
         """Mesmo critério do !periodo-inativos: não bateu a meta e não entrou
         durante o período (esses ainda estão em carência)."""
-        total = 0
-        for guild in self.bot.guilds:
-            for membro in guild.members:
+        guilds = [guild] if guild is not None else self.bot.guilds
+        inativos = []
+        for g in guilds:
+            for membro in g.members:
                 if membro.bot or entrou_durante_periodo(membro):
                     continue
                 registro = self.dados.get(str(membro.id))
                 if registro is None or not registro.get("anunciado", False):
-                    total += 1
-        return total
+                    inativos.append(membro)
+        return inativos
+
+    def _contar_inativos(self) -> int:
+        return len(self._listar_inativos())
 
     @staticmethod
     def _dias_restantes_texto() -> str:
@@ -436,18 +445,42 @@ class Atividade(commands.Cog):
                 print(f"[ATIVIDADE] ⚠️ Canal de incentivo ({CANAL_INCENTIVO_ID}) não encontrado.")
                 return
 
-            # sorteia uma mensagem diferente da última enviada
-            indices = [i for i in range(len(MENSAGENS_INCENTIVO)) if i != estado.get("ultima_mensagem")]
-            indice = random.choice(indices)
-            texto = MENSAGENS_INCENTIVO[indice].format(
+            fmt = dict(
                 meta=META_PONTOS,
                 min_call=max(SEGUNDOS_POR_PONTO_CALL // 60, 1),
                 dias=self._dias_restantes_texto(),
-                inativos="1 membro" if inativos == 1 else f"{inativos} membros",
             )
-            await canal.send(texto)
-            estado["ultima_mensagem"] = indice
-            print(f"[ATIVIDADE] 📣 Incentivo #{indice + 1} enviado ({inativos} inativos).")
+
+            # quem foi marcado há pouco tempo fica de fora (cooldown)
+            marcados = estado.get("marcados", {})
+            limite = agora - MARCACAO_COOLDOWN_DIAS * 86400
+            marcados = {uid: ts for uid, ts in marcados.items() if ts > limite}
+            estado["marcados"] = marcados
+
+            candidatos = [
+                m for m in self._listar_inativos(canal.guild)
+                if str(m.id) not in marcados and canal.permissions_for(m).view_channel
+            ]
+
+            if candidatos and random.random() < INCENTIVO_CHANCE_MARCAR:
+                membro = random.choice(candidatos)
+                indices = [i for i in range(len(MENSAGENS_MARCANDO)) if i != estado.get("ultima_marcacao")]
+                indice = random.choice(indices)
+                texto = MENSAGENS_MARCANDO[indice].format(mencao=membro.mention, **fmt)
+                await canal.send(texto, allowed_mentions=discord.AllowedMentions(users=[membro]))
+                estado["ultima_marcacao"] = indice
+                marcados[str(membro.id)] = agora
+                print(f"[ATIVIDADE] 📣 Incentivo marcando {membro} (msg #{indice + 1}).")
+            else:
+                # sorteia uma mensagem geral diferente da última enviada
+                indices = [i for i in range(len(MENSAGENS_INCENTIVO)) if i != estado.get("ultima_mensagem")]
+                indice = random.choice(indices)
+                texto = MENSAGENS_INCENTIVO[indice].format(
+                    inativos="1 membro" if inativos == 1 else f"{inativos} membros", **fmt
+                )
+                await canal.send(texto)
+                estado["ultima_mensagem"] = indice
+                print(f"[ATIVIDADE] 📣 Incentivo geral #{indice + 1} enviado ({inativos} inativos).")
         except discord.HTTPException as e:
             print(f"[ATIVIDADE] ⚠️ Erro ao enviar incentivo: {e}")
         finally:

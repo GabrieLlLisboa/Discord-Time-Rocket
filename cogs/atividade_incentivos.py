@@ -48,3 +48,35 @@ MENSAGENS_INCENTIVO: list[str] = [
 ]
 
 assert len(MENSAGENS_INCENTIVO) == 32, "precisa ter exatamente 32 mensagens"
+
+
+# Mensagens que MARCAM um inativo específico (o bot sorteia um deles).
+# Aqui {mencao} é obrigatório; {meta}, {min_call} e {dias} também funcionam.
+MENSAGENS_MARCANDO: list[str] = [
+    "Eai {mencao}, tudo certo? 👋 Bora conversar no chat?",
+    "Fala {mencao}! Faz um tempinho que você não aparece por aqui. Bora trocar uma ideia no chat? 💬",
+    "Opa {mencao}, sumiu hein! 😄 Chega aí no chat, a galera tá esperando você!",
+    "{mencao}, e aí, bora jogar uma? 🎮 Entra numa call ou manda um salve no chat!",
+    "Eai {mencao}! Sentimos sua falta por aqui 🚀 Passa no chat e conta como tá o Rocket League!",
+    "Fala {mencao}, tudo bem? Bora bater um papo no chat e de quebra somar uns pontinhos de atividade? 😉",
+    "{mencao}, dá uma passada no chat! Qualquer assunto vale: jogada boa, meme, dúvida de mecânica… 🧠",
+    "Salve {mencao}! 🙌 Tá com tempo? Entra na call e joga com a gente!",
+    "Eai {mencao}, como tá o rank? 📈 Vem contar no chat!",
+    "Oi {mencao}! A meta de atividade são só **{meta} pontos**, dá tempo de sobra. Bora conversar no chat? 💪",
+    "{mencao}, tá sumido(a)! 🔎 Aparece aí e manda um oi pra galera!",
+    "Fala {mencao}! Que tal um 2v2 hoje? Chama alguém no chat e bora pra call 🎧",
+    "Eai {mencao}, tudo tranquilo? Vem trocar uma ideia no chat, o servidor fica melhor com você por aqui! 🤝",
+    "{mencao}, ainda dá tempo de ficar ativo(a) no período: faltam **{dias}**! Bora conversar? ⏳",
+    "Opa {mencao}! 👀 Vi que você anda quieto(a). Solta um \"salve\" no chat e bora!",
+    "{mencao}, bora sair do modo espectador? 🍿 Participa do chat que a gente quer te ouvir!",
+    "Fala {mencao}! Qual foi sua melhor jogada recente? Conta pra gente no chat! 🏆",
+    "Eai {mencao}! Entrar numa call desmutado por **{min_call} minutos** já vale 1 ponto. Bora? 🎙️",
+    "{mencao}, saudade de você por aqui! 💙 Passa no chat e bora jogar junto!",
+    "Salve {mencao}! Alguém precisa de dupla pra rankeada? Chega no chat e chama a galera! ⚽",
+    "Eai {mencao}, bora movimentar esse chat? 🔥 Manda uma mensagem e começa a somar pontos!",
+    "Fala {mencao}, tudo certo? Tá precisando de dica pro seu jogo? Pergunta no chat que a galera ajuda! 🧩",
+    "{mencao}, dia bom pra jogar, né? ☀️ Bora aparecer no chat ou na call!",
+    "Opa {mencao}! Chega mais, a conversa tá boa e falta você! 🗣️",
+]
+
+assert len(MENSAGENS_MARCANDO) >= 20 and all("{mencao}" in m for m in MENSAGENS_MARCANDO)
