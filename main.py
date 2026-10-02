@@ -327,18 +327,16 @@ async def registrar_views_persistentes():
 
 
     try:
+        # UMA instância só: os botões de revisão usam o mesmo custom_id em todas as
+        # whitelists, e o candidato é descoberto na hora do clique (pela mensagem/canal).
+        # Antes registrava uma instância por candidato pendente — a última sobrescrevia
+        # as outras e, depois de um restart, "Aprovar" agia sobre a pessoa errada.
+        # (Os menus de pergunta e o 🔔 Chamar Staff são registrados em Whitelist.cog_load.)
         from cogs.whitelist import RevisaoWhitelistView
-        from cogs.backup import ler as ler_backup
-        whitelist_dados = ler_backup("whitelist")
-        count = 0
-        for uid_str, registro in whitelist_dados.items():
-            if registro.get("status") in ("pendente", "visualizada"):
-                bot.add_view(RevisaoWhitelistView(int(uid_str)))
-                count += 1
-        if count:
-            print(f"[VIEWS] ✅ {count} view(s) de revisão de whitelist recarregada(s).")
+        bot.add_view(RevisaoWhitelistView())
+        print("[VIEWS] ✅ Botões de revisão de whitelist registrados.")
     except Exception as e:
-        print(f"[VIEWS] ⚠️  Erro ao recarregar views de whitelist: {e}")
+        print(f"[VIEWS] ⚠️  Erro ao registrar views de whitelist: {e}")
 
 
     try:

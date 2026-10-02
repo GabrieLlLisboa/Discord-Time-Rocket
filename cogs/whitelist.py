@@ -5,11 +5,21 @@ import asyncio
 import random
 import re
 import time
+import unicodedata
+from datetime import datetime, timezone
 
 from cogs.backup import ler, salvar
-from cogs.players import CARGOS as PLAYER_CARGOS
+from cogs.players import CARGOS as PLAYER_CARGOS, aplicar_cargo_rank
 from cogs.players import RANK_TIERS_ORDEM, RANK_TIERS_COM_DIVISAO, RANK_TIER_EMOJIS
 from cogs import mod_utils as mu
+from cogs.whitelist_extras import (
+    CARGO_STAFF_WHITELIST_ID,
+    buscar_historico,
+    texto_aviso_historico,
+    registrar_decisao,
+    registrar_punicao_historico,
+    preencher_stats_se_vazio,
+)
 
 
 CARGO_RANKS = {c["nome"]: c["id"] for c in PLAYER_CARGOS if c["secao"] == "rank"}
@@ -123,11 +133,26 @@ STAFF_ROLE_IDS = ({c["id"] for c in PLAYER_CARGOS if c["secao"] == "staff"} | {
 }) - CARGOS_EXCLUIDOS_DA_TAG_STAFF
 
 
+# Cargo com ACESSO TOTAL às whitelists: vê os canais, aprova, recusa, marca
+# como em análise, fecha, consulta/edita perfil. Também é o cargo que o
+# candidato "chama" no botão 🔔 Chamar Staff.
+
 CARGOS_QUE_VEEM_WHITELIST = {
     1511895253777649704,
     1511894837790769204,
     1523835085475020932,
+    CARGO_STAFF_WHITELIST_ID,
 }
+
+# Cargo de plataforma dado quando a whitelist é aprovada (Switch não tem cargo)
+CARGOS_PLATAFORMA_IDS = {
+    "PC":          1550986131858788523,
+    "Xbox":        1550986187106287616,
+    "PlayStation": 1544318397830004767,
+}
+
+# tempo mínimo entre dois "🔔 Chamar Staff" no mesmo canal (evita spam de ping)
+CHAMAR_STAFF_COOLDOWN_SEGUNDOS = 5 * 60
 
 RANK_IDS = set(CARGO_RANKS.values())
 
@@ -145,7 +170,45 @@ TEMPOS_JOGANDO = ["Menos de 1 ano", "1 a 2 anos", "2 a 4 anos", "Mais de 4 anos"
 HABILIDADES = ["Programação", "Designer", "Roteiro", "Editor de vídeo", "Administração"]
 
 
+def _pode_gerir(membro) -> bool:
+    """Quem pode mexer em whitelists: dono do bot, administradores e quem tem
+    o cargo da whitelist (CARGO_STAFF_WHITELIST_ID)."""
+    if mu.eh_super_admin(membro.id):
+        return True
+    perms = getattr(membro, "guild_permissions", None)
+    if perms is not None and perms.administrator:
+        return True
+    return any(r.id == CARGO_STAFF_WHITELIST_ID for r in getattr(membro, "roles", []))
+
+
+def _ctx_pode_gerir(ctx: commands.Context) -> bool:
+    return ctx.guild is not None and _pode_gerir(ctx.author)
+
+
+def _inter_pode_gerir(interaction: discord.Interaction) -> bool:
+    return interaction.guild is not None and _pode_gerir(interaction.user)
+
+
+def _inter_pode_ver_perfil(interaction: discord.Interaction) -> bool:
+    if not _inter_pode_gerir(interaction):
+        return any(r.id == CARGO_MEMBRO_EQUIPE_ID for r in getattr(interaction.user, "roles", []))
+    return True
+
+
+async def _travar_mensagem(interaction: discord.Interaction) -> None:
+    """Tira os componentes da mensagem da pergunta depois que a pessoa
+    respondeu — sem isso dava pra responder duas vezes e a próxima pergunta
+    era enviada duplicada."""
+    try:
+        if interaction.message is not None:
+            await interaction.message.edit(view=None)
+    except discord.HTTPException:
+        pass
+
+
 def _slug(nome: str) -> str:
+    # tira os acentos antes de limpar: "João" virava "jo-o", agora vira "joao"
+    nome = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("ascii")
     nome = nome.lower().strip()
     nome = re.sub(r"[^a-z0-9\-]+", "-", nome)
     nome = re.sub(r"-+", "-", nome).strip("-")
@@ -201,6 +264,10 @@ class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
 
     async def on_submit(self, interaction: discord.Interaction):
         membro = interaction.user
+        ja = self.cog.dados.get(str(membro.id), {}).get("respostas", {}).get("tiktok")
+        if ja:
+            await interaction.response.send_message("⚠️ Você já respondeu essa pergunta.", ephemeral=True)
+            return
         self.cog.salvar_resposta(membro.id, "tiktok", self.tiktok.value.strip())
         # e aqui salva a resposta do campo novo, mesma ideia, só troca a
         # chave (o nome que fica salvo no json, tipo "tiktok") e o valor
@@ -230,6 +297,8 @@ class AbrirPerguntasView(discord.ui.View):
 
     @discord.ui.button(label="📝 Responder Perguntas", style=discord.ButtonStyle.primary, custom_id="wl_perguntas_abertas")
     async def responder(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.cog.checar_dono(interaction):
+            return
         await interaction.response.send_modal(PerguntasAbertasModal(self.cog))
 
 
@@ -239,12 +308,17 @@ class EscolhaSelect(discord.ui.Select):
             discord.SelectOption(label=o, emoji=(emojis or {}).get(o))
             for o in opcoes
         ]
-        super().__init__(placeholder=placeholder, options=options)
+        # custom_id fixo por etapa: assim o menu continua funcionando depois que
+        # o bot reinicia (antes ele ficava "interação falhou" pra quem estava no meio)
+        super().__init__(placeholder=placeholder, options=options, custom_id=f"wl_sel_{step}")
         self.cog = cog
         self.step = step
         self.prox_step = prox_step
 
     async def callback(self, interaction: discord.Interaction):
+        if not await self.cog.checar_dono(interaction):
+            return
+        await _travar_mensagem(interaction)
         membro = interaction.user
         valor = self.values[0]
         self.cog.salvar_resposta(membro.id, self.step, valor)
@@ -339,10 +413,14 @@ class HabilidadesSelect(discord.ui.Select):
             options=options,
             min_values=1,
             max_values=len(options),
+            custom_id="wl_sel_habilidades",
         )
 
     async def callback(self, interaction: discord.Interaction):
         cog: "Whitelist" = interaction.client.get_cog("Whitelist")
+        if not await cog.checar_dono(interaction):
+            return
+        await _travar_mensagem(interaction)
         membro = interaction.user
         valor = ", ".join(self.values)
         cog.salvar_resposta(membro.id, "habilidades", valor)
@@ -359,6 +437,9 @@ class HabilidadesView(discord.ui.View):
     @discord.ui.button(label="⏭️ Pular", style=discord.ButtonStyle.secondary, custom_id="wl_pular_habilidades", row=1)
     async def pular(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog: "Whitelist" = interaction.client.get_cog("Whitelist")
+        if not await cog.checar_dono(interaction):
+            return
+        await _travar_mensagem(interaction)
         membro = interaction.user
         cog.salvar_resposta(membro.id, "habilidades", "Nenhuma")
         await interaction.response.send_message("⏭️ Pergunta pulada — nenhuma habilidade registrada.")
@@ -372,9 +453,10 @@ class ComecarWhitelistView(discord.ui.View):
     @discord.ui.button(label="🚀 Começar Whitelist", style=discord.ButtonStyle.success, custom_id="wl_comecar")
     async def comecar(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        if interaction.channel.name != f"whitelist-{_slug(interaction.user.name)}" and\
-           not interaction.channel.name.startswith("whitelist-"):
-            await interaction.response.send_message("❌ Use isso no seu canal de whitelist.", ephemeral=True)
+        if not await cog.checar_dono(interaction):
+            return
+        if cog.dados.get(str(interaction.user.id), {}).get("respostas", {}).get("nick"):
+            await interaction.response.send_message("⚠️ Você já começou sua whitelist — siga as perguntas abaixo. 👇", ephemeral=True)
             return
         await interaction.response.send_modal(NickModal(cog))
 
@@ -386,7 +468,7 @@ class ComecarWhitelistView(discord.ui.View):
     @discord.ui.button(label="🗑️ Cancelar/Fechar (staff)", style=discord.ButtonStyle.danger, custom_id="wl_cancelar")
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
         cargos = {r.id for r in interaction.user.roles}
-        if not (mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator or cargos & CARGOS_QUE_VEEM_WHITELIST):
+        if not (_pode_gerir(interaction.user) or cargos & CARGOS_QUE_VEEM_WHITELIST):
             await interaction.response.send_message("❌ Apenas staff pode fechar.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
@@ -394,6 +476,11 @@ class ComecarWhitelistView(discord.ui.View):
         await interaction.response.send_message("🔒 Fechando canal em 3 segundos...")
         await asyncio.sleep(3)
         await interaction.channel.delete(reason=f"Whitelist cancelada por {interaction.user}")
+
+    @discord.ui.button(label="🔔 Chamar Staff", style=discord.ButtonStyle.primary, custom_id="wl_chamar_staff")
+    async def chamar_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        await cog.chamar_staff(interaction)
 
 
 class ConfirmarDesistenciaView(discord.ui.View):
@@ -421,88 +508,130 @@ class FinalizarWhitelistView(discord.ui.View):
         cog: Whitelist = interaction.client.get_cog("Whitelist")
         await cog.solicitar_aprovacao(interaction)
 
+    @discord.ui.button(label="🔔 Chamar Staff", style=discord.ButtonStyle.primary, custom_id="wl_chamar_staff_final")
+    async def chamar_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        await cog.chamar_staff(interaction)
+
 
 def _checar_admin(interaction: discord.Interaction) -> bool:
-    return mu.eh_super_admin(interaction.user.id) or interaction.user.guild_permissions.administrator
+    return _pode_gerir(interaction.user)
 
 
-class ConfirmarRecusaView(discord.ui.View):
-    """Confirmação antes de recusar uma whitelist (recusar EXPULSA o membro),
-    pra evitar clique ou comando acidental. Só quem pediu a recusa confirma."""
-    def __init__(self, membro_id: int, autor_id: int, forcar_publico: bool = False):
-        super().__init__(timeout=60)
+class ConfirmarDecisaoView(discord.ui.View):
+    """Confirmação antes de APROVAR (quando a pessoa já foi expulsa/banida) ou
+    de RECUSAR (que expulsa o membro). Só quem pediu a ação pode confirmar."""
+    def __init__(self, membro_id: int, autor_id: int, aprovar: bool, forcar_publico: bool = False):
+        super().__init__(timeout=120)
         self.membro_id = membro_id
         self.autor_id = autor_id
+        self.aprovar = aprovar
         self.forcar_publico = forcar_publico
-        self.message: discord.Message | None = None            # quando enviada como mensagem normal
-        self.interaction: discord.Interaction | None = None    # quando enviada como resposta efêmera
+        self.message: discord.Message | None = None
+        self.interaction: discord.Interaction | None = None
+        self.confirmar.label = "✅ Sim, aceitar mesmo assim" if aprovar else "✅ Sim, recusar"
+        self.confirmar.style = discord.ButtonStyle.success if aprovar else discord.ButtonStyle.danger
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.autor_id:
-            await interaction.response.send_message("❌ Só quem pediu a recusa pode confirmar.", ephemeral=True)
+            await interaction.response.send_message("❌ Só quem pediu essa ação pode confirmar.", ephemeral=True)
             return False
         return True
 
-    @discord.ui.button(label="✅ Sim, recusar", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Confirmar")
     async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.stop()
-        await interaction.response.edit_message(content="⏳ Recusando a whitelist...", view=None)
+        await interaction.response.edit_message(content="⏳ Processando...", view=None)
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        ephemeral, mensagem = await cog.recusar_core(interaction.guild, self.membro_id, interaction.user, interaction.channel)
-        await interaction.followup.send(mensagem, ephemeral=ephemeral and not self.forcar_publico)
+        erro, mensagem = await cog.decidir(interaction.guild, self.membro_id, interaction.user, self.aprovar)
+        if erro:
+            await interaction.edit_original_response(content=mensagem)
+        else:
+            await interaction.edit_original_response(
+                content="✅ Whitelist aprovada!" if self.aprovar else "✅ Whitelist recusada!"
+            )
 
     @discord.ui.button(label="↩️ Cancelar", style=discord.ButtonStyle.secondary)
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.stop()
-        await interaction.response.edit_message(content="Beleza, a whitelist continua como estava. 👍", view=None)
+        await interaction.response.edit_message(content="Beleza, nada foi feito. A whitelist continua como estava. 👍", view=None)
 
     async def on_timeout(self):
         try:
+            texto = "⌛ Confirmação expirada — nada foi feito."
             if self.interaction is not None:
-                await self.interaction.edit_original_response(content="⌛ Confirmação expirada — nada foi feito.", view=None)
+                await self.interaction.edit_original_response(content=texto, view=None)
             elif self.message is not None:
-                await self.message.edit(content="⌛ Confirmação expirada — nada foi feito.", view=None)
+                await self.message.edit(content=texto, view=None)
         except discord.HTTPException:
             pass
 
 
 class RevisaoWhitelistView(discord.ui.View):
-    def __init__(self, membro_id: int):
+    """Botões de revisão (Visualizada / Aprovar / Recusar [+ Abrir chat]).
+
+    IMPORTANTE: quem é o candidato NÃO fica guardado aqui. Os botões são
+    persistentes (todos usam o mesmo custom_id) e, depois de um restart, o
+    Discord entrega o clique pra uma única instância registrada — então o
+    candidato é descoberto na hora do clique, pela mensagem ou pelo canal
+    (ver Whitelist.membro_id_da_interacao). Antes isso aprovava/recusava a
+    pessoa errada quando havia mais de uma whitelist pendente.
+
+    Passando guild_id e canal_id aparece o botão 📂 que abre o chat da
+    whitelist (usado na mensagem do canal de log)."""
+    def __init__(self, guild_id: int | None = None, canal_id: int | None = None):
         super().__init__(timeout=None)
-        self.membro_id = membro_id
+        if guild_id and canal_id and canal_id > 0:
+            self.add_item(discord.ui.Button(
+                label="📂 Abrir chat da whitelist",
+                style=discord.ButtonStyle.link,
+                url=f"https://discord.com/channels/{guild_id}/{canal_id}",
+                row=1,
+            ))
 
     @discord.ui.button(label="👀 Marcar como Visualizada", style=discord.ButtonStyle.secondary, custom_id="wl_visualizar")
     async def visualizar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _checar_admin(interaction):
-            await interaction.response.send_message("❌ Só administradores podem revisar whitelists.", ephemeral=True)
+            await interaction.response.send_message("❌ Só a staff da whitelist pode revisar.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        await cog.marcar_visualizada(interaction, self.membro_id)
+        await cog.marcar_visualizada(interaction)
 
     @discord.ui.button(label="✅ Aprovar", style=discord.ButtonStyle.success, custom_id="wl_aprovar")
     async def aprovar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _checar_admin(interaction):
-            await interaction.response.send_message("❌ Só administradores podem revisar whitelists.", ephemeral=True)
+            await interaction.response.send_message("❌ Só a staff da whitelist pode revisar.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        ephemeral, mensagem = await cog.aprovar_core(interaction.guild, self.membro_id, interaction.user, interaction.channel)
-        await interaction.response.send_message(mensagem, ephemeral=ephemeral)
+        await cog.iniciar_decisao(interaction, aprovar=True)
 
     @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.danger, custom_id="wl_recusar")
     async def recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _checar_admin(interaction):
-            await interaction.response.send_message("❌ Só administradores podem revisar whitelists.", ephemeral=True)
+            await interaction.response.send_message("❌ Só a staff da whitelist pode revisar.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
-        await cog.pedir_confirmacao_recusa(interaction, self.membro_id)
+        await cog.iniciar_decisao(interaction, aprovar=False)
 
 
 class Whitelist(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.dados = ler("whitelist")
+        preencher_stats_se_vazio(self.dados)
         self.limpeza_canais.start()
         self.incentivo_whitelist.start()
+
+    async def cog_load(self):
+        """Registra TODAS as views persistentes da whitelist (antes só 3 eram
+        registradas, e os menus de pergunta morriam quando o bot reiniciava)."""
+        self.bot.add_view(ComecarWhitelistView())
+        self.bot.add_view(FinalizarWhitelistView())
+        self.bot.add_view(RevisaoWhitelistView())
+        self.bot.add_view(HabilidadesView())
+        self.bot.add_view(AbrirPerguntasView(self))
+        for step in self._config_escolha():
+            self.bot.add_view(self._view_escolha(step))
 
     def cog_unload(self):
         self.limpeza_canais.cancel()
@@ -614,7 +743,7 @@ class Whitelist(commands.Cog):
             canal = self.bot.get_channel(canal_id) if canal_id else None
             if canal:
                 try:
-                    await canal.delete(reason="Whitelist aprovada — canal removido automaticamente após 10 minutos")
+                    await canal.delete(reason="Whitelist decidida — canal removido automaticamente após 10 minutos")
                 except discord.HTTPException:
                     pass
             registro["canal_apagado"] = True
@@ -628,10 +757,96 @@ class Whitelist(commands.Cog):
 
 
     def salvar_resposta(self, user_id: int, chave: str, valor: str):
-        uid = str(user_id)
-        registro = self.dados.setdefault(uid, {"respostas": {}, "status": "em_andamento"})
-        registro["respostas"][chave] = valor
+        # só atualiza whitelist que já existe — antes qualquer clique (ex.: de
+        # um staff) criava um registro-fantasma "em_andamento" sem canal
+        registro = self.dados.get(str(user_id))
+        if registro is None:
+            return
+        registro.setdefault("respostas", {})[chave] = valor
         salvar("whitelist", self.dados)
+
+    # ── quem está mexendo na whitelist? ────────────────────────────────────
+    async def checar_dono(self, interaction: discord.Interaction, exigir_andamento: bool = True) -> bool:
+        """Só o dono da whitelist (dono do canal) pode responder as perguntas.
+        Antes, qualquer pessoa com acesso ao canal (staff) que clicasse nos
+        botões gravava respostas no próprio nome e até trocava o próprio apelido."""
+        dono_id = self._membro_id_do_canal(interaction.channel.id) if interaction.channel else None
+        if dono_id is None:
+            await interaction.response.send_message(
+                "⚠️ Não achei os dados dessa whitelist. Chama a staff.", ephemeral=True
+            )
+            return False
+        if dono_id != interaction.user.id:
+            await interaction.response.send_message(
+                "❌ Essa whitelist é de outra pessoa — só quem está fazendo ela pode responder.", ephemeral=True
+            )
+            return False
+        if exigir_andamento and self.dados.get(str(dono_id), {}).get("status") != "em_andamento":
+            await interaction.response.send_message(
+                "⚠️ Sua whitelist já foi enviada pra análise — não dá mais pra mudar as respostas.", ephemeral=True
+            )
+            return False
+        return True
+
+    def membro_id_da_interacao(self, interaction: discord.Interaction) -> int | None:
+        """Descobre de qual whitelist é o clique: primeiro pela mensagem (as
+        mensagens de revisão ficam guardadas), depois pelo canal."""
+        msg = getattr(interaction, "message", None)
+        if msg is not None:
+            for uid, registro in self.dados.items():
+                if any(m.get("msg_id") == msg.id for m in registro.get("revisao_msgs", [])):
+                    return int(uid)
+        if interaction.channel is not None:
+            return self._membro_id_do_canal(interaction.channel.id)
+        return None
+
+    async def _garantir_acesso_staff(self, canal: discord.TextChannel) -> None:
+        """Canais criados antes do cargo da whitelist existir não têm permissão
+        pra ele — garante que a staff da whitelist enxerga e fala no canal."""
+        cargo = canal.guild.get_role(CARGO_STAFF_WHITELIST_ID)
+        if cargo is None:
+            return
+        atual = canal.overwrites_for(cargo)
+        if atual.view_channel and atual.send_messages and atual.read_message_history:
+            return
+        try:
+            await canal.set_permissions(
+                cargo, view_channel=True, send_messages=True, read_message_history=True,
+                reason="Cargo da whitelist precisa acessar o canal",
+            )
+        except discord.HTTPException:
+            pass
+
+    async def chamar_staff(self, interaction: discord.Interaction):
+        """Botão 🔔 do candidato: marca o cargo da whitelist no canal."""
+        if not await self.checar_dono(interaction, exigir_andamento=False):
+            return
+        registro = self.dados.get(str(interaction.user.id), {})
+        if registro.get("status") in ("aprovada", "recusada", "cancelada"):
+            await interaction.response.send_message("⚠️ Essa whitelist já foi encerrada.", ephemeral=True)
+            return
+
+        agora = time.time()
+        restante = CHAMAR_STAFF_COOLDOWN_SEGUNDOS - (agora - registro.get("chamou_staff_ts", 0))
+        if restante > 0:
+            await interaction.response.send_message(
+                f"⏳ A staff já foi chamada há pouco. Aguarda mais {int(restante // 60) + 1} min pra chamar de novo.",
+                ephemeral=True,
+            )
+            return
+
+        cargo = interaction.guild.get_role(CARGO_STAFF_WHITELIST_ID)
+        if cargo is None:
+            await interaction.response.send_message("⚠️ Não achei o cargo da staff de whitelist.", ephemeral=True)
+            return
+
+        registro["chamou_staff_ts"] = agora
+        salvar("whitelist", self.dados)
+        await self._garantir_acesso_staff(interaction.channel)
+        await interaction.response.send_message(
+            f"🔔 {cargo.mention} — {interaction.user.mention} está pedindo ajuda com a whitelist!",
+            allowed_mentions=discord.AllowedMentions(roles=[cargo], users=[interaction.user]),
+        )
 
 
     async def get_categoria(self, guild: discord.Guild) -> discord.CategoryChannel:
@@ -738,11 +953,19 @@ class Whitelist(commands.Cog):
             except discord.Forbidden:
                 pass
 
-        nome_canal = f"whitelist-{_slug(member.name)}"
+        # Já tem uma whitelist em aberto? Reaproveita o canal dela.
+        registro_atual = self.dados.get(str(member.id))
+        if registro_atual and registro_atual.get("status") in ("em_andamento", "pendente", "visualizada"):
+            canal_atual = guild.get_channel(registro_atual.get("canal_id") or 0)
+            if canal_atual is not None:
+                return canal_atual
 
-        existente = discord.utils.get(guild.text_channels, name=nome_canal)
-        if existente:
-            return existente
+        # Nome do canal: se já existir um com esse nome (de OUTRA pessoa com
+        # nome parecido, ou um canal antigo ainda esperando ser apagado), usa
+        # os 4 últimos dígitos do ID pra não misturar as duas whitelists.
+        nome_canal = f"whitelist-{_slug(member.name)}"
+        if discord.utils.get(guild.text_channels, name=nome_canal):
+            nome_canal = f"{nome_canal}-{str(member.id)[-4:]}"
 
         categoria = await self.get_categoria(guild)
 
@@ -784,8 +1007,36 @@ class Whitelist(commands.Cog):
         return canal
 
 
+    async def _audit_recente(self, guild: discord.Guild, acao: discord.AuditLogAction, alvo_id: int):
+        """Quem fez a ação (kick/ban) contra `alvo_id` nos últimos segundos."""
+        for tentativa in range(2):
+            try:
+                async for entry in guild.audit_logs(limit=8, action=acao):
+                    if (datetime.now(timezone.utc) - entry.created_at).total_seconds() > 20:
+                        break
+                    if getattr(entry.target, "id", None) == alvo_id:
+                        return entry.user, entry.reason
+            except (discord.Forbidden, discord.HTTPException):
+                return None, None
+            if tentativa == 0:
+                await asyncio.sleep(1.5)  # o audit log às vezes atrasa um pouco
+        return None, None
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, user: discord.User):
+        """Guarda banimentos no histórico (usado no aviso antes de aceitar de volta)."""
+        executor, motivo = await self._audit_recente(guild, discord.AuditLogAction.ban, user.id)
+        registrar_punicao_historico(user.id, "ban", motivo, executor.id if executor else None)
+
+    async def _registrar_se_foi_expulso(self, member: discord.Member) -> None:
+        executor, motivo = await self._audit_recente(member.guild, discord.AuditLogAction.kick, member.id)
+        if executor is not None or motivo:
+            registrar_punicao_historico(member.id, "kick", motivo, executor.id if executor else None)
+
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
+        asyncio.create_task(self._registrar_se_foi_expulso(member))
+
         registro = self.dados.get(str(member.id))
 
 
@@ -802,20 +1053,41 @@ class Whitelist(commands.Cog):
         registro["cancelado_motivo"] = "saiu_do_servidor"
         registro["cancelado_em"] = time.time()
         salvar("whitelist", self.dados)
+        try:  # o quadro de status ficava mostrando "Pendente" pra quem já tinha saído
+            await self.atualizar_status_board(member.guild, member.id)
+        except discord.HTTPException:
+            pass
 
 
     async def dar_cargo_rank(self, guild: discord.Guild, membro: discord.Member, rank_nome: str) -> str | None:
+        """Dá o cargo de divisão (ex.: Champion 2) E o cargo geral do rank
+        (Champion). Troca os cargos de rank antigos."""
         cargo = guild.get_role(CARGO_RANKS.get(rank_nome, 0))
         if cargo is None:
             return f"⚠️ Não achei o cargo do rank **{rank_nome}**."
-        cargos_rank_atuais = [r for r in membro.roles if r.id in RANK_IDS and r.id != cargo.id]
         try:
-            if cargos_rank_atuais:
-                await membro.remove_roles(*cargos_rank_atuais, reason="Whitelist aprovada — troca de rank")
-            if cargo not in membro.roles:
-                await membro.add_roles(cargo, reason="Whitelist aprovada — rank aplicado")
+            await aplicar_cargo_rank(membro, cargo, "Whitelist — rank aplicado")
         except discord.Forbidden:
             return "⚠️ Não tenho permissão pra dar o cargo de rank."
+        return None
+
+    async def dar_cargo_plataforma(self, guild: discord.Guild, membro: discord.Member, plataforma: str) -> str | None:
+        """Dá o cargo da plataforma (PC / Xbox / PlayStation) e tira os outros
+        cargos de plataforma. Switch não tem cargo."""
+        cargo_id = CARGOS_PLATAFORMA_IDS.get(plataforma)
+        if cargo_id is None:
+            return None
+        cargo = guild.get_role(cargo_id)
+        if cargo is None:
+            return f"⚠️ Não achei o cargo da plataforma **{plataforma}**."
+        outros = [r for r in membro.roles if r.id in CARGOS_PLATAFORMA_IDS.values() and r.id != cargo.id]
+        try:
+            if outros:
+                await membro.remove_roles(*outros, reason="Whitelist — troca de plataforma")
+            if cargo not in membro.roles:
+                await membro.add_roles(cargo, reason="Whitelist — plataforma aplicada")
+        except discord.Forbidden:
+            return "⚠️ Não tenho permissão pra dar o cargo de plataforma."
         return None
 
 
@@ -828,47 +1100,67 @@ class Whitelist(commands.Cog):
             await self.enviar_pergunta(canal, membro, "duvidas")
 
 
+    @staticmethod
+    def _config_escolha() -> dict:
+        """Etapas de múltipla escolha: (opções, placeholder, próxima etapa, emojis)."""
+        return {
+            "idioma":       (IDIOMAS, "Escolha seu idioma...", "rank", IDIOMA_EMOJIS),
+            "rank":         (RANK_TIERS_ORDEM, "Escolha seu rank atual...", "rank_divisao", RANK_TIER_EMOJIS),
+            "rank_divisao": (RANK_DIVISOES_OPCOES, "Escolha a divisão...", "plataforma", None),
+            "plataforma":   (PLATAFORMAS, "Escolha sua plataforma...", "peak_rank", None),
+            "peak_rank":    (PEAK_RANKS, "Escolha o maior rank já alcançado...", "peak_div", None),
+            "peak_div":     (DIVISOES, "Escolha a divisão...", "tempo", None),
+            "tempo":        (TEMPOS_JOGANDO, "Escolha há quanto tempo joga...", "microfone", None),
+            "microfone":    (["Sim", "Não"], "Você tem microfone?", "ativo", None),
+            "ativo":        (["Sim", "Não"], "Você vai ser ativo?", "tem_tiktok", None),
+            "tem_tiktok":   (["Sim", "Não"], "Você tem TikTok?", "habilidades", None),
+        }
+
+    def _view_escolha(self, step: str) -> "EscolhaView":
+        opcoes, placeholder, prox, emojis = self._config_escolha()[step]
+        return EscolhaView(self, step, opcoes, placeholder, prox, emojis=emojis)
+
     async def enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str):
         if step == "idioma":
-            view = EscolhaView(self, "idioma", IDIOMAS, "Escolha seu idioma...", "rank", emojis=IDIOMA_EMOJIS)
+            view = self._view_escolha("idioma")
             await canal.send("🌐 **Qual é a sua linguagem?**\n(Português ou Inglês — só pode escolher uma)", view=view)
 
         elif step == "rank":
-            view = EscolhaView(self, "rank", RANK_TIERS_ORDEM, "Escolha seu rank atual...", "rank_divisao", emojis=RANK_TIER_EMOJIS)
+            view = self._view_escolha("rank")
             await canal.send("🎮 **Qual o seu rank atual no Rocket League?**", view=view)
 
         elif step == "rank_divisao":
             registro = self.dados.get(str(membro.id), {})
             tier = registro.get("respostas", {}).get("rank", "")
-            view = EscolhaView(self, "rank_divisao", RANK_DIVISOES_OPCOES, "Escolha a divisão...", "plataforma")
+            view = self._view_escolha("rank_divisao")
             await canal.send(f"🔢 **Qual divisão do seu rank {tier}?** (1, 2 ou 3)", view=view)
 
         elif step == "plataforma":
-            view = EscolhaView(self, "plataforma", PLATAFORMAS, "Escolha sua plataforma...", "peak_rank")
+            view = self._view_escolha("plataforma")
             await canal.send("🖥️ **Em qual plataforma você joga?**", view=view)
 
         elif step == "peak_rank":
-            view = EscolhaView(self, "peak_rank", PEAK_RANKS, "Escolha o maior rank já alcançado...", "peak_div")
+            view = self._view_escolha("peak_rank")
             await canal.send("🏆 **Qual o maior rank que você já alcançou?**", view=view)
 
         elif step == "peak_div":
-            view = EscolhaView(self, "peak_div", DIVISOES, "Escolha a divisão...", "tempo")
+            view = self._view_escolha("peak_div")
             await canal.send("🔢 **E qual divisão desse rank?**", view=view)
 
         elif step == "tempo":
-            view = EscolhaView(self, "tempo", TEMPOS_JOGANDO, "Escolha há quanto tempo joga...", "microfone")
+            view = self._view_escolha("tempo")
             await canal.send("⏱️ **Há quanto tempo você joga Rocket League?**", view=view)
 
         elif step == "microfone":
-            view = EscolhaView(self, "microfone", ["Sim", "Não"], "Você tem microfone?", "ativo")
+            view = self._view_escolha("microfone")
             await canal.send("🎤 **Você tem microfone pra jogar?**", view=view)
 
         elif step == "ativo":
-            view = EscolhaView(self, "ativo", ["Sim", "Não"], "Você vai ser ativo?", "tem_tiktok")
+            view = self._view_escolha("ativo")
             await canal.send("📈 **Você pretende ser um membro ativo na equipe?**", view=view)
 
         elif step == "tem_tiktok":
-            view = EscolhaView(self, "tem_tiktok", ["Sim", "Não"], "Você tem TikTok?", "habilidades")
+            view = self._view_escolha("tem_tiktok")
             await canal.send("🎵 **Você tem conta no TikTok?**", view=view)
 
         elif step == "habilidades":
@@ -910,30 +1202,30 @@ class Whitelist(commands.Cog):
 
 
     async def solicitar_aprovacao(self, interaction: discord.Interaction):
+        # só o dono, e só uma vez (antes dava pra clicar 2x e duplicar a revisão)
+        if not await self.checar_dono(interaction):
+            return
         membro = interaction.user
         guild = interaction.guild
-        registro = self.dados.get(str(membro.id))
-        if not registro:
-            await interaction.response.send_message("⚠️ Não achei seus dados de whitelist. Chama a staff.", ephemeral=True)
-            return
+        registro = self.dados[str(membro.id)]
 
         registro["status"] = "pendente"
+        registro["enviado_ts"] = time.time()
         salvar("whitelist", self.dados)
 
         await interaction.response.send_message(
             "📨 **Suas respostas foram enviadas!** Um administrador vai revisar e te avisar por aqui assim que decidir. Aguenta aí! ⏳"
         )
 
-
         try:
             await interaction.channel.set_permissions(membro, send_messages=False, view_channel=True)
         except discord.Forbidden:
             pass
+        await self._garantir_acesso_staff(interaction.channel)
 
         await self.atualizar_status_board(guild, membro.id)
 
         r = registro["respostas"]
-
 
         embed_resumo = discord.Embed(
             title=f"📋 Resumo da Whitelist — {membro}",
@@ -955,19 +1247,23 @@ class Whitelist(commands.Cog):
         embed_resumo.set_footer(text=f"ID: {membro.id}")
         await interaction.channel.send(embed=embed_resumo)
 
-
         embed_revisao = discord.Embed(
             title="🔎 Whitelist aguardando revisão",
-            description=f"Analisa as respostas de {membro.mention} e decide abaixo.\n(apenas **administradores**)",
+            description=f"Analisa as respostas de {membro.mention} e decide abaixo.\n(apenas a **staff da whitelist**)",
             color=0xFEE75C,
         )
-        await interaction.channel.send(embed=embed_revisao, view=RevisaoWhitelistView(membro.id))
-
+        msg_revisao = await interaction.channel.send(embed=embed_revisao, view=RevisaoWhitelistView())
+        # guarda as mensagens de revisão: é por elas que o clique descobre de quem é a whitelist
+        revisao_msgs = [{"canal_id": interaction.channel.id, "msg_id": msg_revisao.id}]
 
         if CANAL_LOG_WHITELIST_ID:
             canal_log = self.bot.get_channel(CANAL_LOG_WHITELIST_ID)
             if canal_log:
-                embed = discord.Embed(title=f"📋 Whitelist enviada para análise — {membro}", color=0xFEE75C)
+                embed = discord.Embed(
+                    title=f"📋 Whitelist enviada para análise — {membro}",
+                    description=f"{membro.mention} terminou a whitelist. Revise aqui ou abra o chat. 👇",
+                    color=0xFEE75C,
+                )
                 embed.set_thumbnail(url=membro.display_avatar.url)
                 embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
                 embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
@@ -977,49 +1273,182 @@ class Whitelist(commands.Cog):
                 embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
                 embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
                 embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
-                # esse aqui (log) nem tem os campos de tiktok/habilidades ainda
-                # se for add a pergunta nova, bota ela junto com esses dois que
-                # tão faltando, mesmo padrão dos outros embeds
+                embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
+                embed.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
                 embed.set_footer(text=f"ID: {membro.id}")
-                await canal_log.send(embed=embed)
+                try:
+                    # mesmos botões de revisão + 📂 "Abrir chat da whitelist" ao lado
+                    msg_log = await canal_log.send(embed=embed, view=RevisaoWhitelistView(guild.id, interaction.channel.id))
+                    revisao_msgs.append({"canal_id": canal_log.id, "msg_id": msg_log.id})
+                except discord.HTTPException as e:
+                    print(f"[WHITELIST] ⚠️ Não consegui enviar a revisão pro canal de log: {e}")
 
+        registro["revisao_msgs"] = revisao_msgs
+        salvar("whitelist", self.dados)
 
-    async def marcar_visualizada(self, interaction: discord.Interaction, membro_id: int):
-        registro = self.dados.get(str(membro_id))
+    async def marcar_visualizada(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        membro_id = self.membro_id_da_interacao(interaction)
+        registro = self.dados.get(str(membro_id)) if membro_id else None
         if not registro:
-            await interaction.response.send_message("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
+            await interaction.followup.send("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
             return
+
+        # antes dava pra "visualizar" uma whitelist JÁ decidida (o status voltava
+        # pra "em análise") e outro admin podia roubar a análise de quem já tinha pego
+        status = registro.get("status")
+        if status in ("aprovada", "recusada", "cancelada"):
+            await interaction.followup.send(f"⚠️ Essa whitelist já está **{status}**.", ephemeral=True)
+            return
+        dono_analise = registro.get("visualizado_por_id")
+        if dono_analise is not None and dono_analise != interaction.user.id:
+            nome = registro.get("visualizado_por_nome", "outro administrador")
+            await interaction.followup.send(f"⚠️ Essa whitelist já está em análise por **{nome}**.", ephemeral=True)
+            return
+
         registro["status"] = "visualizada"
         registro["visualizado_por_id"] = interaction.user.id
         registro["visualizado_por_nome"] = str(interaction.user)
         salvar("whitelist", self.dados)
         await self.atualizar_status_board(interaction.guild, membro_id)
-        await interaction.response.send_message(
-            f"👀 Marcada como em análise por {interaction.user.mention}. "
-            f"A partir de agora, só {interaction.user.mention} pode aprovar ou recusar essa whitelist."
-        )
 
+        canal = self.bot.get_channel(registro.get("canal_id") or 0)
+        if canal is not None:
+            try:
+                await canal.send(
+                    f"👀 Marcada como em análise por {interaction.user.mention}. "
+                    f"A partir de agora, só {interaction.user.mention} pode aprovar ou recusar essa whitelist."
+                )
+            except discord.HTTPException:
+                pass
+        await interaction.followup.send("👀 Pronto, a whitelist está marcada como em análise por você.", ephemeral=True)
 
-    async def aprovar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel) -> tuple[bool, str]:
+    # ── decisão: aprovar / recusar ─────────────────────────────────────────
+    def _bloqueio_decisao(self, membro_id: int, autor_id: int) -> str | None:
+        """Travas comuns de aprovar/recusar. Devolve o aviso, ou None se pode seguir."""
         registro = self.dados.get(str(membro_id))
         if not registro:
-            return True, "⚠️ Não achei os dados dessa whitelist."
-
-        if registro.get("status") in ("aprovada", "recusada"):
-            acao = "aprovada" if registro["status"] == "aprovada" else "recusada"
+            return "⚠️ Não achei os dados dessa whitelist."
+        status = registro.get("status")
+        if status in ("aprovada", "recusada"):
+            acao = "aprovada" if status == "aprovada" else "recusada"
             quem = registro.get("decidido_por_nome", "outro administrador")
-            return True, f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela."
-
+            return f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela."
+        if status == "cancelada":
+            return "⚠️ Essa whitelist foi cancelada — não dá mais pra aprovar ou recusar."
         visualizado_por_id = registro.get("visualizado_por_id")
-        if visualizado_por_id is not None and visualizado_por_id != autor.id:
+        if visualizado_por_id is not None and visualizado_por_id != autor_id:
             nome = registro.get("visualizado_por_nome", "outro administrador")
-            return True, f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar."
+            return f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar."
+        return None
 
+    async def _aviso_confirmacao(self, guild: discord.Guild, membro_id: int, aprovar: bool) -> str | None:
+        """Texto da confirmação pedida antes da decisão (ou None se não precisa).
+        • Aprovar: só pede se a pessoa JÁ FOI expulsa/banida alguma vez.
+        • Recusar: sempre pede (recusar expulsa o membro)."""
+        membro = guild.get_member(membro_id)
+        mencao = membro.mention if membro else f"<@{membro_id}>"
+        if not aprovar:
+            return (
+                f"⚠️ **Tem certeza que quer recusar a whitelist de {mencao}?**\n"
+                f"Isso vai **expulsar** a pessoa do servidor automaticamente."
+            )
+        historico = await buscar_historico(guild, membro_id)
+        if not historico:
+            return None
+        return texto_aviso_historico(mencao, historico)
+
+    async def iniciar_decisao(self, interaction: discord.Interaction, aprovar: bool):
+        """Clique em ✅ Aprovar / ❌ Recusar."""
+        # defer logo de cara: buscar histórico + mexer em cargos passa fácil dos 3s do Discord
+        await interaction.response.defer(ephemeral=True)
+        membro_id = self.membro_id_da_interacao(interaction)
+        if membro_id is None:
+            await interaction.followup.send("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
+            return
+        bloqueio = self._bloqueio_decisao(membro_id, interaction.user.id)
+        if bloqueio:
+            await interaction.followup.send(bloqueio, ephemeral=True)
+            return
+
+        aviso = await self._aviso_confirmacao(interaction.guild, membro_id, aprovar)
+        if aviso:
+            view = ConfirmarDecisaoView(membro_id, interaction.user.id, aprovar)
+            view.interaction = interaction
+            await interaction.followup.send(
+                aviso, view=view, ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+            )
+            return
+
+        erro, mensagem = await self.decidir(interaction.guild, membro_id, interaction.user, aprovar)
+        ok = "✅ Whitelist aprovada!" if aprovar else "✅ Whitelist recusada!"
+        await interaction.followup.send(mensagem if erro else ok, ephemeral=True)
+
+    async def fluxo_comando_decisao(self, ctx: commands.Context, aprovar: bool):
+        """!aprovar-whitelist / !reprovar-whitelist — mesmas confirmações dos botões."""
+        membro_id = self._membro_id_do_canal(ctx.channel.id)
+        if membro_id is None:
+            await ctx.send("⚠️ Esse comando só funciona dentro do canal de whitelist de um membro.", delete_after=8)
+            return
+        bloqueio = self._bloqueio_decisao(membro_id, ctx.author.id)
+        if bloqueio:
+            await ctx.send(bloqueio)
+            return
+        aviso = await self._aviso_confirmacao(ctx.guild, membro_id, aprovar)
+        if aviso:
+            view = ConfirmarDecisaoView(membro_id, ctx.author.id, aprovar, forcar_publico=True)
+            view.message = await ctx.send(aviso, view=view, allowed_mentions=discord.AllowedMentions.none())
+            return
+        erro, mensagem = await self.decidir(ctx.guild, membro_id, ctx.author, aprovar)
+        if erro:
+            await ctx.send(mensagem)
+
+    async def decidir(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, aprovar: bool) -> tuple[bool, str]:
+        """Executa a decisão e publica o resultado no CANAL DA WHITELIST (o clique
+        pode ter vindo do canal de log). Devolve (erro, mensagem)."""
+        registro = self.dados.get(str(membro_id))
+        canal = self.bot.get_channel(registro.get("canal_id") or 0) if registro else None
+        core = self.aprovar_core if aprovar else self.recusar_core
+        erro, mensagem = await core(guild, membro_id, autor, canal)
+        if erro:
+            return True, mensagem
+        if canal is not None:
+            try:
+                await canal.send(mensagem)
+            except discord.HTTPException:
+                pass
+        await self._fechar_mensagens_revisao(registro, autor, aprovar)
+        return False, mensagem
+
+    async def _fechar_mensagens_revisao(self, registro: dict, autor: discord.abc.User, aprovar: bool) -> None:
+        """Tira os botões das mensagens de revisão (canal + log) e marca a decisão."""
+        cor = 0x57F287 if aprovar else 0xED4245
+        texto = f"{'✅ Aprovada' if aprovar else '❌ Recusada'} por {autor.mention}"
+        for ref in registro.get("revisao_msgs", []):
+            canal = self.bot.get_channel(ref.get("canal_id") or 0)
+            if canal is None:
+                continue
+            try:
+                msg = await canal.fetch_message(ref["msg_id"])
+                embed = msg.embeds[0].copy() if msg.embeds else discord.Embed()
+                embed.color = cor
+                embed.add_field(name="Decisão", value=texto, inline=False)
+                await msg.edit(embed=embed, view=None)
+            except discord.HTTPException:
+                continue
+
+    async def aprovar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel | None) -> tuple[bool, str]:
+        bloqueio = self._bloqueio_decisao(membro_id, autor.id)
+        if bloqueio:
+            return True, bloqueio
+        registro = self.dados[str(membro_id)]
 
         registro["status"] = "aprovada"
         registro["decidido_por_nome"] = str(autor)
         registro["decidido_por_id"] = autor.id
+        registro["decidido_em"] = time.time()
         salvar("whitelist", self.dados)
+        registrar_decisao(autor.id, "aprovada")
 
         membro = guild.get_member(membro_id)
         cargo_sem_acesso = guild.get_role(CARGO_SEM_ACESSO_ID)
@@ -1029,28 +1458,31 @@ class Whitelist(commands.Cog):
             except discord.Forbidden:
                 pass
 
-        aviso_rank = ""
-        rank_nome = registro["respostas"].get("rank")
-        if membro and rank_nome:
-            erro = await self.dar_cargo_rank(guild, membro, rank_nome)
+        avisos = []
+        respostas = registro.get("respostas", {})
+        if membro and respostas.get("rank"):
+            erro = await self.dar_cargo_rank(guild, membro, respostas["rank"])
             if erro:
-                aviso_rank = f"\n{erro}"
+                avisos.append(erro)
+        if membro and respostas.get("plataforma"):
+            erro = await self.dar_cargo_plataforma(guild, membro, respostas["plataforma"])
+            if erro:
+                avisos.append(erro)
+        aviso_extra = ("\n" + "\n".join(avisos)) if avisos else ""
 
         await self.atualizar_status_board(guild, membro_id)
 
         mensagem = (
             f"✅ **Whitelist aprovada por {autor.mention}!** "
-            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🚀{aviso_rank}\n"
+            f"{membro.mention if membro else ''} os canais do servidor já estão liberados. Bem-vindo(a)! 🚀{aviso_extra}\n"
             f"*(este canal vai ser apagado automaticamente em 10 minutos)*"
         )
 
-
-        if membro:
+        if membro and canal is not None:
             try:
                 await canal.set_permissions(membro, overwrite=None)
-            except discord.Forbidden:
+            except discord.HTTPException:
                 pass
-
 
         registro["deletar_em"] = time.time() + 600
         registro["canal_apagado"] = False
@@ -1058,75 +1490,29 @@ class Whitelist(commands.Cog):
 
         return False, mensagem
 
-
-    def _bloqueio_recusa(self, membro_id: int, autor_id: int) -> str | None:
-        """Mesmas travas do recusar_core, checadas ANTES de pedir confirmação
-        (não adianta perguntar 'tem certeza?' se a recusa nem é possível)."""
-        registro = self.dados.get(str(membro_id))
-        if not registro:
-            return "⚠️ Não achei os dados dessa whitelist."
-        if registro.get("status") in ("aprovada", "recusada"):
-            acao = "aprovada" if registro["status"] == "aprovada" else "recusada"
-            quem = registro.get("decidido_por_nome", "outro administrador")
-            return f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela."
-        visualizado_por_id = registro.get("visualizado_por_id")
-        if visualizado_por_id is not None and visualizado_por_id != autor_id:
-            nome = registro.get("visualizado_por_nome", "outro administrador")
-            return f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar."
-        return None
-
-    @staticmethod
-    def _texto_confirmacao_recusa(guild: discord.Guild | None, membro_id: int) -> str:
-        membro = guild.get_member(membro_id) if guild else None
-        quem = membro.mention if membro else f"<@{membro_id}>"
-        return (
-            f"⚠️ **Tem certeza que quer recusar a whitelist de {quem}?**\n"
-            f"Isso vai **expulsar** a pessoa do servidor automaticamente."
-        )
-
-    async def pedir_confirmacao_recusa(self, interaction: discord.Interaction, membro_id: int):
-        """Botão ❌ Recusar: pergunta antes de recusar (mensagem só pra quem clicou)."""
-        bloqueio = self._bloqueio_recusa(membro_id, interaction.user.id)
+    async def recusar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel | None) -> tuple[bool, str]:
+        bloqueio = self._bloqueio_decisao(membro_id, autor.id)
         if bloqueio:
-            await interaction.response.send_message(bloqueio, ephemeral=True)
-            return
-
-        view = ConfirmarRecusaView(membro_id, interaction.user.id)
-        await interaction.response.send_message(
-            self._texto_confirmacao_recusa(interaction.guild, membro_id),
-            view=view,
-            ephemeral=True,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
-        view.interaction = interaction
-
-    async def recusar_core(self, guild: discord.Guild, membro_id: int, autor: discord.abc.User, canal: discord.TextChannel) -> tuple[bool, str]:
-        registro = self.dados.get(str(membro_id))
-        if not registro:
-            return True, "⚠️ Não achei os dados dessa whitelist."
-
-        if registro.get("status") in ("aprovada", "recusada"):
-            acao = "aprovada" if registro["status"] == "aprovada" else "recusada"
-            quem = registro.get("decidido_por_nome", "outro administrador")
-            return True, f"⚠️ Essa whitelist já foi **{acao}** por **{quem}** — ninguém mais precisa mexer nela."
-
-        visualizado_por_id = registro.get("visualizado_por_id")
-        if visualizado_por_id is not None and visualizado_por_id != autor.id:
-            nome = registro.get("visualizado_por_nome", "outro administrador")
-            return True, f"⚠️ Essa whitelist foi marcada como em análise por **{nome}** — só ela(e) pode aprovar ou recusar."
-
+            return True, bloqueio
+        registro = self.dados[str(membro_id)]
 
         registro["status"] = "recusada"
         registro["decidido_por_nome"] = str(autor)
         registro["decidido_por_id"] = autor.id
+        registro["decidido_em"] = time.time()
         salvar("whitelist", self.dados)
+        registrar_decisao(autor.id, "recusada")
 
         membro = guild.get_member(membro_id)
 
+        expulso = False
         aviso_kick = ""
         if membro:
             try:
                 await membro.kick(reason=f"Whitelist recusada por {autor}")
+                expulso = True
+                # fica no histórico: se a pessoa voltar, a staff é avisada antes de aceitar
+                registrar_punicao_historico(membro_id, "kick", f"Whitelist recusada por {autor}", autor.id)
             except discord.Forbidden:
                 aviso_kick = "\n⚠️ Não consegui expulsar o membro (falta permissão/hierarquia de cargo) — remova manualmente."
         else:
@@ -1134,18 +1520,18 @@ class Whitelist(commands.Cog):
 
         await self.atualizar_status_board(guild, membro_id)
 
-
         registro["deletar_em"] = time.time() + 600
         registro["canal_apagado"] = False
         salvar("whitelist", self.dados)
 
+        quem = membro.mention if membro else "O membro"
+        situacao = "foi removido do servidor automaticamente." if expulso else "**não** foi removido do servidor."
         mensagem = (
             f"❌ **Whitelist recusada por {autor.mention}.** "
-            f"{membro.mention if membro else 'O membro'} foi removido do servidor automaticamente.{aviso_kick}\n"
+            f"{quem} {situacao}{aviso_kick}\n"
             f"*(este canal vai ser apagado automaticamente em 10 minutos)*"
         )
         return False, mensagem
-
 
     def _membro_id_do_canal(self, canal_id: int) -> int | None:
         for membro_id_str, registro in self.dados.items():
@@ -1212,61 +1598,43 @@ class Whitelist(commands.Cog):
 
 
     @commands.command(name="whitelist")
-    @commands.has_permissions(administrator=True)
+    @commands.check(_ctx_pode_gerir)
     async def whitelist_manual(self, ctx: commands.Context, membro: discord.Member):
         canal = await self.criar_canal_whitelist(membro)
         await ctx.send(f"✅ Canal de whitelist pronto: {canal.mention}", delete_after=6)
 
     @whitelist_manual.error
     async def whitelist_manual_error(self, ctx, error):
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
+        if isinstance(error, commands.CheckFailure):
+            await ctx.send("❌ Apenas a **staff da whitelist** (ou administradores) pode usar este comando.", delete_after=5)
         elif isinstance(error, commands.MemberNotFound):
             await ctx.send("❌ Não achei esse membro.", delete_after=5)
 
 
     @commands.command(name="aprovar-whitelist")
-    @commands.has_permissions(administrator=True)
+    @commands.check(_ctx_pode_gerir)
     async def aprovar_whitelist_cmd(self, ctx: commands.Context):
-        membro_id = self._membro_id_do_canal(ctx.channel.id)
-        if membro_id is None:
-            await ctx.send("⚠️ Esse comando só funciona dentro do canal de whitelist de um membro.", delete_after=8)
-            return
-        _, mensagem = await self.aprovar_core(ctx.guild, membro_id, ctx.author, ctx.channel)
-        await ctx.send(mensagem)
+        await self.fluxo_comando_decisao(ctx, aprovar=True)
 
     @aprovar_whitelist_cmd.error
     async def aprovar_whitelist_cmd_error(self, ctx, error):
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
+        if isinstance(error, commands.CheckFailure):
+            await ctx.send("❌ Apenas a **staff da whitelist** (ou administradores) pode usar este comando.", delete_after=5)
 
     @commands.command(name="reprovar-whitelist")
-    @commands.has_permissions(administrator=True)
+    @commands.check(_ctx_pode_gerir)
     async def reprovar_whitelist_cmd(self, ctx: commands.Context):
-        membro_id = self._membro_id_do_canal(ctx.channel.id)
-        if membro_id is None:
-            await ctx.send("⚠️ Esse comando só funciona dentro do canal de whitelist de um membro.", delete_after=8)
-            return
-        bloqueio = self._bloqueio_recusa(membro_id, ctx.author.id)
-        if bloqueio:
-            await ctx.send(bloqueio)
-            return
-        view = ConfirmarRecusaView(membro_id, ctx.author.id, forcar_publico=True)
-        view.message = await ctx.send(
-            self._texto_confirmacao_recusa(ctx.guild, membro_id),
-            view=view,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        await self.fluxo_comando_decisao(ctx, aprovar=False)
 
     @reprovar_whitelist_cmd.error
     async def reprovar_whitelist_cmd_error(self, ctx, error):
-        if isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ Apenas **Administradores** podem usar este comando.", delete_after=5)
+        if isinstance(error, commands.CheckFailure):
+            await ctx.send("❌ Apenas a **staff da whitelist** (ou administradores) pode usar este comando.", delete_after=5)
 
 
     @app_commands.command(name="perfil-whitelist", description="[Staff] Vê o perfil/respostas da whitelist de um membro.")
     @app_commands.describe(membro="Membro cujo perfil de whitelist você quer ver")
-    @app_commands.checks.has_role(CARGO_MEMBRO_EQUIPE_ID)
+    @app_commands.check(_inter_pode_ver_perfil)
     async def perfil_whitelist(self, interaction: discord.Interaction, membro: discord.Member):
         registro = self.dados.get(str(membro.id))
         if not registro:
@@ -1302,9 +1670,9 @@ class Whitelist(commands.Cog):
 
     @perfil_whitelist.error
     async def perfil_whitelist_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        if isinstance(error, app_commands.MissingRole):
+        if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message(
-                "❌ Só quem tem o cargo de **Membro da Equipe** pode usar esse comando.", ephemeral=True
+                "❌ Só a **staff** (Membro da Equipe ou staff da whitelist) pode usar esse comando.", ephemeral=True
             )
 
 
@@ -1338,7 +1706,7 @@ class Whitelist(commands.Cog):
         ativo=[app_commands.Choice(name="Sim", value="Sim"), app_commands.Choice(name="Não", value="Não")],
         tem_tiktok=[app_commands.Choice(name="Sim", value="Sim"), app_commands.Choice(name="Não", value="Não")],
     )
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.check(_inter_pode_gerir)
     async def editar_whitelist(
         self,
         interaction: discord.Interaction,
@@ -1409,6 +1777,9 @@ class Whitelist(commands.Cog):
 
         if plataforma:
             registro["respostas"]["plataforma"] = plataforma.value
+            erro = await self.dar_cargo_plataforma(interaction.guild, membro, plataforma.value)
+            if erro:
+                avisos.append(erro)
 
         if tempo:
             registro["respostas"]["tempo"] = tempo.value
@@ -1462,9 +1833,9 @@ class Whitelist(commands.Cog):
 
     @editar_whitelist.error
     async def editar_whitelist_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        if isinstance(error, app_commands.MissingPermissions):
+        if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message(
-                "❌ Apenas **Administradores** podem usar este comando.", ephemeral=True
+                "❌ Apenas a **staff da whitelist** (ou administradores) pode usar este comando.", ephemeral=True
             )
 
 

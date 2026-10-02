@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 
-from cogs.players import CARGOS_RANK, RANK_IDS, CARGO_MAP
+from cogs.players import CARGOS_RANK, RANK_IDS, CARGO_MAP, aplicar_cargo_rank
 
 # ─────────────────────────────────────────────
 #  Cog: Enquete de Divisão
@@ -65,13 +65,8 @@ class DivSelect(discord.ui.Select):
             return
 
         membro = interaction.user
-        cargos_rank_atuais = [r for r in membro.roles if r.id in RANK_IDS and r.id != novo_cargo.id]
-
         try:
-            if cargos_rank_atuais:
-                await membro.remove_roles(*cargos_rank_atuais, reason="Enquete de divisão (!div)")
-            if novo_cargo not in membro.roles:
-                await membro.add_roles(novo_cargo, reason="Enquete de divisão (!div)")
+            await aplicar_cargo_rank(membro, novo_cargo, "Enquete de divisão (!div)")
         except discord.Forbidden:
             await interaction.followup.send(
                 "❌ Não tenho permissão pra alterar seu cargo. Chama a staff!", ephemeral=True

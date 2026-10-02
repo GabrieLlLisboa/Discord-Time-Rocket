@@ -3,7 +3,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import os
 
-from cogs.players import CARGOS
+from cogs.players import CARGOS, aplicar_cargo_rank
 
 load_dotenv()
 WELCOME_CHANNEL_ID   = int(os.getenv("WELCOME_CHANNEL_ID", 0))
@@ -38,13 +38,8 @@ class RegistrarRankSelect(discord.ui.Select):
             return
 
 
-        cargos_rank_atuais = [r for r in membro.roles if r.id in RANK_IDS and r.id != novo_cargo.id]
-
         try:
-            if cargos_rank_atuais:
-                await membro.remove_roles(*cargos_rank_atuais, reason="Trocou de rank pelo menu de boas-vindas")
-            if novo_cargo not in membro.roles:
-                await membro.add_roles(novo_cargo, reason="Registrou o rank pelo menu de boas-vindas")
+            await aplicar_cargo_rank(membro, novo_cargo, "Registrou o rank pelo menu de boas-vindas")
         except discord.Forbidden:
             await interaction.response.send_message("❌ Não tenho permissão pra te dar esse cargo. Chama a staff!", ephemeral=True)
             return

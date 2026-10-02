@@ -73,6 +73,37 @@ IDS_MONITORADOS  = {c["id"] for c in CARGOS}
 CARGO_MAP        = {c["id"]: c for c in CARGOS}
 RANK_IDS         = {c["id"] for c in CARGOS if c["secao"] == "rank"}
 STAFF_IDS        = {c["id"] for c in CARGOS if c["secao"] == "staff"}
+
+# Cargo "geral" do rank (Platina, Diamante, Champion, Grand Champion) que acompanha
+# SEMPRE o cargo de divisão: quem recebe "Champion 2" recebe também "Champion".
+# O Super Sonic Legend não tem divisão, então não tem cargo geral.
+CARGO_GERAL_IDS = set(CARGO_GERAL_SEM_DIVISAO_IDS.values())
+CARGO_GERAL_POR_DIVISAO = {
+    div_id: CARGO_GERAL_SEM_DIVISAO_IDS[tier]
+    for tier, divisoes in RANK_DIVISAO_IDS.items()
+    for div_id in divisoes.values()
+}
+
+
+async def aplicar_cargo_rank(membro, novo_cargo, motivo: str) -> None:
+    """Dá o cargo de divisão `novo_cargo` + o cargo geral do rank dele e tira
+    os cargos de rank antigos (divisão e geral). Levanta discord.Forbidden se
+    o bot não tiver permissão — quem chama decide o que avisar."""
+    guild = membro.guild
+    geral_id = CARGO_GERAL_POR_DIVISAO.get(novo_cargo.id)
+    geral = guild.get_role(geral_id) if geral_id else None
+
+    remover = [
+        r for r in membro.roles
+        if (r.id in RANK_IDS and r.id != novo_cargo.id)
+        or (r.id in CARGO_GERAL_IDS and (geral is None or r.id != geral.id))
+    ]
+    if remover:
+        await membro.remove_roles(*remover, reason=motivo)
+
+    adicionar = [r for r in (novo_cargo, geral) if r is not None and r not in membro.roles]
+    if adicionar:
+        await membro.add_roles(*adicionar, reason=motivo)
 CARGOS_RANK      = [c for c in CARGOS if c["secao"] == "rank"]
 
 
@@ -179,9 +210,7 @@ class SelecaoRankView(discord.ui.View):
         antigo_info = CARGO_MAP.get(cargos_rank_atuais[0].id) if cargos_rank_atuais else None
 
         try:
-            if cargos_rank_atuais:
-                await self.jogador.remove_roles(*cargos_rank_atuais, reason=f"Rank atualizado via !setup-rank ({self.tipo})")
-            await self.jogador.add_roles(novo_cargo, reason=f"Rank atualizado via !setup-rank ({self.tipo})")
+            await aplicar_cargo_rank(self.jogador, novo_cargo, f"Rank atualizado via !setup-rank ({self.tipo})")
         except discord.Forbidden:
             await interaction.followup.send("❌ Não tenho permissão pra alterar os cargos desse jogador.", ephemeral=True)
             return

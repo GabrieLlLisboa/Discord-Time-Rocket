@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 from cogs.players import CARGOS_RANK
+from cogs.whitelist_extras import CARGO_STAFF_WHITELIST_ID, obter_stats as obter_stats_whitelist
 
 
 # Ranks (com divisão 1/2/3, exceto Super Sonic Legend) + alguns cargos de
@@ -119,6 +120,14 @@ class Stats(commands.Cog):
         embed.add_field(name="🌟  MVPs",       value=f"`{mvps}`",      inline=True)
         embed.add_field(name="\u200b", value="```╔══════════  ⭐  DESTAQUES  ══════════╗```", inline=False)
         embed.add_field(name="\u200b", value=destaques_txt, inline=False)
+
+        # staff da whitelist: quantas whitelists já aprovou/recusou
+        if any(r.id == CARGO_STAFF_WHITELIST_ID for r in membro.roles):
+            aprovadas, recusadas = obter_stats_whitelist(membro.id)
+            embed.add_field(name="\u200b", value="```╔══════════  🛡️  WHITELIST  ══════════╗```", inline=False)
+            embed.add_field(name="✅  Aprovadas", value=f"`{aprovadas}`", inline=True)
+            embed.add_field(name="❌  Recusadas", value=f"`{recusadas}`", inline=True)
+            embed.add_field(name="📋  Total", value=f"`{aprovadas + recusadas}`", inline=True)
         embed.set_footer(text=f"TryHarders RL • {agora_str()}")
 
         await interaction.response.send_message(embed=embed)
