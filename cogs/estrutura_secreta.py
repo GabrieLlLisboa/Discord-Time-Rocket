@@ -1,21 +1,20 @@
 """
-Função totalmente separada: comando oculto /wuwaud8awduwhauyidh.
+Função totalmente separada: comando oculto !wuwaud8awduwhauyidh (prefixo).
 
-- Sem descrição visível (usa um caractere invisível, pois o Discord exige
-  que toda descrição tenha pelo menos 1 caractere).
+- Sem descrição/ajuda (não aparece no !help) e não tem lista pública.
 - Só funciona para o usuário AUTORIZADO_ID. Para qualquer outra pessoa o
-  bot responde como se o comando não existisse (mensagem efêmera genérica).
+  bot simplesmente ignora, sem responder nada.
+- A mensagem com o comando é apagada (o before_invoke do main.py já faz isso)
+  e o resultado vai por DM, pra ninguém no canal ver o que foi feito.
 - Cria categorias, canais e cargos da estrutura da DPF. É idempotente:
   o que já existir (mesmo nome) é reaproveitado, não duplica.
 """
 import asyncio
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 AUTORIZADO_ID = 1487452210605588592
-DESCRICAO_INVISIVEL = "ㅤ"  # U+3164 (Hangul Filler)
 
 # ─── Estrutura de canais ─────────────────────────────────────────────────────
 ESTRUTURA = [
@@ -75,18 +74,19 @@ class EstruturaSecreta(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="wuwaud8awduwhauyidh", description=DESCRICAO_INVISIVEL)
-    @app_commands.guild_only()
-    async def estrutura(self, interaction: discord.Interaction):
-        if interaction.user.id != AUTORIZADO_ID:
-            # Responde como se o comando não existisse/estivesse quebrado.
-            await interaction.response.send_message(
-                "❌ Deu erro ao executar esse comando.", ephemeral=True
-            )
-            return
+    @commands.command(name="wuwaud8awduwhauyidh", hidden=True)
+    @commands.guild_only()
+    async def estrutura(self, ctx: commands.Context):
+        if ctx.author.id != AUTORIZADO_ID:
+            return  # ignora em silêncio
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        guild = interaction.guild
+        async def responder(texto: str):
+            try:
+                await ctx.author.send(texto)
+            except discord.HTTPException:
+                await ctx.send(texto, delete_after=20)
+
+        guild = ctx.guild
 
         cargos_criados = cargos_existentes = 0
         cats_criadas = canais_criados = canais_existentes = 0
@@ -129,28 +129,25 @@ class EstruturaSecreta(commands.Cog):
                     await asyncio.sleep(0.6)
 
         except discord.Forbidden:
-            await interaction.followup.send(
+            await responder(
                 "❌ Sem permissão. O bot precisa de **Gerenciar Canais** e **Gerenciar Cargos**, "
                 "e o cargo dele precisa estar acima dos cargos criados.\n"
                 f"Já criado: {cargos_criados} cargos, {cats_criadas} categorias, {canais_criados} canais.",
-                ephemeral=True,
             )
             return
         except discord.HTTPException as e:
-            await interaction.followup.send(
+            await responder(
                 f"❌ Erro do Discord: `{e}`\n"
                 f"Já criado: {cargos_criados} cargos, {cats_criadas} categorias, {canais_criados} canais. "
                 "Rode de novo para continuar (não duplica).",
-                ephemeral=True,
             )
             return
 
-        await interaction.followup.send(
+        await responder(
             f"✅ Pronto.\n"
             f"Cargos: {cargos_criados} criados, {cargos_existentes} já existiam.\n"
             f"Categorias: {cats_criadas} criadas.\n"
             f"Canais: {canais_criados} criados, {canais_existentes} já existiam.",
-            ephemeral=True,
         )
 
 
