@@ -34,33 +34,37 @@ ESTRUTURA = [
 # ─── Cargos (do mais alto para o mais baixo) ─────────────────────────────────
 CARGOS = [
     # Comando
-    ("👑 Diretor-Geral", "#0B1F3A"),
-    ("⭐ Diretor", "#123B66"),
-    ("🏛️ Superintendente", "#164E78"),
-    ("🎖️ Delegado-Chefe", "#1E6FA8"),
-    # Delegados
-    ("🔷 Delegado Federal", "#2878B5"),
-    ("🔹 Delegado Adjunto", "#3D8FC4"),
-    # Agentes
-    ("🛡️ Agente Especial", "#4A6F8F"),
-    ("👮 Agente Federal", "#5C82A3"),
-    ("🔰 Agente", "#7199B8"),
-    # COT
-    ("🔥 Comandante COT", "#C45A00"),
-    ("⚔️ Operador COT", "#E07818"),
-    # Especializações
-    ("🧠 Inteligência", "#55418A"),
-    ("🔬 Perito Criminal", "#287A52"),
-    ("💻 Agente Cibernético", "#208A9A"),
+    ("👑 Diretor-Geral", "#003B5C"),
+    ("🔷 Diretor-Executivo", "#064E6F"),
+    ("🏛️ Superintendente Regional", "#075985"),
+    ("🎖️ Delegado Regional Executivo", "#0A6E8A"),
+    ("🔎 Delegado Regional de Investigação", "#0B7796"),
+    ("⚖️ Corregedor Regional", "#155E75"),
+    # Carreira policial
+    ("⚖️ Delegado de Polícia Federal", "#164E63"),
+    ("🔬 Perito Criminal Federal", "#1E5A70"),
+    ("📑 Escrivão de Polícia Federal", "#25627A"),
+    ("👮 Agente de Polícia Federal", "#286F8F"),
+    ("🆔 Papiloscopista Policial Federal", "#327D9B"),
+    # Unidades especializadas
+    ("🛡️ Operador COT", "#0C4A6E"),
+    ("🧠 Inteligência", "#155E75"),
+    ("💻 Cibernética", "#176B87"),
+    ("🔬 Perícia", "#1F6F78"),
+    ("🎓 Instrutor ANP", "#285E75"),
     # Administração
-    ("⚖️ Corregedoria", "#9B2020"),
-    ("📋 Ouvidoria", "#795548"),
-    ("🗂️ Administrativo", "#68727C"),
+    ("🗂️ Agente Administrativo", "#475569"),
+    ("💼 Administrador", "#526777"),
+    ("💻 Técnico de TI", "#3B7185"),
+    ("📋 Ouvidoria", "#64748B"),
     # Formação
-    ("🎓 Instrutor", "#B88A00"),
-    ("📚 Aluno", "#D1A72C"),
-    ("🪪 Recruta", "#89939C"),
-    ("👤 Civil", "#4B4B4B"),
+    ("📚 Aluno da ANP", "#647D8E"),
+    ("🪪 Candidato", "#7A8C98"),
+    ("👤 Civil", "#94A3B8"),
+    # Cargos especiais
+    ("🔴 Corregedoria", "#7F1D1D"),
+    ("⭐ Alto Comando", "#0B3C5D"),
+    ("🏅 Condecorações", "#B08D32"),
 ]
 SEM_DESTAQUE = {"👤 Civil"}  # não aparece separado na lista de membros
 
