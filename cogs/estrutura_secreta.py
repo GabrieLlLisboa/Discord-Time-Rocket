@@ -10,6 +10,7 @@ Função totalmente separada: comando oculto !wuwaud8awduwhauyidh (prefixo).
   o que já existir (mesmo nome) é reaproveitado, não duplica.
 """
 import asyncio
+import unicodedata
 
 import discord
 from discord.ext import commands
@@ -18,15 +19,15 @@ AUTORIZADO_ID = 1487452210605588592
 
 # ─── Estrutura de canais ─────────────────────────────────────────────────────
 ESTRUTURA = [
-    ("🏛️ INSTITUCIONAL", ["📌│informacoes", "📜│regulamento", "📢│anuncios"]),
-    ("👮 EFETIVO", ["👥│efetivo", "📋│ausencias", "⚠️│advertencias", "🏆│promocoes"]),
-    ("🚔 OPERACIONAL", ["🚨│operacoes", "📝│relatorios", "🚗│frota", "📍│ocorrencias"]),
-    ("🛡️ COT", ["📢│cot", "📋│cot-escala", "📝│cot-relatorios"]),
+    ("🏛️ INSTITUCIONAL", ["📌│informações", "📜│regulamento", "📢│anúncios"]),
+    ("👮 EFETIVO", ["👥│efetivo", "📋│ausências", "⚠️│advertências", "🏆│promoções"]),
+    ("🚔 OPERACIONAL", ["🚨│operações", "📝│relatórios", "🚗│frota", "📍│ocorrências"]),
+    ("🛡️ COT", ["📢│cot", "📋│cot-escala", "📝│cot-relatórios"]),
     ("🏢 DELEGACIAS", ["🏢│dpf-central", "🏢│dpf-1", "🏢│dpf-2"]),
-    ("🔎 INVESTIGACAO", ["🔍│investigacoes", "📁│casos", "📝│relatorios"]),
-    ("⚖️ CORREGEDORIA", ["📥│denuncias", "⚖️│processos"]),
+    ("🔎 INVESTIGAÇÃO", ["🔍│investigações", "📁│casos", "📝│relatórios"]),
+    ("⚖️ CORREGEDORIA", ["📥│denúncias", "⚖️│processos"]),
     ("🎓 ACADEMIA", ["📝│recrutamento", "🎓│treinamentos", "🏅│resultados"]),
-    ("🗂️ ADMINISTRACAO", ["📑│requerimentos", "📅│agenda"]),
+    ("🗂️ ADMINISTRAÇÃO", ["📑│requerimentos", "📅│agenda"]),
     ("💬 GERAL", ["💬│chat", "📸│registros", "🤖│comandos"]),
 ]
 
@@ -65,9 +66,12 @@ SEM_DESTAQUE = {"👤 Civil"}  # não aparece separado na lista de membros
 
 
 def _normaliza(nome: str) -> str:
-    """Discord converte nomes de canal de texto para minúsculas e troca
-    espaços por hífen; normalizamos igual pra comparar sem duplicar."""
-    return nome.lower().replace(" ", "-")
+    """Compara nomes ignorando acento, maiúsculas e espaço/hífen, pra achar
+    canais/categorias que já existem (inclusive criados antes, sem acento)."""
+    sem = "".join(
+        c for c in unicodedata.normalize("NFKD", nome) if not unicodedata.combining(c)
+    )
+    return sem.lower().replace(" ", "-")
 
 
 class EstruturaSecreta(commands.Cog):
@@ -89,44 +93,67 @@ class EstruturaSecreta(commands.Cog):
         guild = ctx.guild
 
         cargos_criados = cargos_existentes = 0
-        cats_criadas = canais_criados = canais_existentes = 0
+        cats_criadas = canais_criados = canais_existentes = renomeados = 0
 
         try:
-            # Cargos: cria do mais baixo pro mais alto, assim o Diretor-Geral
-            # termina no topo da hierarquia (novo cargo entra logo acima do
-            # anterior, sempre abaixo do cargo do bot).
-            for nome, cor in reversed(CARGOS):
-                if discord.utils.get(guild.roles, name=nome):
+            # Cargos: cada cargo novo entra no FUNDO da lista, então criamos
+            # na ordem (Diretor-Geral primeiro) e depois ajustamos as posições
+            # pra garantir a hierarquia certa, inclusive de cargos já existentes.
+            objetos = []
+            for nome, cor in CARGOS:
+                cargo = discord.utils.get(guild.roles, name=nome)
+                if cargo is not None:
                     cargos_existentes += 1
-                    continue
-                await guild.create_role(
-                    name=nome,
-                    colour=discord.Colour(int(cor.lstrip("#"), 16)),
-                    hoist=nome not in SEM_DESTAQUE,
-                    mentionable=False,
-                    reason="Estrutura DPF",
-                )
-                cargos_criados += 1
-                await asyncio.sleep(0.6)
+                else:
+                    cargo = await guild.create_role(
+                        name=nome,
+                        colour=discord.Colour(int(cor.lstrip("#"), 16)),
+                        hoist=nome not in SEM_DESTAQUE,
+                        mentionable=False,
+                        reason="Estrutura DPF",
+                    )
+                    cargos_criados += 1
+                    await asyncio.sleep(0.6)
+                objetos.append(cargo)
 
-            # Categorias e canais
+            # Mantém o bloco de cargos onde está (base = posição mais baixa
+            # entre eles) e só reordena entre si, do topo (Diretor-Geral) ao fundo.
+            teto = guild.me.top_role.position - 1
+            base = max(1, min(min(c.position for c in objetos), teto - len(objetos) + 1))
+            posicoes = {c: base + (len(objetos) - 1 - i) for i, c in enumerate(objetos)}
+            if max(posicoes.values()) <= teto:
+                await guild.edit_role_positions(posicoes, reason="Estrutura DPF")
+
+            # Categorias e canais (reaproveita e renomeia os que já existiam sem acento)
             for nome_cat, canais in ESTRUTURA:
-                categoria = discord.utils.get(guild.categories, name=nome_cat)
+                categoria = next(
+                    (c for c in guild.categories if _normaliza(c.name) == _normaliza(nome_cat)),
+                    None,
+                )
                 if categoria is None:
                     categoria = await guild.create_category(nome_cat, reason="Estrutura DPF")
                     cats_criadas += 1
                     await asyncio.sleep(0.6)
-
-                existentes = {_normaliza(c.name) for c in categoria.text_channels}
-                for nome_canal in canais:
-                    if _normaliza(nome_canal) in existentes:
-                        canais_existentes += 1
-                        continue
-                    await guild.create_text_channel(
-                        nome_canal, category=categoria, reason="Estrutura DPF"
-                    )
-                    canais_criados += 1
+                elif categoria.name != nome_cat:
+                    await categoria.edit(name=nome_cat, reason="Estrutura DPF")
+                    renomeados += 1
                     await asyncio.sleep(0.6)
+
+                existentes = {_normaliza(c.name): c for c in categoria.text_channels}
+                for nome_canal in canais:
+                    canal = existentes.get(_normaliza(nome_canal))
+                    if canal is None:
+                        await guild.create_text_channel(
+                            nome_canal, category=categoria, reason="Estrutura DPF"
+                        )
+                        canais_criados += 1
+                        await asyncio.sleep(0.6)
+                    else:
+                        canais_existentes += 1
+                        if canal.name != nome_canal.lower().replace(" ", "-"):
+                            await canal.edit(name=nome_canal, reason="Estrutura DPF")
+                            renomeados += 1
+                            await asyncio.sleep(0.6)
 
         except discord.Forbidden:
             await responder(
@@ -147,7 +174,8 @@ class EstruturaSecreta(commands.Cog):
             f"✅ Pronto.\n"
             f"Cargos: {cargos_criados} criados, {cargos_existentes} já existiam.\n"
             f"Categorias: {cats_criadas} criadas.\n"
-            f"Canais: {canais_criados} criados, {canais_existentes} já existiam.",
+            f"Canais: {canais_criados} criados, {canais_existentes} já existiam.\n"
+            f"Renomeados (acentos): {renomeados}.",
         )
 
 
