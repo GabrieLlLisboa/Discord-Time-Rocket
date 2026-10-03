@@ -171,6 +171,7 @@ COGS = [
     "cogs.antinuke",
     "cogs.clear",
     "cogs.estrutura_secreta",
+    "cogs.eleicao",
 ]
 
 async def _resultado_check(check, ctx_ou_interaction):
