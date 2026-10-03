@@ -567,8 +567,160 @@ class ConfirmarDecisaoView(discord.ui.View):
             pass
 
 
+# ── edição das respostas pela staff (antes de aprovar) ─────────────────────
+# chave da resposta -> (rótulo, tipo, extra)
+#   tipo "texto"   -> abre um modal (extra = tamanho máximo)
+#   tipo "escolha" -> menu de uma opção (extra = lista de opções)
+#   tipo "multi"   -> menu de várias opções
+# pergunta nova na whitelist? é só adicionar a linha aqui também
+CAMPOS_EDITAVEIS = {
+    "nick":        ("Nick RL", "texto", 32),
+    "idioma":      ("Idioma", "escolha", IDIOMAS),
+    "rank":        ("Rank atual", "escolha", None),
+    "plataforma":  ("Plataforma", "escolha", PLATAFORMAS),
+    "peak_rank":   ("Maior rank", "escolha", PEAK_RANKS),
+    "peak_div":    ("Divisão do maior rank", "escolha", DIVISOES),
+    "tempo":       ("Tempo jogando", "escolha", TEMPOS_JOGANDO),
+    "microfone":   ("Microfone", "escolha", ["Sim", "Não"]),
+    "ativo":       ("Ativo?", "escolha", ["Sim", "Não"]),
+    "tem_tiktok":  ("Tem TikTok?", "escolha", ["Sim", "Não"]),
+    "tiktok":      ("TikTok", "texto", 200),
+    "habilidades": ("Habilidades", "multi", None),
+}
+
+
+def _limpo(valor, limite: int = 100) -> str:
+    """Texto seguro pra jogar numa mensagem: sem menção e sem markdown solto."""
+    texto = discord.utils.escape_mentions(discord.utils.escape_markdown(str(valor)))
+    return texto if len(texto) <= limite else texto[: limite - 1] + "…"
+
+
+def _opcoes_campo(chave: str) -> list[str]:
+    if chave == "rank":
+        # mesmo formato que o fluxo normal grava: "Champion 2", "Super Sonic Legend"
+        opcoes = []
+        for tier in RANK_TIERS_ORDEM:
+            if tier in RANK_TIERS_COM_DIVISAO:
+                opcoes += [f"{tier} {d}" for d in RANK_DIVISOES_OPCOES]
+            else:
+                opcoes.append(tier)
+        return opcoes
+    if chave == "habilidades":
+        return HABILIDADES + ["Nenhuma"]
+    return CAMPOS_EDITAVEIS[chave][2]
+
+
+class _ViewEdicao(discord.ui.View):
+    """Base dos menus efêmeros de edição: só quem clicou em ✏️ mexe neles."""
+
+    def __init__(self, cog: "Whitelist", membro_id: int, autor_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.membro_id = membro_id
+        self.autor_id = autor_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.autor_id:
+            await interaction.response.send_message("❌ Esse menu é de quem abriu a edição.", ephemeral=True)
+            return False
+        return True
+
+
+class CampoSelect(discord.ui.Select):
+    def __init__(self):
+        options = [discord.SelectOption(label=rotulo, value=chave) for chave, (rotulo, _, _) in CAMPOS_EDITAVEIS.items()]
+        super().__init__(placeholder="Qual resposta você quer corrigir?", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "EditarCampoView" = self.view
+        chave = self.values[0]
+        rotulo, tipo, _ = CAMPOS_EDITAVEIS[chave]
+        if tipo == "texto":
+            atual = view.cog.dados.get(str(view.membro_id), {}).get("respostas", {}).get(chave, "")
+            await interaction.response.send_modal(EditarTextoModal(view.cog, view.membro_id, chave, atual))
+            return
+        await interaction.response.edit_message(
+            content=f"Escolha o novo valor de **{rotulo}**:",
+            embed=None,
+            view=EscolherValorView(view.cog, view.membro_id, view.autor_id, chave),
+        )
+
+
+class EditarCampoView(_ViewEdicao):
+    def __init__(self, cog: "Whitelist", membro_id: int, autor_id: int):
+        super().__init__(cog, membro_id, autor_id)
+        self.add_item(CampoSelect())
+
+
+class ValorSelect(discord.ui.Select):
+    def __init__(self, chave: str):
+        opcoes = _opcoes_campo(chave)
+        multi = CAMPOS_EDITAVEIS[chave][1] == "multi"
+        super().__init__(
+            placeholder="Escolha o novo valor..." if not multi else "Escolha uma ou mais opções...",
+            options=[discord.SelectOption(label=o) for o in opcoes],
+            min_values=1,
+            max_values=len(opcoes) if multi else 1,
+        )
+        self.chave = chave
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "EscolherValorView" = self.view
+        if "Nenhuma" in self.values:
+            valor = "Nenhuma"
+        else:
+            valor = ", ".join(self.values)
+        # editar mexe em apelido/cargo/mensagens e pode passar dos 3s do Discord: confirma o clique primeiro
+        await interaction.response.defer()
+        _, texto = await view.cog.aplicar_edicao(interaction.guild, interaction.user, view.membro_id, self.chave, valor)
+        # volta pro menu de campos, já mostrando as respostas atualizadas
+        await interaction.edit_original_response(
+            content=texto,
+            embed=view.cog._embed_edicao(interaction.guild, view.membro_id),
+            view=EditarCampoView(view.cog, view.membro_id, view.autor_id),
+        )
+
+
+class EscolherValorView(_ViewEdicao):
+    def __init__(self, cog: "Whitelist", membro_id: int, autor_id: int, chave: str):
+        super().__init__(cog, membro_id, autor_id)
+        self.add_item(ValorSelect(chave))
+
+    @discord.ui.button(label="↩️ Voltar", style=discord.ButtonStyle.secondary, row=1)
+    async def voltar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content=None,
+            embed=self.cog._embed_edicao(interaction.guild, self.membro_id),
+            view=EditarCampoView(self.cog, self.membro_id, self.autor_id),
+        )
+
+
+class EditarTextoModal(discord.ui.Modal):
+    def __init__(self, cog: "Whitelist", membro_id: int, chave: str, atual: str):
+        rotulo, _, limite = CAMPOS_EDITAVEIS[chave]
+        super().__init__(title=f"Editar — {rotulo}"[:45])
+        self.cog = cog
+        self.membro_id = membro_id
+        self.chave = chave
+        self.valor = discord.ui.TextInput(
+            label=rotulo[:45],
+            default=("" if atual in (None, "—") else str(atual))[:limite],
+            max_length=limite,
+            required=True,
+        )
+        self.add_item(self.valor)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        _, texto = await self.cog.aplicar_edicao(
+            interaction.guild, interaction.user, self.membro_id, self.chave, self.valor.value.strip()
+        )
+        await interaction.followup.send(texto, ephemeral=True)
+
+
 class RevisaoWhitelistView(discord.ui.View):
-    """Botões de revisão (Visualizada / Aprovar / Recusar [+ Abrir chat]).
+    """Botões de revisão (Visualizada / Aprovar / Recusar), mais 💬 Abrir/Fechar chat
+    e ✏️ Editar respostas (+ link 📂 pro canal, no log).
 
     IMPORTANTE: quem é o candidato NÃO fica guardado aqui. Os botões são
     persistentes (todos usam o mesmo custom_id) e, depois de um restart, o
@@ -612,6 +764,22 @@ class RevisaoWhitelistView(discord.ui.View):
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
         await cog.iniciar_decisao(interaction, aprovar=False)
+
+    @discord.ui.button(label="💬 Abrir/Fechar chat", style=discord.ButtonStyle.primary, custom_id="wl_chat_toggle", row=1)
+    async def chat(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _checar_admin(interaction):
+            await interaction.response.send_message("❌ Só a staff da whitelist pode usar isso.", ephemeral=True)
+            return
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        await cog.alternar_chat(interaction)
+
+    @discord.ui.button(label="✏️ Editar respostas", style=discord.ButtonStyle.secondary, custom_id="wl_editar", row=1)
+    async def editar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _checar_admin(interaction):
+            await interaction.response.send_message("❌ Só a staff da whitelist pode editar.", ephemeral=True)
+            return
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        await cog.abrir_edicao(interaction)
 
 
 class Whitelist(commands.Cog):
@@ -1233,19 +1401,9 @@ class Whitelist(commands.Cog):
             color=0x5865F2,
         )
         embed_resumo.set_thumbnail(url=membro.display_avatar.url)
-        embed_resumo.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
-        embed_resumo.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
-        embed_resumo.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
-        embed_resumo.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
-        embed_resumo.add_field(name="Maior rank", value=f"{r.get('peak_rank','—')} ({r.get('peak_div','—')})", inline=True)
-        embed_resumo.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
-        embed_resumo.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
-        embed_resumo.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
-        embed_resumo.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
-        embed_resumo.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
-        # add_field da pergunta nova entra aqui tb, mesmo esquema
+        self._campos_resumo(embed_resumo, registro)
         embed_resumo.set_footer(text=f"ID: {membro.id}")
-        await interaction.channel.send(embed=embed_resumo)
+        msg_resumo = await interaction.channel.send(embed=embed_resumo)
 
         embed_revisao = discord.Embed(
             title="🔎 Whitelist aguardando revisão",
@@ -1265,16 +1423,7 @@ class Whitelist(commands.Cog):
                     color=0xFEE75C,
                 )
                 embed.set_thumbnail(url=membro.display_avatar.url)
-                embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
-                embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
-                embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
-                embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
-                embed.add_field(name="Maior rank", value=f"{r.get('peak_rank','—')} ({r.get('peak_div','—')})", inline=True)
-                embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
-                embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
-                embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
-                embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
-                embed.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
+                self._campos_resumo(embed, registro)
                 embed.set_footer(text=f"ID: {membro.id}")
                 try:
                     # mesmos botões de revisão + 📂 "Abrir chat da whitelist" ao lado
@@ -1284,6 +1433,8 @@ class Whitelist(commands.Cog):
                     print(f"[WHITELIST] ⚠️ Não consegui enviar a revisão pro canal de log: {e}")
 
         registro["revisao_msgs"] = revisao_msgs
+        # guarda o resumo do canal pra conseguir atualizar quando a staff editar uma resposta
+        registro["resumo_msg"] = {"canal_id": interaction.channel.id, "msg_id": msg_resumo.id}
         salvar("whitelist", self.dados)
 
     async def marcar_visualizada(self, interaction: discord.Interaction):
@@ -1322,6 +1473,232 @@ class Whitelist(commands.Cog):
             except discord.HTTPException:
                 pass
         await interaction.followup.send("👀 Pronto, a whitelist está marcada como em análise por você.", ephemeral=True)
+
+    # ── chat do candidato + edição das respostas (staff) ───────────────────
+    @staticmethod
+    def _campos_resumo(embed: discord.Embed, registro: dict) -> None:
+        """Campos do resumo da whitelist — usado no resumo do canal, na mensagem
+        do canal de log e no menu de edição. Pergunta nova: add_field aqui
+        (e no status board, mais abaixo, que monta o seu próprio)."""
+        r = registro.get("respostas", {})
+        embed.add_field(name="Idioma", value=r.get("idioma", "—"), inline=True)
+        embed.add_field(name="Nick RL", value=r.get("nick", "—"), inline=True)
+        embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
+        embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
+        embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
+        embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
+        embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
+        embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
+        embed.add_field(name="TikTok", value=r.get("tiktok", "—"), inline=False)
+        embed.add_field(name="Habilidades", value=r.get("habilidades", "—"), inline=False)
+
+        edicoes = registro.get("edicoes") or []
+        if edicoes:
+            linhas = [
+                f"• **{_limpo(e.get('rotulo', '?'))}**: {_limpo(e.get('de', '—'))} → {_limpo(e.get('para', '—'))} "
+                f"(por {_limpo(e.get('por_nome', '?'))})"
+                for e in edicoes[-5:]
+            ]
+            if len(edicoes) > 5:
+                linhas.insert(0, f"*(+{len(edicoes) - 5} edição(ões) anterior(es))*")
+            embed.add_field(name="✏️ Editado pela staff", value="\n".join(linhas)[:1024], inline=False)
+
+    def _bloqueio_edicao(self, membro_id: int, autor_id: int) -> str | None:
+        """Quando a staff NÃO pode editar. Devolve o aviso, ou None se pode."""
+        registro = self.dados.get(str(membro_id))
+        if not registro:
+            return "⚠️ Não achei os dados dessa whitelist."
+        status = registro.get("status")
+        if status in ("aprovada", "recusada", "cancelada"):
+            return f"⚠️ Essa whitelist já está **{status}** — pra corrigir depois disso use o comando `/editar_whitelist`."
+        if status == "em_andamento":
+            return "⚠️ O candidato ainda está respondendo — espera ele enviar a whitelist pra editar."
+        visualizado_por_id = registro.get("visualizado_por_id")
+        if visualizado_por_id is not None and visualizado_por_id != autor_id:
+            nome = registro.get("visualizado_por_nome", "outro administrador")
+            return f"⚠️ Essa whitelist está em análise por **{_limpo(nome)}** — só ela(e) pode editar."
+        return None
+
+    def _embed_edicao(self, guild: discord.Guild, membro_id: int) -> discord.Embed:
+        registro = self.dados.get(str(membro_id), {})
+        membro = guild.get_member(membro_id) if guild else None
+        embed = discord.Embed(
+            title=f"✏️ Editar whitelist — {membro or membro_id}",
+            description="Escolha no menu qual resposta quer corrigir.\n"
+                        "*(rank e plataforma só viram cargo quando a whitelist for aprovada)*",
+            color=0xFEE75C,
+        )
+        if membro:
+            embed.set_thumbnail(url=membro.display_avatar.url)
+        self._campos_resumo(embed, registro)
+        return embed
+
+    async def abrir_edicao(self, interaction: discord.Interaction):
+        """Clique em ✏️ Editar respostas."""
+        membro_id = self.membro_id_da_interacao(interaction)
+        if membro_id is None:
+            await interaction.response.send_message("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
+            return
+        bloqueio = self._bloqueio_edicao(membro_id, interaction.user.id)
+        if bloqueio:
+            await interaction.response.send_message(bloqueio, ephemeral=True)
+            return
+        await interaction.response.send_message(
+            embed=self._embed_edicao(interaction.guild, membro_id),
+            view=EditarCampoView(self, membro_id, interaction.user.id),
+            ephemeral=True,
+        )
+
+    async def aplicar_edicao(self, guild: discord.Guild, autor: discord.abc.User, membro_id: int, chave: str, valor: str) -> tuple[bool, str]:
+        """Grava a correção da staff. Devolve (mudou, texto pra mostrar pra staff)."""
+        if not _pode_gerir(autor):
+            return False, "❌ Só a staff da whitelist pode editar."
+        bloqueio = self._bloqueio_edicao(membro_id, autor.id)
+        if bloqueio:
+            return False, bloqueio
+        if chave not in CAMPOS_EDITAVEIS:
+            return False, "⚠️ Campo inválido."
+
+        rotulo = CAMPOS_EDITAVEIS[chave][0]
+        registro = self.dados[str(membro_id)]
+        respostas = registro.setdefault("respostas", {})
+        antigo = respostas.get(chave, "—")
+        if antigo == valor:
+            return False, f"ℹ️ **{rotulo}** já está como **{_limpo(valor)}** — nada mudou."
+
+        respostas[chave] = valor
+        membro = guild.get_member(membro_id)
+        notas = []
+
+        if chave == "nick" and membro:
+            # o fluxo normal já troca o apelido do candidato quando ele responde; mantém igual
+            try:
+                await membro.edit(nick=valor, reason=f"Whitelist editada por {autor}")
+            except discord.HTTPException:
+                notas.append("⚠️ Não consegui atualizar o apelido do membro (permissão/hierarquia).")
+        elif chave == "idioma" and membro:
+            # o cargo de inglês é dado na hora da resposta, então acompanha a correção
+            cargo = guild.get_role(CARGO_IDIOMA_INGLES_ID)
+            if cargo:
+                try:
+                    if valor == "Inglês" and cargo not in membro.roles:
+                        await membro.add_roles(cargo, reason=f"Whitelist editada por {autor}")
+                    elif valor != "Inglês" and cargo in membro.roles:
+                        await membro.remove_roles(cargo, reason=f"Whitelist editada por {autor}")
+                except discord.HTTPException:
+                    notas.append("⚠️ Não consegui ajustar o cargo de idioma.")
+        elif chave == "peak_rank":
+            if valor == "Supersonic Legend":
+                respostas["peak_div"] = "—"
+            elif respostas.get("peak_div") in (None, "—"):
+                notas.append("⚠️ Falta escolher também a **divisão do maior rank**.")
+        elif chave == "tem_tiktok":
+            if valor == "Não":
+                respostas["tiktok"] = "Não possui"
+                notas.append("ℹ️ TikTok marcado como \"Não possui\".")
+            elif respostas.get("tiktok") in (None, "—", "Não possui"):
+                respostas["tiktok"] = "—"
+                notas.append("⚠️ Falta editar também o **link do TikTok**.")
+        elif chave in ("rank", "plataforma"):
+            notas.append("ℹ️ O cargo só é aplicado quando a whitelist for aprovada.")
+
+        registro.setdefault("edicoes", []).append({
+            "campo": chave,
+            "rotulo": rotulo,
+            "de": antigo,
+            "para": valor,
+            "por_id": autor.id,
+            "por_nome": str(autor),
+            "ts": time.time(),
+        })
+        salvar("whitelist", self.dados)
+
+        await self._atualizar_embeds_revisao(registro)
+        try:
+            await self.atualizar_status_board(guild, membro_id)
+        except discord.HTTPException:
+            pass
+
+        canal = self.bot.get_channel(registro.get("canal_id") or 0)
+        if canal is not None:
+            try:
+                await canal.send(
+                    f"✏️ {autor.mention} corrigiu **{rotulo}**: {_limpo(antigo)} → **{_limpo(valor)}**",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                pass
+
+        texto = f"✅ **{rotulo}** corrigido: {_limpo(antigo)} → **{_limpo(valor)}**"
+        if notas:
+            texto += "\n" + "\n".join(notas)
+        return True, texto
+
+    async def _atualizar_embeds_revisao(self, registro: dict) -> None:
+        """Reescreve os campos do resumo do canal e da mensagem do log (as
+        mensagens ficam no lugar, com os mesmos botões)."""
+        refs = list(registro.get("revisao_msgs", []))
+        if registro.get("resumo_msg"):
+            refs.append(registro["resumo_msg"])
+        for ref in refs:
+            canal = self.bot.get_channel(ref.get("canal_id") or 0)
+            if canal is None:
+                continue
+            try:
+                msg = await canal.fetch_message(ref["msg_id"])
+                if not msg.embeds or not any(f.name == "Nick RL" for f in msg.embeds[0].fields):
+                    continue  # a mensagem de revisão do canal não tem o resumo
+                embed = msg.embeds[0].copy()
+                embed.clear_fields()
+                self._campos_resumo(embed, registro)
+                await msg.edit(embed=embed)
+            except discord.HTTPException:
+                continue
+
+    async def alternar_chat(self, interaction: discord.Interaction):
+        """Botão 💬: libera (ou trava de novo) o chat do candidato no canal da
+        whitelist. Depois que ele envia as respostas o bot tira a permissão
+        dele de falar — esse botão devolve pra staff conseguir conversar."""
+        await interaction.response.defer(ephemeral=True)
+        membro_id = self.membro_id_da_interacao(interaction)
+        registro = self.dados.get(str(membro_id)) if membro_id else None
+        if not registro:
+            await interaction.followup.send("⚠️ Não achei os dados dessa whitelist.", ephemeral=True)
+            return
+        status = registro.get("status")
+        if status in ("aprovada", "recusada", "cancelada"):
+            await interaction.followup.send(f"⚠️ Essa whitelist já está **{status}**.", ephemeral=True)
+            return
+        if status == "em_andamento":
+            await interaction.followup.send("ℹ️ O candidato ainda está respondendo — o chat dele já está liberado.", ephemeral=True)
+            return
+
+        canal = self.bot.get_channel(registro.get("canal_id") or 0)
+        membro = interaction.guild.get_member(membro_id)
+        if canal is None or membro is None:
+            await interaction.followup.send("⚠️ O canal da whitelist ou o membro não existe mais.", ephemeral=True)
+            return
+
+        aberto = canal.overwrites_for(membro).send_messages is True
+        try:
+            await canal.set_permissions(
+                membro, view_channel=True, send_messages=not aberto,
+                reason=f"Chat da whitelist {'travado' if aberto else 'liberado'} por {interaction.user}",
+            )
+        except discord.HTTPException as e:
+            await interaction.followup.send(f"⚠️ Não consegui mudar a permissão do canal: {e}", ephemeral=True)
+            return
+
+        if aberto:
+            await canal.send(f"🔒 Chat travado de novo por {interaction.user.mention}.", allowed_mentions=discord.AllowedMentions.none())
+            await interaction.followup.send("🔒 Chat travado. Clica de novo pra liberar.", ephemeral=True)
+        else:
+            await canal.send(
+                f"💬 {membro.mention}, a staff liberou o chat: {interaction.user.mention} quer conversar com você. "
+                f"Pode responder aqui!",
+                allowed_mentions=discord.AllowedMentions(users=[membro, interaction.user]),
+            )
+            await interaction.followup.send("💬 Chat liberado. Clica de novo pra travar.", ephemeral=True)
 
     # ── decisão: aprovar / recusar ─────────────────────────────────────────
     def _bloqueio_decisao(self, membro_id: int, autor_id: int) -> str | None:
