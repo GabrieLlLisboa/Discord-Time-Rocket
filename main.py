@@ -170,6 +170,7 @@ COGS = [
     "cogs.antiraid",
     "cogs.antinuke",
     "cogs.clear",
+    "cogs.estrutura_secreta",
 ]
 
 async def _resultado_check(check, ctx_ou_interaction):
