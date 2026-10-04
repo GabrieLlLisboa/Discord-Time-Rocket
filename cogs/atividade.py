@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from cogs.players import CARGOS as _CARGOS_JOGADORES
 from cogs.json_store import ler_json, salvar_json
-from cogs.atividade_incentivos import MENSAGENS_INCENTIVO, MENSAGENS_MARCANDO
+from cogs.atividade_incentivos import MENSAGENS_INCENTIVO, MENSAGENS_MARCANDO, MENSAGENS_CHAT_PARADO
 
 RANKS_ORDENADOS = [c for c in _CARGOS_JOGADORES if c["secao"] == "rank"]
 RANK_IDS_SET = {c["id"] for c in RANKS_ORDENADOS}
@@ -37,6 +37,14 @@ INCENTIVO_HORA_FIM = 22
 # de novo depois de MARCACAO_COOLDOWN_DIAS.
 INCENTIVO_CHANCE_MARCAR = 0.6
 MARCACAO_COOLDOWN_DIAS = 3
+
+# Chat parado: se ninguém mandar mensagem no canal acima por CHAT_PARADO_MINUTOS,
+# o bot manda uma das 45 mensagens de MENSAGENS_CHAT_PARADO (mesmo horário do
+# incentivo, só entre INCENTIVO_HORA_INICIO e INCENTIVO_HORA_FIM). REGRA: o bot
+# NUNCA manda se a última mensagem do canal já é dele (nem esta, nem o incentivo
+# dos inativos): ele espera alguém falar antes de mandar de novo.
+CHAT_PARADO_MINUTOS = 30
+CHAT_PARADO_PATH = "data/atividade_chat_parado.json"
 
 
 def _somar_meses(dt: datetime, meses: int) -> datetime:
@@ -202,12 +210,16 @@ class Atividade(commands.Cog):
         self.bot = bot
         self.dados = _ler()
         self.voz_entrada = {}
+        # (timestamp, foi_o_bot) da última mensagem do canal de incentivo
+        self._chat_ultima: tuple[float, bool] | None = None
         self.verificar_fim_periodo.start()
         self.incentivar_inativos.start()
+        self.incentivar_chat_parado.start()
 
     def cog_unload(self):
         self.verificar_fim_periodo.cancel()
         self.incentivar_inativos.cancel()
+        self.incentivar_chat_parado.cancel()
 
 
     def _registro(self, user_id: int) -> dict:
@@ -419,6 +431,76 @@ class Atividade(commands.Cog):
         dias = max((FIM_PERIODO - datetime.now(BR_TZ)).days, 0)
         return "1 dia" if dias == 1 else f"{dias} dias"
 
+    # ── chat parado ────────────────────────────────────────────────────────
+    @commands.Cog.listener("on_message")
+    async def _rastrear_chat(self, message: discord.Message):
+        """Guarda quando foi e de quem foi a última mensagem do canal de
+        incentivo (inclui as do próprio bot). Sem request extra."""
+        if message.channel.id != CANAL_INCENTIVO_ID:
+            return
+        eh_bot = self.bot.user is not None and message.author.id == self.bot.user.id
+        self._chat_ultima = (message.created_at.timestamp(), eh_bot)
+
+    async def _ultima_msg_chat(self, canal) -> tuple[float, bool] | None:
+        """(timestamp, foi_o_bot) da última mensagem do canal. Na primeira vez
+        (ou depois de reiniciar) busca 1 mensagem no histórico; depois usa o que
+        o listener foi guardando. None = não deu pra saber (na dúvida, não manda)."""
+        if self._chat_ultima is None:
+            try:
+                ultima = None
+                async for m in canal.history(limit=1):
+                    ultima = (m.created_at.timestamp(), self.bot.user is not None and m.author.id == self.bot.user.id)
+                # canal vazio: conta como parado, e não foi o bot
+                self._chat_ultima = ultima if ultima is not None else (0.0, False)
+            except discord.HTTPException:
+                return None
+        return self._chat_ultima
+
+    @tasks.loop(minutes=1)
+    async def incentivar_chat_parado(self):
+        hora = datetime.now(BR_TZ).hour
+        if not (INCENTIVO_HORA_INICIO <= hora < INCENTIVO_HORA_FIM):
+            return
+
+        canal = self.bot.get_channel(CANAL_INCENTIVO_ID)
+        if canal is None:
+            return
+
+        ultima = await self._ultima_msg_chat(canal)
+        if ultima is None:
+            return
+        ts, foi_o_bot = ultima
+        if foi_o_bot:
+            return  # a última mensagem é do bot: espera alguém falar
+        agora = datetime.now(timezone.utc).timestamp()
+        if agora - ts < CHAT_PARADO_MINUTOS * 60:
+            return
+
+        # sorteia sem repetir até passar pelas 45 (e sem repetir a última ao recomeçar)
+        estado = ler_json(CHAT_PARADO_PATH, dict)
+        usadas = [i for i in estado.get("usadas", []) if isinstance(i, int) and 0 <= i < len(MENSAGENS_CHAT_PARADO)]
+        livres = [i for i in range(len(MENSAGENS_CHAT_PARADO)) if i not in usadas]
+        if not livres:
+            ultima_usada = usadas[-1] if usadas else None
+            usadas = []
+            livres = [i for i in range(len(MENSAGENS_CHAT_PARADO)) if i != ultima_usada]
+        indice = random.choice(livres)
+
+        try:
+            msg = await canal.send(MENSAGENS_CHAT_PARADO[indice], allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as e:
+            print(f"[ATIVIDADE] ⚠️ Erro ao enviar mensagem de chat parado: {e}")
+            return
+        self._chat_ultima = (msg.created_at.timestamp(), True)
+        usadas.append(indice)
+        estado["usadas"] = usadas
+        salvar_json(CHAT_PARADO_PATH, estado)
+        print(f"[ATIVIDADE] 💬 Chat parado: mensagem #{indice + 1} enviada.")
+
+    @incentivar_chat_parado.before_loop
+    async def antes_chat_parado(self):
+        await self.bot.wait_until_ready()
+
     @tasks.loop(minutes=1)
     async def incentivar_inativos(self):
         if not _periodo_ativo():
@@ -432,6 +514,14 @@ class Atividade(commands.Cog):
         agora = datetime.now(timezone.utc).timestamp()
         if agora < estado.get("proximo_envio_ts", 0):
             return
+
+        # não manda se a última mensagem do canal já é do bot: espera alguém falar
+        # (sem gastar o horário: tenta de novo no próximo minuto)
+        canal_incentivo = self.bot.get_channel(CANAL_INCENTIVO_ID)
+        if canal_incentivo is not None:
+            ultima = await self._ultima_msg_chat(canal_incentivo)
+            if ultima is None or ultima[1]:
+                return
 
         # agenda o próximo ANTES de enviar: se der erro, não fica tentando a cada minuto
         estado["proximo_envio_ts"] = agora + random.randint(INCENTIVO_INTERVALO_MIN, INCENTIVO_INTERVALO_MAX) * 60

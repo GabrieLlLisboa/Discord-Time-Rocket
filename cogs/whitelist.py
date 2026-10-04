@@ -111,6 +111,8 @@ CARGO_MEMBRO_ID = 1523830313141272586
 
 CARGO_IDIOMA_INGLES_ID = 1525312330831892481
 
+PEAK_CONTAS = ["Nesta conta", "Em outra conta"]
+
 IDIOMAS = ["Português", "Inglês"]
 IDIOMA_EMOJIS = {"Português": "🇧🇷", "Inglês": "🇬🇧"}
 
@@ -246,13 +248,35 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
         await self.cog.enviar_pergunta(interaction.channel, membro, "idioma")
 
 
+def normalizar_tiktok(texto: str) -> tuple[str | None, str | None]:
+    """Aceita só o usuário ("seuusuario" / "@seuusuario") ou o link completo.
+    Devolve (valor_pra_salvar, erro). O valor salvo é sempre o link do perfil,
+    pra continuar clicável nos resumos (e igual ao que já existia salvo)."""
+    t = (texto or "").strip().strip("<>").strip()
+    if not t:
+        return None, "Escreva seu usuário do TikTok (ex: @seuusuario)."
+    if "tiktok.com" in t.lower():
+        m = re.search(r"tiktok\.com/@([A-Za-z0-9_.]+)", t, re.IGNORECASE)
+        if m:
+            usuario = m.group(1)
+        elif re.match(r"https?://(?:[\w-]+\.)?tiktok\.com/\S+$", t, re.IGNORECASE):
+            return t[:200], None  # link curto (vm.tiktok.com/...): não dá pra tirar o @, mantém
+        else:
+            return None, "Não entendi esse link. Escreva só o seu usuário (ex: @seuusuario)."
+    else:
+        usuario = t.lstrip("@").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.]{2,24}", usuario):
+        return None, "Usuário inválido. Use só letras, números, _ e . (ex: @seuusuario)."
+    return f"https://www.tiktok.com/@{usuario}", None
+
+
 class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
     # pra add uma pergunta nova de texto livre é só criar outro TextInput
     # aqui embaixo, tipo o do tiktok, só troca label/placeholder/max_length
     # modal aceita até 5 campos, então dá de sobra
     tiktok = discord.ui.TextInput(
-        label="Qual o link da sua conta do TikTok?",
-        placeholder="Ex: https://www.tiktok.com/@seuusuario",
+        label="Qual o seu usuário do TikTok?",
+        placeholder="Ex: @seuusuario (pode colocar o link também)",
         style=discord.TextStyle.short,
         max_length=200,
         required=True,
@@ -268,7 +292,11 @@ class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
         if ja:
             await interaction.response.send_message("⚠️ Você já respondeu essa pergunta.", ephemeral=True)
             return
-        self.cog.salvar_resposta(membro.id, "tiktok", self.tiktok.value.strip())
+        valor, erro = normalizar_tiktok(self.tiktok.value)
+        if erro:
+            await interaction.response.send_message(f"⚠️ {erro} Clica em **Responder Perguntas** e tenta de novo.", ephemeral=True)
+            return
+        self.cog.salvar_resposta(membro.id, "tiktok", valor)
         # e aqui salva a resposta do campo novo, mesma ideia, só troca a
         # chave (o nome que fica salvo no json, tipo "tiktok") e o valor
         # pra pegar do campo que vc criou lá em cima
@@ -385,7 +413,7 @@ class EscolhaSelect(discord.ui.Select):
 
         if self.step == "peak_rank" and valor == "Supersonic Legend":
             self.cog.salvar_resposta(membro.id, "peak_div", "—")
-            await self.cog.enviar_pergunta(interaction.channel, membro, "tempo")
+            await self.cog.enviar_pergunta(interaction.channel, membro, "peak_conta")
             return
 
 
@@ -580,11 +608,12 @@ CAMPOS_EDITAVEIS = {
     "plataforma":  ("Plataforma", "escolha", PLATAFORMAS),
     "peak_rank":   ("Maior rank", "escolha", PEAK_RANKS),
     "peak_div":    ("Divisão do maior rank", "escolha", DIVISOES),
+    "peak_conta":  ("Conta do maior rank", "escolha", PEAK_CONTAS),
     "tempo":       ("Tempo jogando", "escolha", TEMPOS_JOGANDO),
     "microfone":   ("Microfone", "escolha", ["Sim", "Não"]),
     "ativo":       ("Ativo?", "escolha", ["Sim", "Não"]),
     "tem_tiktok":  ("Tem TikTok?", "escolha", ["Sim", "Não"]),
-    "tiktok":      ("TikTok", "texto", 200),
+    "tiktok":      ("TikTok (usuário ou link)", "texto", 200),
     "habilidades": ("Habilidades", "multi", None),
 }
 
@@ -1081,6 +1110,7 @@ class Whitelist(commands.Cog):
             embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
             embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
             embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
+            embed.add_field(name="Conta do maior rank", value=r.get("peak_conta", "—"), inline=True)
             embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
             embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
             embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
@@ -1277,7 +1307,8 @@ class Whitelist(commands.Cog):
             "rank_divisao": (RANK_DIVISOES_OPCOES, "Escolha a divisão...", "plataforma", None),
             "plataforma":   (PLATAFORMAS, "Escolha sua plataforma...", "peak_rank", None),
             "peak_rank":    (PEAK_RANKS, "Escolha o maior rank já alcançado...", "peak_div", None),
-            "peak_div":     (DIVISOES, "Escolha a divisão...", "tempo", None),
+            "peak_div":     (DIVISOES, "Escolha a divisão...", "peak_conta", None),
+            "peak_conta":   (PEAK_CONTAS, "Foi nesta conta ou em outra?", "tempo", None),
             "tempo":        (TEMPOS_JOGANDO, "Escolha há quanto tempo joga...", "microfone", None),
             "microfone":    (["Sim", "Não"], "Você tem microfone?", "ativo", None),
             "ativo":        (["Sim", "Não"], "Você vai ser ativo?", "tem_tiktok", None),
@@ -1315,6 +1346,10 @@ class Whitelist(commands.Cog):
             view = self._view_escolha("peak_div")
             await canal.send("🔢 **E qual divisão desse rank?**", view=view)
 
+        elif step == "peak_conta":
+            view = self._view_escolha("peak_conta")
+            await canal.send("🔁 **Esse maior rank foi alcançado na conta que você joga hoje ou em outra conta?**", view=view)
+
         elif step == "tempo":
             view = self._view_escolha("tempo")
             await canal.send("⏱️ **Há quanto tempo você joga Rocket League?**", view=view)
@@ -1347,7 +1382,7 @@ class Whitelist(commands.Cog):
                 title="📝 Última pergunta",
                 description=(
                     "Só falta mais uma coisa. Clica no botão abaixo pra abrir o formulário:\n\n"
-                    "• Qual o link da sua conta do TikTok?"
+                    "• Qual o seu usuário do TikTok? (só o @ já serve)"
                     # se add pergunta nova no modal, bota ela aqui também
                     # nessa listinha, só copia o padrão de cima
                 ),
@@ -1486,6 +1521,7 @@ class Whitelist(commands.Cog):
         embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
         embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
         embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
+        embed.add_field(name="Conta do maior rank", value=r.get("peak_conta", "—"), inline=True)
         embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
         embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
@@ -1558,6 +1594,11 @@ class Whitelist(commands.Cog):
             return False, bloqueio
         if chave not in CAMPOS_EDITAVEIS:
             return False, "⚠️ Campo inválido."
+
+        if chave == "tiktok":
+            valor, erro = normalizar_tiktok(valor)
+            if erro:
+                return False, f"⚠️ {erro}"
 
         rotulo = CAMPOS_EDITAVEIS[chave][0]
         registro = self.dados[str(membro_id)]
@@ -2034,6 +2075,7 @@ class Whitelist(commands.Cog):
         embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
         embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
         embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
+        embed.add_field(name="Conta do maior rank", value=r.get("peak_conta", "—"), inline=True)
         embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
         embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)
@@ -2064,12 +2106,13 @@ class Whitelist(commands.Cog):
         rank="Rank atual no Rocket League",
         maior_rank="Maior rank já alcançado (peak)",
         peak_div="Divisão do maior rank alcançado",
+        peak_conta="O maior rank foi nesta conta ou em outra?",
         plataforma="Plataforma que o jogador usa",
         tempo="Há quanto tempo joga Rocket League",
         microfone="Se o jogador tem microfone",
         ativo="Se o jogador pretende ser ativo na equipe",
         tem_tiktok="Se o jogador tem TikTok",
-        tiktok="Link do TikTok (se tiver)",
+        tiktok="Usuário ou link do TikTok (se tiver)",
         habilidades="Habilidades extras (texto livre, ex: Designer, Editor de vídeo)",
     )
     @app_commands.choices(
@@ -2077,6 +2120,7 @@ class Whitelist(commands.Cog):
         idioma=[app_commands.Choice(name=i, value=i) for i in IDIOMAS],
         maior_rank=[app_commands.Choice(name=r, value=r) for r in PEAK_RANKS],
         peak_div=[app_commands.Choice(name=d, value=d) for d in DIVISOES],
+        peak_conta=[app_commands.Choice(name=c, value=c) for c in PEAK_CONTAS],
         plataforma=[app_commands.Choice(name=p, value=p) for p in PLATAFORMAS],
         tempo=[app_commands.Choice(name=t, value=t) for t in TEMPOS_JOGANDO],
         microfone=[app_commands.Choice(name="Sim", value="Sim"), app_commands.Choice(name="Não", value="Não")],
@@ -2093,6 +2137,7 @@ class Whitelist(commands.Cog):
         rank: app_commands.Choice[str] | None = None,
         maior_rank: app_commands.Choice[str] | None = None,
         peak_div: app_commands.Choice[str] | None = None,
+        peak_conta: app_commands.Choice[str] | None = None,
         plataforma: app_commands.Choice[str] | None = None,
         tempo: app_commands.Choice[str] | None = None,
         microfone: app_commands.Choice[str] | None = None,
@@ -2105,7 +2150,7 @@ class Whitelist(commands.Cog):
         que entraram antes do sistema existir (ou corrigir dados de quem já
         tem). Cria o registro como 'aprovada' se ainda não existir nenhum."""
 
-        campos = [nick, idioma, rank, maior_rank, peak_div, plataforma, tempo, microfone, ativo, tem_tiktok, tiktok, habilidades]
+        campos = [nick, idioma, rank, maior_rank, peak_div, peak_conta, plataforma, tempo, microfone, ativo, tem_tiktok, tiktok, habilidades]
         if not any(campos):
             await interaction.response.send_message(
                 "⚠️ Informe pelo menos um campo pra alterar.",
@@ -2149,6 +2194,9 @@ class Whitelist(commands.Cog):
         if peak_div:
             registro["respostas"]["peak_div"] = peak_div.value
 
+        if peak_conta:
+            registro["respostas"]["peak_conta"] = peak_conta.value
+
         if maior_rank and maior_rank.value == "Supersonic Legend":
             registro["respostas"]["peak_div"] = "—"
 
@@ -2173,7 +2221,11 @@ class Whitelist(commands.Cog):
                 registro["respostas"]["tiktok"] = "Não possui"
 
         if tiktok:
-            registro["respostas"]["tiktok"] = tiktok
+            tiktok_valor, erro_tiktok = normalizar_tiktok(tiktok)
+            if erro_tiktok:
+                avisos.append(f"⚠️ TikTok não alterado: {erro_tiktok}")
+            else:
+                registro["respostas"]["tiktok"] = tiktok_valor
 
         if habilidades:
             registro["respostas"]["habilidades"] = habilidades
@@ -2196,6 +2248,7 @@ class Whitelist(commands.Cog):
         embed.add_field(name="Rank atual", value=r.get("rank", "—"), inline=True)
         embed.add_field(name="Plataforma", value=r.get("plataforma", "—"), inline=True)
         embed.add_field(name="Maior rank", value=f"{r.get('peak_rank', '—')} ({r.get('peak_div', '—')})", inline=True)
+        embed.add_field(name="Conta do maior rank", value=r.get("peak_conta", "—"), inline=True)
         embed.add_field(name="Tempo jogando", value=r.get("tempo", "—"), inline=True)
         embed.add_field(name="Microfone", value=r.get("microfone", "—"), inline=True)
         embed.add_field(name="Ativo?", value=r.get("ativo", "—"), inline=True)

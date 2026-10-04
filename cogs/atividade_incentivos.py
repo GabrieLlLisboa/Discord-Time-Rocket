@@ -80,3 +80,58 @@ MENSAGENS_MARCANDO: list[str] = [
 ]
 
 assert len(MENSAGENS_MARCANDO) >= 20 and all("{mencao}" in m for m in MENSAGENS_MARCANDO)
+
+
+# Mensagens do CHAT PARADO: o bot manda uma delas no canal de incentivo quando
+# ninguém fala há CHAT_PARADO_MINUTOS (ver atividade.py). São papo solto e
+# aleatório pra puxar conversa (comida, bichos, perguntas bobas): não usam
+# {campos} nem marcam ninguém. Pode editar/trocar à vontade, só manter 45.
+MENSAGENS_CHAT_PARADO: list[str] = [
+    "👋 Olá galera! Por que ninguém tá mandando mensagem? Tá todo mundo dormindo?",
+    "🍇 Açaí com fruta ou açaí puro? Quero saber o lado de cada um!",
+    "🤔 Se vocês pudessem comer só uma coisa pro resto da vida, o que seria?",
+    "😴 Chat dormindo... alguém acorda aí e manda um oi!",
+    "🍕 Pizza com ou sem borda recheada? Responde sem pensar!",
+    "🦗 *grilos* ... ninguém? Sério? Alguém fala alguma coisa!",
+    "🥤 Qual a bebida que vocês mais tomam? Guaraná, coca, suco, água?",
+    "🐶 Cachorro ou gato? Defendam o seu time!",
+    "🛌 Quem aqui já dormiu de tarde e acordou sem saber que dia era?",
+    "🍫 Chocolate ao leite ou chocolate amargo? Tem que escolher um.",
+    "📱 Qual foi a última coisa que vocês pesquisaram no Google? Sem mentir!",
+    "🌧️ Como tá o tempo aí na cidade de vocês? Aqui no chat só tá chovendo silêncio.",
+    "🍔 Qual o melhor lanche do mundo? Vou esperar a resposta de vocês.",
+    "🎵 Qual música tá tocando no seu fone agora? Manda aí!",
+    "😂 Qual foi a coisa mais aleatória que aconteceu com vocês essa semana?",
+    "🧊 Gelo no refrigerante: sim ou não? Quero polêmica!",
+    "🕐 Que horas vocês costumam dormir? Corujão ou acordando cedo?",
+    "🥔 Batata frita ou batata doce? Escolhe um lado!",
+    "🎬 Qual série ou filme vocês recomendam? Tô sem nada pra assistir.",
+    "☕ Café ou chá? Ou nenhum dos dois e só energético?",
+    "🍦 Qual o seu sabor de sorvete favorito? Se for coco, eu respeito.",
+    "🤷 Sem assunto aqui... alguém sugere um tema pra gente conversar?",
+    "🏖️ Praia ou campo? Pra onde vocês fugiriam hoje?",
+    "🥚 O que veio primeiro, o ovo ou a galinha? Vocês têm 1 minuto pra resolver.",
+    "🎂 Quando é o aniversário de vocês? Bora montar um calendário aqui!",
+    "🧠 Pergunta que não faz sentido: se tomate é fruta, ketchup é geleia?",
+    "🚿 Banho quente ou frio? Isso define o caráter de uma pessoa.",
+    "🛒 O que vocês comprariam agora se ganhassem 100 reais?",
+    "🗣️ Eita, que silêncio! Tô falando sozinho aqui, vem fazer companhia!",
+    "🍉 Qual a melhor fruta? Vou contar os votos.",
+    "📚 Qual a última coisa nova que vocês aprenderam? Pode ser besteira mesmo.",
+    "✈️ Se tivessem que viajar agora pra qualquer lugar, pra onde iriam?",
+    "🌮 Pastel, coxinha ou esfiha? Só um!",
+    "🙃 Qual o apelido mais engraçado que vocês já tiveram?",
+    "🥱 Alguém mais tá com preguiça hoje? Bora reclamar juntos no chat.",
+    "🎲 Joguinho rápido: respondam com um emoji que descreve o seu dia!",
+    "🍞 Pão com manteiga ou pão com queijo? Isso aqui é sério.",
+    "🌙 Quem tá acordado a essa hora e por quê? Insônia, jogo ou fome?",
+    "📺 Qual desenho ou programa de TV vocês assistiam quando eram crianças?",
+    "🤝 Oi gente! Já que ninguém fala, eu pergunto: tá tudo bem com vocês?",
+    "🍳 Ovo mexido, frito ou cozido? Qual o seu favorito?",
+    "💤 Se o chat fosse uma pessoa, estaria dormindo agora. Alguém cutuca ele!",
+    "🥭 Manga com sal, sim ou não? Tô esperando as brigas.",
+    "🎤 Qual música vocês cantam no chuveiro? Sem vergonha, aqui é seguro!",
+    "🍓 Morango com leite condensado ou com chantilly? Tô precisando de uma opinião!",
+]
+
+assert len(MENSAGENS_CHAT_PARADO) == 45, "precisa ter exatamente 45 mensagens"
