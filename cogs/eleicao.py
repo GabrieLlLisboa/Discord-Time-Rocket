@@ -87,6 +87,28 @@ MENSAGENS = [
         "cor": COR_INFO,
     },
     {
+        "id": "votacao_candidatos",
+        "quando": _dt(DIA_VOTACAO, 13, 35),
+        "dia_permitido": DIA_VOTACAO,
+        "titulo": "Já escolheu seu candidato á presidente?",
+        "texto": (
+ "🇧🇷 **Candidatos à Presidência:**\n"
+            "13 - Lula (PT)\n"
+            "14 - Renan Santos (Missão)\n"
+            "16 - Hertz Dias (PSTU)\n"
+            "21 - Edmilson Costa (PCB)\n"
+            "22 - Flávio Bolsonaro (PL)\n"
+            "27 - Clariana Barão (DC)\n"
+            "29 - Rui Costa Pimenta (PCO)\n"
+            "30 - Romeu Zema (Novo)\n"
+            "35 - Wilson Grassi (Democrata)\n"
+            "55 - Ronaldo Caiado (PSD)\n"
+            "70 - Augusto Cury (Avante)\n"
+            "80 - Samara Martins (UP)"
+        ),
+        "cor": COR_INFO,
+    },
+    {
         "id": "votacao_roupa_celular",
         "quando": _dt(DIA_VOTACAO, 11, 30),
         "dia_permitido": DIA_VOTACAO,
