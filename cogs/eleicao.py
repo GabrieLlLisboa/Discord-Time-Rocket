@@ -90,7 +90,7 @@ MENSAGENS = [
         "id": "votacao_candidatos",
         "quando": _dt(DIA_VOTACAO, 13, 35),
         "dia_permitido": DIA_VOTACAO,
-        "titulo": "Já escolheu seu candidato á presidente?",
+        "titulo": "Já escolheu seu candidato à Presidência?",
         "texto": (
  "🇧🇷 **Candidatos à Presidência:**\n"
             "13 - Lula (PT)\n"
