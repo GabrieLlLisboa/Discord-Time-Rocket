@@ -39,6 +39,23 @@ BIOS_FIXAS = {
 }
 
 
+# ── Destaques fixos ──────────────────────────────────────────────────────
+# Títulos "hard-coded" que aparecem SEMPRE no topo dos DESTAQUES do /perfil
+# desse usuário (igual a BIOS_FIXAS), além dos destaques que a staff adiciona
+# com /destaque-adicionar. Pra mudar, é só editar a lista (um título por linha;
+# o emoji é livre) ou copiar o bloco pra outro ID.
+DESTAQUES_FIXOS = {
+    1487452210605588592: [
+        "💻 **Melhor Dev**",
+        "⚙️ **Melhor DevOps**",
+        "🔐 **Melhor Cibersecurity**",
+        "🐍 **Melhor em Python**",
+        "🤖 **Criador do Bot**",
+        "🛠️ **Melhor Configurador de Servidor**",
+    ],
+}
+
+
 def obter_rank(member: discord.Member) -> str:
     for role in member.roles:
         if role.id in RANKS_IDS:
@@ -92,8 +109,12 @@ class Stats(commands.Cog):
 
         winrate = f"{round((vitorias / amistosos) * 100)}%" if amistosos > 0 else "—"
 
-        if destaques:
-            destaques_txt = "\n".join(f"⭐ {d}" for d in destaques[-5:])
+        # fixos (do código) primeiro, depois os últimos 5 que a staff adicionou
+        linhas_destaques = list(DESTAQUES_FIXOS.get(membro.id, [])) + [f"⭐ {d}" for d in destaques[-5:]]
+        if linhas_destaques:
+            destaques_txt = "\n".join(linhas_destaques)
+            if len(destaques_txt) > 1024:  # limite do Discord por campo
+                destaques_txt = destaques_txt[:1021] + "…"
         else:
             destaques_txt = "_Nenhum destaque registrado ainda._"
 

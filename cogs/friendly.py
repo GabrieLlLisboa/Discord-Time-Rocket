@@ -7,7 +7,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from cogs.backup import ler, salvar, agora_str
 from cogs import mod_utils as mu
-from cogs.players import CARGOS_RANK
+from cogs.players import CARGOS_RANK, CARGO_GERAL_SEM_DIVISAO_IDS, RANK_DIVISAO_IDS, RANK_TIER_EMOJIS
 
 AMISTOSOS_CHANNEL_ID = 1514778555970621531
 
@@ -130,6 +130,22 @@ RANKS["Ouro"] = 1512571913849933956
 RANK_EMOJIS = {c["nome"]: c["emoji"] for c in CARGOS_RANK}
 RANK_EMOJIS["Ouro"] = "🥇"
 
+# Cargo "geral" de cada rank (Platina, Diamante, Champion, Grand Champion) também vale
+# pro amistoso: marca todo mundo do tier. (Quem tem a divisão sempre tem o geral.)
+for _tier, _geral_id in CARGO_GERAL_SEM_DIVISAO_IDS.items():
+    RANKS[_tier] = _geral_id
+    RANK_EMOJIS[_tier] = RANK_TIER_EMOJIS[_tier]
+
+# cargo (geral ou de divisão) -> tier a que pertence
+TIER_POR_CARGO_ID = {}
+for _tier, _divs in RANK_DIVISAO_IDS.items():
+    TIER_POR_CARGO_ID[CARGO_GERAL_SEM_DIVISAO_IDS[_tier]] = _tier
+    for _rid in _divs.values():
+        TIER_POR_CARGO_ID[_rid] = _tier
+
+# máximo de cargos num amistoso (limite de menções/tamanho do embed do Discord)
+MAX_CARGOS_AMISTOSO = 30
+
 
 # Divisões do Champion: se quem anuncia marcar as três (C1, C2 e C3), o
 # amistoso é tratado como "Champion" (todos os ranks Champion) — pra não
@@ -142,6 +158,59 @@ def rank_info(role: discord.Role):
         if role.id == rid:
             return nome, RANK_EMOJIS[nome]
     return None
+
+
+def montar_ranks_display(ranks_ids: list) -> tuple[list, list]:
+    """(nomes, emojis) pra mostrar no anúncio. Se o tier está completo (marcou o cargo
+    geral OU as 3 divisões), mostra só o nome do tier: Champion 1+2+3 -> "Champion"."""
+    ids = set(ranks_ids)
+    nomes, emojis, tiers_usados = [], [], set()
+    for rid in ranks_ids:
+        tier = TIER_POR_CARGO_ID.get(rid)
+        completo = tier is not None and (
+            CARGO_GERAL_SEM_DIVISAO_IDS[tier] in ids or set(RANK_DIVISAO_IDS[tier].values()) <= ids
+        )
+        if completo:
+            if tier not in tiers_usados:
+                tiers_usados.add(tier)
+                nomes.append(tier)
+                emojis.append(RANK_TIER_EMOJIS[tier])
+            continue
+        nome, emoji = rank_info_por_id(rid)
+        nomes.append(nome)
+        emojis.append(emoji)
+    return nomes, emojis
+
+
+def rank_info_por_id(rid: int):
+    for nome, rank_id in RANKS.items():
+        if rank_id == rid:
+            return nome, RANK_EMOJIS[nome]
+    return None
+
+
+def extrair_cargos_extras(guild: discord.Guild, texto: str) -> tuple[list, str | None]:
+    """Lê o campo `mais_cargos` do /amistoso: menções (@cargo) ou IDs, separados por
+    espaço, vírgula ou linha. Devolve (cargos, erro)."""
+    if not texto or not texto.strip():
+        return [], None
+    padrao = r"<@&(\d{15,22})>|(?<!\d)(\d{17,22})(?!\d)"
+    ids = []
+    for m_id, id_solto in re.findall(padrao, texto):
+        valor = int(m_id or id_solto)
+        if valor not in ids:
+            ids.append(valor)
+    sobra = re.sub(padrao, "", texto).strip(" ,;+\n\t")
+    if sobra or not ids:
+        return [], ("❌ Não entendi **mais_cargos**. Marque os cargos com @ (ou cole os IDs), "
+                    "separados por espaço. Ex: `@Platina 1 @Platina 2 @Diamante 3`.")
+    cargos = []
+    for rid in ids:
+        cargo = guild.get_role(rid)
+        if cargo is None:
+            return [], f"❌ O cargo com ID `{rid}` não existe nesse servidor."
+        cargos.append(cargo)
+    return cargos, None
 
 
 def _construir_lista_confirmados(guild: discord.Guild, ids_confirmados: list) -> str:
@@ -303,45 +372,37 @@ async def criar_amistoso(
     info_extra: str,
     rank2: discord.Role = None,
     rank3: discord.Role = None,
+    outros: list = None,
 ):
     guild = interaction.guild
 
-    info1 = rank_info(rank1)
-    if info1 is None:
-        await interaction.response.send_message(f"❌ O cargo {rank1.mention} não é um rank válido.", ephemeral=True)
+    # criar os canais abaixo demora mais que os 3s que o Discord dá pra responder:
+    # confirma o comando já, e responde tudo pelo followup
+    await interaction.response.defer(ephemeral=True)
+
+    canal_anuncio = interaction.client.get_channel(AMISTOSOS_CHANNEL_ID)
+    if canal_anuncio is None:
+        # antes essa checagem vinha depois de criar os canais e deixava canal órfão
+        await interaction.followup.send("❌ Canal de amistosos não encontrado.", ephemeral=True)
         return
 
-    ranks_ids    = [rank1.id]
-    nomes_ranks  = [info1[0]]
-    emojis_ranks = [info1[1]]
-
-    if rank2 and rank2.id not in ranks_ids:
-        info2 = rank_info(rank2)
-        if info2 is None:
-            await interaction.response.send_message(f"❌ O cargo {rank2.mention} não é um rank válido.", ephemeral=True)
+    ranks_ids = []
+    for cargo in [rank1, rank2, rank3, *(outros or [])]:
+        if cargo is None or cargo.id in ranks_ids:
+            continue
+        if rank_info(cargo) is None:
+            await interaction.followup.send(f"❌ O cargo {cargo.mention} não é um rank válido.", ephemeral=True)
             return
-        ranks_ids.append(rank2.id)
-        nomes_ranks.append(info2[0])
-        emojis_ranks.append(info2[1])
+        ranks_ids.append(cargo.id)
+    if len(ranks_ids) > MAX_CARGOS_AMISTOSO:
+        await interaction.followup.send(
+            f"❌ No máximo {MAX_CARGOS_AMISTOSO} cargos por amistoso (limite de menções do Discord).", ephemeral=True
+        )
+        return
 
-    if rank3 and rank3.id not in ranks_ids:
-        info3 = rank_info(rank3)
-        if info3 is None:
-            await interaction.response.send_message(f"❌ O cargo {rank3.mention} não é um rank válido.", ephemeral=True)
-            return
-        ranks_ids.append(rank3.id)
-        nomes_ranks.append(info3[0])
-        emojis_ranks.append(info3[1])
-
-    if CHAMPION_DIVISOES_IDS <= set(ranks_ids):
-        # C1 + C2 + C3 marcados = todos os ranks Champion: junta num item só.
-        # ranks_ids continua com os 3 cargos (menção e confirmação de presença).
-        restantes = [
-            (e, n) for rid, e, n in zip(ranks_ids, emojis_ranks, nomes_ranks)
-            if rid not in CHAMPION_DIVISOES_IDS
-        ]
-        emojis_ranks = [RANK_EMOJIS["Champion 1"]] + [e for e, _ in restantes]
-        nomes_ranks  = ["Champion"] + [n for _, n in restantes]
+    # tier completo (cargo geral ou as 3 divisões) vira só o nome do tier no anúncio;
+    # ranks_ids continua com todos os cargos (menção e confirmação de presença)
+    nomes_ranks, emojis_ranks = montar_ranks_display(ranks_ids)
 
     rank_display = " + ".join(f"{e} {n}" for e, n in zip(emojis_ranks, nomes_ranks))
     mencao_str   = " ".join(guild.get_role(rid).mention for rid in ranks_ids if guild.get_role(rid))
@@ -404,11 +465,6 @@ async def criar_amistoso(
     embed.set_footer(text=f"Anunciado por {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
     embed.timestamp = discord.utils.utcnow()
 
-    canal_anuncio = interaction.client.get_channel(AMISTOSOS_CHANNEL_ID)
-    if canal_anuncio is None:
-        await interaction.response.send_message("❌ Canal de amistosos não encontrado.", ephemeral=True)
-        return
-
     view_conf   = ConfirmarPresencaView(rank_alvo=rank_salvo, rank_id=ranks_ids[0], canal_amistoso_id=canal_amistoso.id, rank_ids_extras=ranks_ids)
     msg_anuncio = await canal_anuncio.send(content=mencao_str, embed=embed, view=view_conf)
 
@@ -452,7 +508,7 @@ async def criar_amistoso(
     else:
         aviso_lembretes = ""
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"✅ Amistoso anunciado! Canal criado: {canal_amistoso.mention}{aviso_lembretes}", ephemeral=True
     )
     print(f"[AMISTOSO] ✅ {interaction.user} anunciou amistoso vs {adversario} — {rank_salvo}")
@@ -643,6 +699,7 @@ class Friendly(commands.Cog):
         rank1="Cargo do rank principal",
         rank2="Segundo cargo de rank (opcional)",
         rank3="Terceiro cargo de rank (opcional)",
+        mais_cargos="Quantos cargos quiser (opcional): marque com @ ou cole os IDs, separados por espaço",
         info_extra="Informações extras (opcional)",
     )
     @app_commands.choices(
@@ -657,9 +714,14 @@ class Friendly(commands.Cog):
         rank1: discord.Role,
         rank2: discord.Role = None,
         rank3: discord.Role = None,
+        mais_cargos: str = "",
         info_extra: str = "",
     ):
-        await criar_amistoso(interaction, adversario, dia_semana.value, horario, rank1, info_extra, rank2, rank3)
+        outros, erro = extrair_cargos_extras(interaction.guild, mais_cargos)
+        if erro:
+            await interaction.response.send_message(erro, ephemeral=True)
+            return
+        await criar_amistoso(interaction, adversario, dia_semana.value, horario, rank1, info_extra, rank2, rank3, outros)
 
     @amistoso.error
     async def amistoso_error(self, interaction: discord.Interaction, error):

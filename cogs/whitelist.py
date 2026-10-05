@@ -9,7 +9,7 @@ import unicodedata
 from datetime import datetime, timezone
 
 from cogs.backup import ler, salvar
-from cogs.players import CARGOS as PLAYER_CARGOS, aplicar_cargo_rank
+from cogs.players import CARGOS as PLAYER_CARGOS, aplicar_cargo_rank, CARGO_GERAL_SEM_DIVISAO_IDS
 from cogs.players import RANK_TIERS_ORDEM, RANK_TIERS_COM_DIVISAO, RANK_TIER_EMOJIS
 from cogs import mod_utils as mu
 from cogs.whitelist_extras import (
@@ -156,6 +156,13 @@ CARGOS_PLATAFORMA_IDS = {
 # tempo mínimo entre dois "🔔 Chamar Staff" no mesmo canal (evita spam de ping)
 CHAMAR_STAFF_COOLDOWN_SEGUNDOS = 5 * 60
 
+# whitelist enviada e NINGUÉM da staff respondeu: o bot marca o cargo da staff da
+# whitelist (CARGO_STAFF_WHITELIST_ID) depois de AVISO_STAFF_PRIMEIRO_SEGUNDOS e
+# repete a cada AVISO_STAFF_INTERVALO_SEGUNDOS, até alguém da staff pegar a análise
+# (botão Visualizada), decidir (aprovar/recusar) ou escrever no canal do candidato.
+AVISO_STAFF_PRIMEIRO_SEGUNDOS = 5 * 60
+AVISO_STAFF_INTERVALO_SEGUNDOS = 30 * 60
+
 RANK_IDS = set(CARGO_RANKS.values())
 
 PLATAFORMAS = ["PC", "Xbox", "PlayStation", "Switch"]
@@ -208,6 +215,45 @@ async def _travar_mensagem(interaction: discord.Interaction) -> None:
         pass
 
 
+async def _responder(interaction: discord.Interaction, texto: str, **kw) -> None:
+    """Responde o clique SEM nunca estourar: se a interação já tiver expirado
+    (o Discord só dá 3s pra responder), manda no canal mesmo assim — a pessoa não
+    fica sem retorno e o fluxo continua."""
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(texto, **kw)
+        else:
+            await interaction.response.send_message(texto, **kw)
+    except discord.HTTPException:
+        if kw.get("ephemeral") or interaction.channel is None:
+            return
+        try:
+            await interaction.channel.send(texto)
+        except discord.HTTPException:
+            pass
+
+
+MSG_ERRO_ETAPA = (
+    "⚠️ Algo deu errado aqui. Clique em **🔄 Refazer pergunta** (primeira mensagem do canal) "
+    "ou use `/retomar_whitelist` pra continuar de onde parou."
+)
+
+
+def _log_erro(onde: str, error: BaseException) -> None:
+    import traceback
+    print(f"[WHITELIST] ❌ Erro em {onde}: {error}")
+    traceback.print_exception(type(error), error, error.__traceback__)
+
+
+class _ViewComErro(discord.ui.View):
+    """Qualquer erro num botão/menu da whitelist vira aviso pra pessoa (antes ela só
+    via 'interação falhou' e o bot parecia travado), além de ir pro console."""
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
+        _log_erro(f"{type(self).__name__}/{getattr(item, 'custom_id', '?')}", error)
+        await _responder(interaction, MSG_ERRO_ETAPA, ephemeral=True)
+
+
 def _slug(nome: str) -> str:
     # tira os acentos antes de limpar: "João" virava "jo-o", agora vira "joao"
     nome = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("ascii")
@@ -229,23 +275,44 @@ class NickModal(discord.ui.Modal, title="Whitelist — Nick no Rocket League"):
         super().__init__()
         self.cog = cog
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        _log_erro("NickModal", error)
+        await _responder(interaction, MSG_ERRO_ETAPA, ephemeral=True)
+
     async def on_submit(self, interaction: discord.Interaction):
         membro = interaction.user
-        nick_valor = self.nick.value.strip()
+        cog = self.cog
+        nick_valor = " ".join(self.nick.value.split())  # tira espaços repetidos e quebras de linha
 
-        self.cog.salvar_resposta(membro.id, "nick", nick_valor)
+        registro = cog.dados.get(str(membro.id))
+        if registro is None or registro.get("status") != "em_andamento":
+            await interaction.response.send_message("⚠️ Não dá mais pra mexer nessa whitelist.", ephemeral=True)
+            return
+        if not nick_valor:
+            await interaction.response.send_message("⚠️ Escreva o seu nick no Rocket League. Clica em **Começar** de novo.", ephemeral=True)
+            return
 
-        aviso_nick = ""
-        try:
-            await membro.edit(nick=nick_valor, reason="Whitelist — nick informado")
-        except discord.Forbidden:
-            aviso_nick = "\n⚠️ Não consegui atualizar seu apelido (permissão), mas seguimos!"
+        async with cog.trava(membro.id):
+            if registro.get("respostas", {}).get("nick"):
+                await interaction.response.send_message(
+                    "⚠️ Você já registrou seu nick — siga as perguntas abaixo (se travou, clique em **🔄 Refazer pergunta**).",
+                    ephemeral=True,
+                )
+                return
+            # confirma o clique ANTES de qualquer coisa lenta (o Discord só espera 3s)
+            await interaction.response.defer()
+            cog.salvar_resposta(membro.id, "nick", nick_valor)
 
-        await interaction.response.send_message(
-            f"✅ Nick registrado: **{nick_valor}**{aviso_nick}",
-        )
-        await asyncio.sleep(5)
-        await self.cog.enviar_pergunta(interaction.channel, membro, "idioma")
+            aviso_nick = ""
+            try:
+                await membro.edit(nick=nick_valor, reason="Whitelist — nick informado")
+            except discord.Forbidden:
+                aviso_nick = "\n⚠️ Não consegui atualizar seu apelido (permissão), mas seguimos!"
+            except discord.HTTPException:
+                aviso_nick = "\n⚠️ Não consegui atualizar seu apelido, mas seguimos!"
+
+            await _responder(interaction, f"✅ Nick registrado: **{nick_valor}**{aviso_nick}")
+            await cog.enviar_pergunta(interaction.channel, membro, "idioma")
 
 
 def normalizar_tiktok(texto: str) -> tuple[str | None, str | None]:
@@ -264,7 +331,7 @@ def normalizar_tiktok(texto: str) -> tuple[str | None, str | None]:
         else:
             return None, "Não entendi esse link. Escreva só o seu usuário (ex: @seuusuario)."
     else:
-        usuario = t.lstrip("@").strip()
+        usuario = t[1:] if t.startswith("@") else t  # só UM @ na frente; "@@x" e "@ x" não valem
     if not re.fullmatch(r"[A-Za-z0-9_.]{2,24}", usuario):
         return None, "Usuário inválido. Use só letras, números, _ e . (ex: @seuusuario)."
     return f"https://www.tiktok.com/@{usuario}", None
@@ -286,23 +353,38 @@ class PerguntasAbertasModal(discord.ui.Modal, title="Whitelist — Perguntas"):
         super().__init__()
         self.cog = cog
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        _log_erro("PerguntasAbertasModal", error)
+        await _responder(interaction, MSG_ERRO_ETAPA, ephemeral=True)
+
     async def on_submit(self, interaction: discord.Interaction):
         membro = interaction.user
-        ja = self.cog.dados.get(str(membro.id), {}).get("respostas", {}).get("tiktok")
-        if ja:
-            await interaction.response.send_message("⚠️ Você já respondeu essa pergunta.", ephemeral=True)
+        cog = self.cog
+        registro = cog.dados.get(str(membro.id))
+        if registro is None or registro.get("status") != "em_andamento":
+            await interaction.response.send_message("⚠️ Sua whitelist já foi enviada pra análise.", ephemeral=True)
             return
         valor, erro = normalizar_tiktok(self.tiktok.value)
         if erro:
             await interaction.response.send_message(f"⚠️ {erro} Clica em **Responder Perguntas** e tenta de novo.", ephemeral=True)
             return
-        self.cog.salvar_resposta(membro.id, "tiktok", valor)
-        # e aqui salva a resposta do campo novo, mesma ideia, só troca a
-        # chave (o nome que fica salvo no json, tipo "tiktok") e o valor
-        # pra pegar do campo que vc criou lá em cima
 
-        await interaction.response.send_message("✅ Respostas registradas!")
-        await self.cog.enviar_pergunta(interaction.channel, membro, "duvidas")
+        async with cog.trava(membro.id):
+            etapa = registro.get("etapa_atual")
+            ja_respondeu = (etapa is not None and etapa != "perguntas_abertas") or (
+                etapa is None and registro.get("respostas", {}).get("tiktok")
+            )
+            if ja_respondeu:
+                await interaction.response.send_message("⚠️ Você já respondeu essa pergunta.", ephemeral=True)
+                return
+            await interaction.response.defer()
+            cog.salvar_resposta(membro.id, "tiktok", valor)
+            # e aqui salva a resposta do campo novo, mesma ideia, só troca a
+            # chave (o nome que fica salvo no json, tipo "tiktok") e o valor
+            # pra pegar do campo que vc criou lá em cima
+            await _travar_mensagem(interaction)
+            await _responder(interaction, "✅ Respostas registradas!")
+            await cog.enviar_pergunta(interaction.channel, membro, "duvidas")
 
 
 class DesistirButton(discord.ui.Button):
@@ -317,7 +399,7 @@ class DesistirButton(discord.ui.Button):
         await cog.pedir_confirmacao_desistencia(interaction)
 
 
-class AbrirPerguntasView(discord.ui.View):
+class AbrirPerguntasView(_ViewComErro):
     def __init__(self, cog: "Whitelist"):
         super().__init__(timeout=None)
         self.cog = cog
@@ -344,89 +426,29 @@ class EscolhaSelect(discord.ui.Select):
         self.prox_step = prox_step
 
     async def callback(self, interaction: discord.Interaction):
-        if not await self.cog.checar_dono(interaction):
+        cog = self.cog
+        if not await cog.checar_dono(interaction):
             return
-        await _travar_mensagem(interaction)
         membro = interaction.user
-        valor = self.values[0]
-        self.cog.salvar_resposta(membro.id, self.step, valor)
-
-        if self.step == "idioma":
-            guild = interaction.guild
-            cargo_ingles = guild.get_role(CARGO_IDIOMA_INGLES_ID)
-
-
-            falantes_ingles = sum(
-                1 for m in (cargo_ingles.members if cargo_ingles else [])
-                if not m.bot and m.id != membro.id
-            )
-            total_humanos = sum(1 for m in guild.members if not m.bot and m.id != membro.id)
-
-            if valor == "Inglês":
-                contagem = falantes_ingles
-            else:
-                contagem = total_humanos - falantes_ingles
-
-            cargo_msg = ""
-            if valor == "Inglês":
-                if cargo_ingles:
-                    try:
-                        await membro.add_roles(cargo_ingles, reason="Whitelist — idioma Inglês selecionado")
-                        cargo_msg = f"\n🏷️ Cargo {cargo_ingles.mention} atribuído!"
-                    except discord.Forbidden:
-                        cargo_msg = "\n⚠️ Não consegui atribuir o cargo de idioma (permissão)."
-                else:
-                    cargo_msg = "\n⚠️ Cargo de idioma configurado não foi encontrado no servidor."
-
-            await interaction.response.send_message(
-                f"✅ Idioma registrado: **{valor}**.\n"
-                f"🌐 Mais **{contagem}** pessoa(s) falam o mesmo idioma que você.{cargo_msg}"
-            )
-        elif self.step == "rank":
-            if valor in RANK_TIERS_COM_DIVISAO:
+        # um clique de cada vez por pessoa: clique duplo não duplica a próxima pergunta
+        async with cog.trava(membro.id):
+            if not cog.etapa_valida(membro.id, self.step):
                 await interaction.response.send_message(
-                    f"✅ Rank registrado: **{valor}**. Agora escolhe a divisão! 🔢"
+                    "⚠️ Essa pergunta já foi respondida (ou não é a atual). Se travou, clique em **🔄 Refazer pergunta**.",
+                    ephemeral=True,
                 )
-                await self.cog.enviar_pergunta(interaction.channel, membro, "rank_divisao")
-            else:
-                # Super Sonic Legend não tem divisão, já vai direto pra próxima etapa
-                await interaction.response.send_message(
-                    f"✅ Rank registrado: **{valor}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
-                )
-                await self.cog.enviar_pergunta(interaction.channel, membro, "plataforma")
-            return
-
-        elif self.step == "rank_divisao":
-            registro = self.cog.dados.get(str(membro.id), {})
-            tier = registro.get("respostas", {}).get("rank", "")
-            rank_completo = f"{tier} {valor}".strip()
-            self.cog.salvar_resposta(membro.id, "rank", rank_completo)
-            await interaction.response.send_message(
-                f"✅ Divisão registrada: **{rank_completo}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
-            )
-            await self.cog.enviar_pergunta(interaction.channel, membro, "plataforma")
-            return
-
-        else:
-            await interaction.response.send_message(f"✅ Resposta registrada: **{valor}**")
+                await _travar_mensagem(interaction)
+                return
+            # 1º: confirma o clique (o Discord só espera 3s). Antes o bot editava a mensagem
+            # e trocava cargos ANTES de responder: se demorasse, a resposta falhava, a
+            # pergunta ficava travada e a próxima nunca vinha. Foi isso que deixou a pessoa
+            # presa na pergunta do microfone.
+            await interaction.response.defer()
+            await _travar_mensagem(interaction)
+            await cog.processar_escolha(interaction, self.step, self.values[0], self.prox_step)
 
 
-        if self.step == "peak_rank" and valor == "Supersonic Legend":
-            self.cog.salvar_resposta(membro.id, "peak_div", "—")
-            await self.cog.enviar_pergunta(interaction.channel, membro, "peak_conta")
-            return
-
-
-        if self.step == "tem_tiktok" and valor == "Não":
-            self.cog.salvar_resposta(membro.id, "tiktok", "Não possui")
-            await self.cog.enviar_pergunta(interaction.channel, membro, "habilidades")
-            return
-
-        if self.prox_step:
-            await self.cog.enviar_pergunta(interaction.channel, membro, self.prox_step)
-
-
-class EscolhaView(discord.ui.View):
+class EscolhaView(_ViewComErro):
     def __init__(self, cog: "Whitelist", step: str, opcoes: list[str], placeholder: str, prox_step: str | None, emojis: dict | None = None):
         super().__init__(timeout=None)
         self.add_item(EscolhaSelect(cog, step, opcoes, placeholder, prox_step, emojis))
@@ -448,15 +470,24 @@ class HabilidadesSelect(discord.ui.Select):
         cog: "Whitelist" = interaction.client.get_cog("Whitelist")
         if not await cog.checar_dono(interaction):
             return
-        await _travar_mensagem(interaction)
         membro = interaction.user
-        valor = ", ".join(self.values)
-        cog.salvar_resposta(membro.id, "habilidades", valor)
-        await interaction.response.send_message(f"✅ Habilidade(s) registrada(s): **{valor}**")
-        await cog.prosseguir_apos_habilidades(interaction.channel, membro)
+        async with cog.trava(membro.id):
+            if not cog.etapa_valida(membro.id, "habilidades"):
+                await interaction.response.send_message(
+                    "⚠️ Essa pergunta já foi respondida (ou não é a atual). Se travou, clique em **🔄 Refazer pergunta**.",
+                    ephemeral=True,
+                )
+                await _travar_mensagem(interaction)
+                return
+            await interaction.response.defer()
+            await _travar_mensagem(interaction)
+            valor = ", ".join(self.values)
+            cog.salvar_resposta(membro.id, "habilidades", valor)
+            await _responder(interaction, f"✅ Habilidade(s) registrada(s): **{valor}**")
+            await cog.prosseguir_apos_habilidades(interaction.channel, membro)
 
 
-class HabilidadesView(discord.ui.View):
+class HabilidadesView(_ViewComErro):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(HabilidadesSelect())
@@ -467,14 +498,23 @@ class HabilidadesView(discord.ui.View):
         cog: "Whitelist" = interaction.client.get_cog("Whitelist")
         if not await cog.checar_dono(interaction):
             return
-        await _travar_mensagem(interaction)
         membro = interaction.user
-        cog.salvar_resposta(membro.id, "habilidades", "Nenhuma")
-        await interaction.response.send_message("⏭️ Pergunta pulada — nenhuma habilidade registrada.")
-        await cog.prosseguir_apos_habilidades(interaction.channel, membro)
+        async with cog.trava(membro.id):
+            if not cog.etapa_valida(membro.id, "habilidades"):
+                await interaction.response.send_message(
+                    "⚠️ Essa pergunta já foi respondida (ou não é a atual). Se travou, clique em **🔄 Refazer pergunta**.",
+                    ephemeral=True,
+                )
+                await _travar_mensagem(interaction)
+                return
+            await interaction.response.defer()
+            await _travar_mensagem(interaction)
+            cog.salvar_resposta(membro.id, "habilidades", "Nenhuma")
+            await _responder(interaction, "⏭️ Pergunta pulada — nenhuma habilidade registrada.")
+            await cog.prosseguir_apos_habilidades(interaction.channel, membro)
 
 
-class ComecarWhitelistView(discord.ui.View):
+class ComecarWhitelistView(_ViewComErro):
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -484,9 +524,22 @@ class ComecarWhitelistView(discord.ui.View):
         if not await cog.checar_dono(interaction):
             return
         if cog.dados.get(str(interaction.user.id), {}).get("respostas", {}).get("nick"):
-            await interaction.response.send_message("⚠️ Você já começou sua whitelist — siga as perguntas abaixo. 👇", ephemeral=True)
+            # já começou: em vez de só avisar, reenvia a pergunta em que parou
+            await interaction.response.defer(ephemeral=True)
+            texto = await cog.reenviar_etapa(interaction.channel, interaction.user)
+            await interaction.followup.send(texto, ephemeral=True)
             return
         await interaction.response.send_modal(NickModal(cog))
+
+    @discord.ui.button(label="🔄 Refazer pergunta", style=discord.ButtonStyle.secondary, custom_id="wl_retomar")
+    async def retomar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Travou ou fechou a aba sem responder? Reenvia a pergunta em que parou."""
+        cog: Whitelist = interaction.client.get_cog("Whitelist")
+        if not await cog.checar_dono(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        texto = await cog.reenviar_etapa(interaction.channel, interaction.user)
+        await interaction.followup.send(texto, ephemeral=True)
 
     @discord.ui.button(label="🚫 Desistir", style=discord.ButtonStyle.secondary, custom_id="wl_desistir")
     async def desistir(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -527,7 +580,7 @@ class ConfirmarDesistenciaView(discord.ui.View):
         await interaction.response.edit_message(content="Beleza, sua whitelist continua normalmente! 👍", view=None)
 
 
-class FinalizarWhitelistView(discord.ui.View):
+class FinalizarWhitelistView(_ViewComErro):
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -818,6 +871,9 @@ class Whitelist(commands.Cog):
         preencher_stats_se_vazio(self.dados)
         self.limpeza_canais.start()
         self.incentivo_whitelist.start()
+        self._locks: dict[int, asyncio.Lock] = {}
+        self.lembrar_staff_whitelist.start()
+        self.retomar_etapas_whitelist.start()
 
     async def cog_load(self):
         """Registra TODAS as views persistentes da whitelist (antes só 3 eram
@@ -833,6 +889,8 @@ class Whitelist(commands.Cog):
     def cog_unload(self):
         self.limpeza_canais.cancel()
         self.incentivo_whitelist.cancel()
+        self.lembrar_staff_whitelist.cancel()
+        self.retomar_etapas_whitelist.cancel()
 
     @tasks.loop(minutes=1)
     async def incentivo_whitelist(self):
@@ -921,6 +979,96 @@ class Whitelist(commands.Cog):
 
     @incentivo_whitelist.before_loop
     async def antes_incentivo_whitelist(self):
+        await self.bot.wait_until_ready()
+
+    # ── cobrança da staff quando a whitelist fica sem resposta ─────────────
+    @staticmethod
+    def _texto_espera(segundos: float) -> str:
+        minutos = max(1, int(segundos // 60))
+        if minutos < 60:
+            return f"{minutos} min"
+        horas, resto = divmod(minutos, 60)
+        return f"{horas}h" if resto == 0 else f"{horas}h{resto:02d}"
+
+    @commands.Cog.listener("on_message")
+    async def _staff_respondeu(self, message: discord.Message):
+        """Staff da whitelist escreveu no canal de uma whitelist pendente = já
+        está atendendo: o bot para de cobrar essa."""
+        if message.guild is None or message.author.bot:
+            return
+        if not _pode_gerir(message.author):
+            return
+        membro_id = self._membro_id_do_canal(message.channel.id)
+        if membro_id is None or membro_id == message.author.id:
+            return
+        registro = self.dados.get(str(membro_id))
+        if not registro or registro.get("status") != "pendente":
+            return
+        registro["staff_respondeu_ts"] = time.time()
+        salvar("whitelist", self.dados)
+
+    @tasks.loop(minutes=1)
+    async def lembrar_staff_whitelist(self):
+        agora = time.time()
+        mudou = False
+
+        for uid_str, registro in list(self.dados.items()):
+            if registro.get("status") != "pendente" or registro.get("canal_apagado"):
+                continue
+            canal_id = registro.get("canal_id")
+            if not canal_id:
+                continue
+
+            enviado_ts = registro.get("enviado_ts")
+            if not enviado_ts:
+                # whitelist pendente de antes dessa função: começa a contar daqui
+                registro["enviado_ts"] = agora
+                mudou = True
+                continue
+
+            # staff já escreveu no canal depois do envio: está sendo atendida
+            if registro.get("staff_respondeu_ts", 0) >= enviado_ts:
+                continue
+
+            ultimo = registro.get("ultimo_aviso_staff_ts", 0)
+            if ultimo >= enviado_ts:
+                if agora - ultimo < AVISO_STAFF_INTERVALO_SEGUNDOS:
+                    continue
+                primeiro_aviso = False
+            else:
+                if agora - enviado_ts < AVISO_STAFF_PRIMEIRO_SEGUNDOS:
+                    continue
+                primeiro_aviso = True
+
+            canal = self.bot.get_channel(canal_id)
+            if canal is None:
+                continue
+            cargo = canal.guild.get_role(CARGO_STAFF_WHITELIST_ID)
+            if cargo is None:
+                continue
+
+            espera = self._texto_espera(agora - enviado_ts)
+            dono = f"<@{uid_str}>"
+            if primeiro_aviso:
+                texto = f"⏰ {cargo.mention} — a whitelist de {dono} foi enviada há **{espera}** e ainda ninguém da staff respondeu!"
+            else:
+                texto = f"🔔 {cargo.mention} — a whitelist de {dono} continua esperando há **{espera}**. Alguém pode dar uma olhada?"
+
+            await self._garantir_acesso_staff(canal)
+            try:
+                await canal.send(texto, allowed_mentions=discord.AllowedMentions(roles=[cargo], users=False, everyone=False))
+            except discord.HTTPException as e:
+                print(f"[WHITELIST] ⚠️ Não consegui marcar a staff em {canal_id}: {e}")
+
+            # marca mesmo se falhou: tenta de novo só no próximo intervalo (sem spam de erro)
+            registro["ultimo_aviso_staff_ts"] = agora
+            mudou = True
+
+        if mudou:
+            salvar("whitelist", self.dados)
+
+    @lembrar_staff_whitelist.before_loop
+    async def antes_lembrar_staff_whitelist(self):
         await self.bot.wait_until_ready()
 
     @tasks.loop(minutes=1)
@@ -1039,8 +1187,13 @@ class Whitelist(commands.Cog):
 
         registro["chamou_staff_ts"] = agora
         salvar("whitelist", self.dados)
-        await self._garantir_acesso_staff(interaction.channel)
-        await interaction.response.send_message(
+        await interaction.response.defer()
+        try:
+            await self._garantir_acesso_staff(interaction.channel)
+        except discord.HTTPException:
+            pass
+        await _responder(
+            interaction,
             f"🔔 {cargo.mention} — {interaction.user.mention} está pedindo ajuda com a whitelist!",
             allowed_mentions=discord.AllowedMentions(roles=[cargo], users=[interaction.user]),
         )
@@ -1139,7 +1292,10 @@ class Whitelist(commands.Cog):
     async def on_member_join(self, member: discord.Member):
         if member.bot:
             return
-        await self.criar_canal_whitelist(member)
+        try:
+            await self.criar_canal_whitelist(member)
+        except Exception as e:  # sem isso a pessoa entrava e ficava sem canal, sem nenhum aviso
+            _log_erro(f"criar_canal_whitelist({member})", e)
 
     async def criar_canal_whitelist(self, member: discord.Member) -> discord.TextChannel:
         guild = member.guild
@@ -1259,15 +1415,34 @@ class Whitelist(commands.Cog):
 
     async def dar_cargo_rank(self, guild: discord.Guild, membro: discord.Member, rank_nome: str) -> str | None:
         """Dá o cargo de divisão (ex.: Champion 2) E o cargo geral do rank
-        (Champion). Troca os cargos de rank antigos."""
-        cargo = guild.get_role(CARGO_RANKS.get(rank_nome, 0))
-        if cargo is None:
-            return f"⚠️ Não achei o cargo do rank **{rank_nome}**."
+        (Champion). Troca os cargos de rank antigos. Aceita o rank sem divisão
+        ("Platina") dando só o cargo geral e avisando a staff."""
+        nome = " ".join(str(rank_nome).split())
+        cargo_id = CARGO_RANKS.get(nome) or next((i for n, i in CARGO_RANKS.items() if n.lower() == nome.lower()), 0)
         try:
-            await aplicar_cargo_rank(membro, cargo, "Whitelist — rank aplicado")
+            if cargo_id:
+                cargo = guild.get_role(cargo_id)
+                if cargo is None:
+                    return f"⚠️ Não achei o cargo do rank **{nome}** no servidor (confira o ID em cogs/players.py)."
+                await aplicar_cargo_rank(membro, cargo, "Whitelist — rank aplicado")
+                return None
+
+            geral_id = next((i for t, i in CARGO_GERAL_SEM_DIVISAO_IDS.items() if t.lower() == nome.lower()), 0)
+            geral = guild.get_role(geral_id) if geral_id else None
+            if geral is None:
+                return f"⚠️ Não achei o cargo do rank **{nome}**."
+            # rank sem divisão: dá só o cargo geral (e tira os de rank antigos)
+            ids_rank = set(CARGO_RANKS.values()) | set(CARGO_GERAL_SEM_DIVISAO_IDS.values())
+            remover = [r for r in membro.roles if r.id in ids_rank and r.id != geral.id]
+            if remover:
+                await membro.remove_roles(*remover, reason="Whitelist — rank aplicado")
+            if geral not in membro.roles:
+                await membro.add_roles(geral, reason="Whitelist — rank aplicado")
+            return f"⚠️ O rank **{nome}** veio sem divisão: dei só o cargo **{geral.name}**. Ajuste a divisão depois."
         except discord.Forbidden:
             return "⚠️ Não tenho permissão pra dar o cargo de rank."
-        return None
+        except discord.HTTPException as e:
+            return f"⚠️ Erro do Discord ao dar o cargo de rank: {e}"
 
     async def dar_cargo_plataforma(self, guild: discord.Guild, membro: discord.Member, plataforma: str) -> str | None:
         """Dá o cargo da plataforma (PC / Xbox / PlayStation) e tira os outros
@@ -1298,6 +1473,189 @@ class Whitelist(commands.Cog):
             await self.enviar_pergunta(canal, membro, "duvidas")
 
 
+    # ── controle de etapa: retomar pergunta, travas e recuperação ──────────
+    ORDEM_ETAPAS = ["idioma", "rank", "rank_divisao", "plataforma", "peak_rank", "peak_div", "peak_conta",
+                    "tempo", "microfone", "ativo", "tem_tiktok", "habilidades", "perguntas_abertas", "duvidas"]
+
+    def trava(self, membro_id: int) -> asyncio.Lock:
+        """Um lock por pessoa: clique duplo / dois cliques ao mesmo tempo não duplicam etapas."""
+        return self._locks.setdefault(membro_id, asyncio.Lock())
+
+    def etapa_valida(self, membro_id: int, step: str) -> bool:
+        """O clique é na pergunta ATUAL? (menu antigo/duplicado não pode mais mexer no fluxo)
+        Whitelists de antes dessa função não têm etapa guardada: aceitam tudo, como antes."""
+        etapa = self.dados.get(str(membro_id), {}).get("etapa_atual")
+        return etapa is None or etapa == step
+
+    @staticmethod
+    def _inferir_etapa(respostas: dict) -> str:
+        """Etapa em que a pessoa está, pelas respostas já dadas (usado quando não há etapa guardada)."""
+        if not respostas.get("idioma"):
+            return "idioma"
+        rank = respostas.get("rank")
+        if not rank:
+            return "rank"
+        if rank in RANK_TIERS_COM_DIVISAO:       # escolheu o tier mas não a divisão
+            return "rank_divisao"
+        for chave in ("plataforma", "peak_rank"):
+            if not respostas.get(chave):
+                return chave
+        for chave in ("peak_div", "peak_conta", "tempo", "microfone", "ativo", "tem_tiktok"):
+            if not respostas.get(chave):
+                return chave
+        if not respostas.get("habilidades"):
+            return "habilidades"
+        if respostas.get("tem_tiktok") == "Sim" and not respostas.get("tiktok"):
+            return "perguntas_abertas"
+        return "duvidas"
+
+    async def enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str) -> bool:
+        """Manda a pergunta da etapa e guarda onde a pessoa está. NUNCA estoura: se o envio
+        falhar, a etapa fica marcada como 'não enviada' e o bot reenvia sozinho em ~1 min."""
+        registro = self.dados.get(str(membro.id))
+        if registro is not None:
+            registro["etapa_atual"] = step
+            registro["etapa_enviada"] = False
+            registro["etapa_ts"] = time.time()
+            salvar("whitelist", self.dados)
+        try:
+            msg = await self._montar_e_enviar_pergunta(canal, membro, step)
+        except Exception as e:
+            _log_erro(f"enviar_pergunta({step})", e)
+            return False
+        if registro is not None:
+            registro["etapa_enviada"] = True
+            registro["etapa_msg_id"] = getattr(msg, "id", None)
+            registro["etapa_tentativas"] = 0
+            salvar("whitelist", self.dados)
+        return True
+
+    async def processar_escolha(self, interaction: discord.Interaction, step: str, valor: str, prox_step: str | None):
+        """Grava a resposta de um menu, confirma pra pessoa e manda a próxima pergunta."""
+        membro = interaction.user
+        canal = interaction.channel
+        try:
+            self.salvar_resposta(membro.id, step, valor)
+            texto = f"✅ Resposta registrada: **{valor}**"
+            proximo = prox_step
+
+            if step == "idioma":
+                guild = interaction.guild
+                cargo_ingles = guild.get_role(CARGO_IDIOMA_INGLES_ID)
+                falantes_ingles = sum(
+                    1 for m in (cargo_ingles.members if cargo_ingles else [])
+                    if not m.bot and m.id != membro.id
+                )
+                total_humanos = sum(1 for m in guild.members if not m.bot and m.id != membro.id)
+                contagem = falantes_ingles if valor == "Inglês" else max(0, total_humanos - falantes_ingles)
+
+                cargo_msg = ""
+                if valor == "Inglês":
+                    if cargo_ingles:
+                        try:
+                            await membro.add_roles(cargo_ingles, reason="Whitelist — idioma Inglês selecionado")
+                            cargo_msg = f"\n🏷️ Cargo {cargo_ingles.mention} atribuído!"
+                        except discord.HTTPException:
+                            cargo_msg = "\n⚠️ Não consegui atribuir o cargo de idioma (permissão)."
+                    else:
+                        cargo_msg = "\n⚠️ Cargo de idioma configurado não foi encontrado no servidor."
+                texto = (
+                    f"✅ Idioma registrado: **{valor}**.\n"
+                    f"🌐 Mais **{contagem}** pessoa(s) falam o mesmo idioma que você.{cargo_msg}"
+                )
+            elif step == "rank":
+                if valor in RANK_TIERS_COM_DIVISAO:
+                    texto = f"✅ Rank registrado: **{valor}**. Agora escolhe a divisão! 🔢"
+                    proximo = "rank_divisao"
+                else:
+                    # Super Sonic Legend não tem divisão, já vai direto pra próxima etapa
+                    texto = f"✅ Rank registrado: **{valor}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
+                    proximo = "plataforma"
+            elif step == "rank_divisao":
+                tier = self.dados.get(str(membro.id), {}).get("respostas", {}).get("rank", "")
+                rank_completo = f"{tier} {valor}".strip()
+                self.salvar_resposta(membro.id, "rank", rank_completo)
+                texto = f"✅ Divisão registrada: **{rank_completo}**.\n*(o cargo só é aplicado se a whitelist for aprovada)*"
+                proximo = "plataforma"
+            elif step == "peak_rank" and valor == "Supersonic Legend":
+                self.salvar_resposta(membro.id, "peak_div", "—")
+                proximo = "peak_conta"
+            elif step == "tem_tiktok" and valor == "Não":
+                self.salvar_resposta(membro.id, "tiktok", "Não possui")
+                proximo = "habilidades"
+
+            await _responder(interaction, texto)
+            if proximo:
+                await self.enviar_pergunta(canal, membro, proximo)
+        except Exception as e:
+            # a resposta pode ter sido gravada, mas o fluxo não andou: deixa a etapa marcada como
+            # 'não enviada' (o bot reenvia a pergunta sozinho) e avisa a pessoa
+            _log_erro(f"processar_escolha({step})", e)
+            registro = self.dados.get(str(membro.id))
+            if registro is not None:
+                registro["etapa_enviada"] = False
+                registro["etapa_ts"] = time.time()
+                salvar("whitelist", self.dados)
+            await _responder(interaction, MSG_ERRO_ETAPA + " (vou reenviar a pergunta sozinho em instantes)")
+
+    async def reenviar_etapa(self, canal: discord.TextChannel, membro: discord.Member) -> str:
+        """Refaz a pergunta em que a pessoa parou (apaga a antiga, se ainda existir).
+        Devolve o texto pra mostrar pra ela."""
+        registro = self.dados.get(str(membro.id))
+        if not registro or registro.get("status") != "em_andamento":
+            return "⚠️ Sua whitelist já foi enviada pra análise — não tem mais pergunta pra refazer."
+        respostas = registro.get("respostas", {})
+        if not respostas.get("nick"):
+            return "👉 Você ainda não começou: clique em **🚀 Começar Whitelist** na primeira mensagem do canal."
+
+        step = registro.get("etapa_atual") or self._inferir_etapa(respostas)
+        antiga = registro.get("etapa_msg_id")
+        if antiga:
+            try:
+                msg = await canal.fetch_message(antiga)
+                await msg.delete()
+            except discord.HTTPException:
+                pass
+        ok = await self.enviar_pergunta(canal, membro, step)
+        if not ok:
+            return "⚠️ Não consegui reenviar agora. Tento de novo sozinho em instantes — se não aparecer, clique em **🔄 Refazer pergunta**."
+        return "🔄 Pronto! Reenviei a pergunta em que você parou — é só responder lá embaixo. 👇"
+
+    @tasks.loop(minutes=1)
+    async def retomar_etapas_whitelist(self):
+        """Se a pergunta de alguém não chegou a ser enviada (erro do Discord, bot reiniciou no
+        meio...), reenvia sozinho. No máximo 5 tentativas por etapa, 1 por minuto."""
+        agora = time.time()
+        for uid_str, registro in list(self.dados.items()):
+            if registro.get("status") != "em_andamento" or registro.get("canal_apagado"):
+                continue
+            if not registro.get("etapa_atual") or registro.get("etapa_enviada", True):
+                continue
+            if agora - registro.get("etapa_ts", 0) < 60 or registro.get("etapa_tentativas", 0) >= 5:
+                continue
+            canal = self.bot.get_channel(registro.get("canal_id") or 0)
+            membro = canal.guild.get_member(int(uid_str)) if canal else None
+            if canal is None or membro is None:
+                continue
+            registro["etapa_tentativas"] = registro.get("etapa_tentativas", 0) + 1
+            await self.reenviar_etapa(canal, membro)
+
+    @retomar_etapas_whitelist.before_loop
+    async def antes_retomar_etapas(self):
+        await self.bot.wait_until_ready()
+
+    @app_commands.command(name="retomar_whitelist", description="Travou na whitelist? Reenvia a pergunta em que você parou.")
+    async def retomar_whitelist(self, interaction: discord.Interaction):
+        membro_id = self._membro_id_do_canal(interaction.channel.id) if interaction.channel else None
+        if membro_id is None or membro_id != interaction.user.id:
+            await interaction.response.send_message(
+                "❌ Use esse comando dentro do canal da sua whitelist.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        texto = await self.reenviar_etapa(interaction.channel, interaction.user)
+        await interaction.followup.send(texto, ephemeral=True)
+
     @staticmethod
     def _config_escolha() -> dict:
         """Etapas de múltipla escolha: (opções, placeholder, próxima etapa, emojis)."""
@@ -1319,52 +1677,53 @@ class Whitelist(commands.Cog):
         opcoes, placeholder, prox, emojis = self._config_escolha()[step]
         return EscolhaView(self, step, opcoes, placeholder, prox, emojis=emojis)
 
-    async def enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str):
+    async def _montar_e_enviar_pergunta(self, canal: discord.TextChannel, membro: discord.Member, step: str):
+        msg = None
         if step == "idioma":
             view = self._view_escolha("idioma")
-            await canal.send("🌐 **Qual é a sua linguagem?**\n(Português ou Inglês — só pode escolher uma)", view=view)
+            msg = await canal.send("🌐 **Qual é a sua linguagem?**\n(Português ou Inglês — só pode escolher uma)", view=view)
 
         elif step == "rank":
             view = self._view_escolha("rank")
-            await canal.send("🎮 **Qual o seu rank atual no Rocket League?**", view=view)
+            msg = await canal.send("🎮 **Qual o seu rank atual no Rocket League?**", view=view)
 
         elif step == "rank_divisao":
             registro = self.dados.get(str(membro.id), {})
             tier = registro.get("respostas", {}).get("rank", "")
             view = self._view_escolha("rank_divisao")
-            await canal.send(f"🔢 **Qual divisão do seu rank {tier}?** (1, 2 ou 3)", view=view)
+            msg = await canal.send(f"🔢 **Qual divisão do seu rank {tier}?** (1, 2 ou 3)", view=view)
 
         elif step == "plataforma":
             view = self._view_escolha("plataforma")
-            await canal.send("🖥️ **Em qual plataforma você joga?**", view=view)
+            msg = await canal.send("🖥️ **Em qual plataforma você joga?**", view=view)
 
         elif step == "peak_rank":
             view = self._view_escolha("peak_rank")
-            await canal.send("🏆 **Qual o maior rank que você já alcançou?**", view=view)
+            msg = await canal.send("🏆 **Qual o maior rank que você já alcançou?**", view=view)
 
         elif step == "peak_div":
             view = self._view_escolha("peak_div")
-            await canal.send("🔢 **E qual divisão desse rank?**", view=view)
+            msg = await canal.send("🔢 **E qual divisão desse rank?**", view=view)
 
         elif step == "peak_conta":
             view = self._view_escolha("peak_conta")
-            await canal.send("🔁 **Esse maior rank foi alcançado na conta que você joga hoje ou em outra conta?**", view=view)
+            msg = await canal.send("🔁 **Esse maior rank foi alcançado na conta que você joga hoje ou em outra conta?**", view=view)
 
         elif step == "tempo":
             view = self._view_escolha("tempo")
-            await canal.send("⏱️ **Há quanto tempo você joga Rocket League?**", view=view)
+            msg = await canal.send("⏱️ **Há quanto tempo você joga Rocket League?**", view=view)
 
         elif step == "microfone":
             view = self._view_escolha("microfone")
-            await canal.send("🎤 **Você tem microfone pra jogar?**", view=view)
+            msg = await canal.send("🎤 **Você tem microfone pra jogar?**", view=view)
 
         elif step == "ativo":
             view = self._view_escolha("ativo")
-            await canal.send("📈 **Você pretende ser um membro ativo na equipe?**", view=view)
+            msg = await canal.send("📈 **Você pretende ser um membro ativo na equipe?**", view=view)
 
         elif step == "tem_tiktok":
             view = self._view_escolha("tem_tiktok")
-            await canal.send("🎵 **Você tem conta no TikTok?**", view=view)
+            msg = await canal.send("🎵 **Você tem conta no TikTok?**", view=view)
 
         elif step == "habilidades":
             embed = discord.Embed(
@@ -1375,7 +1734,7 @@ class Whitelist(commands.Cog):
                 ),
                 color=0x5865F2,
             )
-            await canal.send(embed=embed, view=HabilidadesView())
+            msg = await canal.send(embed=embed, view=HabilidadesView())
 
         elif step == "perguntas_abertas":
             embed = discord.Embed(
@@ -1388,7 +1747,7 @@ class Whitelist(commands.Cog):
                 ),
                 color=0x5865F2,
             )
-            await canal.send(embed=embed, view=AbrirPerguntasView(self))
+            msg = await canal.send(embed=embed, view=AbrirPerguntasView(self))
 
         elif step == "duvidas":
             embed = discord.Embed(
@@ -1401,7 +1760,8 @@ class Whitelist(commands.Cog):
                 ),
                 color=0x5865F2,
             )
-            await canal.send(embed=embed, view=FinalizarWhitelistView())
+            msg = await canal.send(embed=embed, view=FinalizarWhitelistView())
+        return msg
 
 
     async def solicitar_aprovacao(self, interaction: discord.Interaction):
@@ -1879,11 +2239,19 @@ class Whitelist(commands.Cog):
         avisos = []
         respostas = registro.get("respostas", {})
         if membro and respostas.get("rank"):
-            erro = await self.dar_cargo_rank(guild, membro, respostas["rank"])
+            try:
+                erro = await self.dar_cargo_rank(guild, membro, respostas["rank"])
+            except Exception as e:  # a whitelist já está aprovada: não deixa um erro de cargo travar o resto
+                _log_erro("dar_cargo_rank", e)
+                erro = f"⚠️ Erro inesperado ao dar o cargo de rank: {e}"
             if erro:
                 avisos.append(erro)
         if membro and respostas.get("plataforma"):
-            erro = await self.dar_cargo_plataforma(guild, membro, respostas["plataforma"])
+            try:
+                erro = await self.dar_cargo_plataforma(guild, membro, respostas["plataforma"])
+            except Exception as e:
+                _log_erro("dar_cargo_plataforma", e)
+                erro = f"⚠️ Erro inesperado ao dar o cargo de plataforma: {e}"
             if erro:
                 avisos.append(erro)
         aviso_extra = ("\n" + "\n".join(avisos)) if avisos else ""
@@ -1996,6 +2364,10 @@ class Whitelist(commands.Cog):
         registro = self.dados.get(str(membro_id))
         if not registro:
             await interaction.response.edit_message(content="⚠️ Não encontrei mais essa whitelist.", view=None)
+            return
+
+        if registro.get("status") != "em_andamento":
+            await interaction.response.edit_message(content="⚠️ Essa whitelist já foi enviada pra análise — não dá mais pra desistir por aqui.", view=None)
             return
 
         registro["status"] = "cancelada"

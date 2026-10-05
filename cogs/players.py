@@ -41,8 +41,7 @@ CARGO_GERAL_SEM_DIVISAO_IDS = {
 }
 
 RANK_DIVISAO_IDS = {
-    # ⚠️ Platina 2 continua com o ID antigo (não atualizado ainda — ver aviso do Claude).
-    "Platina":        {1: 1544205321751232574, 2: 1544205321751232574, 3: 1544205635871051786},
+    "Platina":        {1: 1544205321751232574, 2: 1544318465886785617, 3: 1544205635871051786},
     "Diamante":       {1: 1544318417044111430, 2: 1544206278082039890, 3: 1544207340570546226},
     "Champion":       {1: 1544318519305441330, 2: 1544207872488116284, 3: 1544208446986002542},
     "Grand Champion": {1: 1544318559994253353, 2: 1544208903233871872, 3: 1544209080053145711},
@@ -104,6 +103,28 @@ async def aplicar_cargo_rank(membro, novo_cargo, motivo: str) -> None:
     adicionar = [r for r in (novo_cargo, geral) if r is not None and r not in membro.roles]
     if adicionar:
         await membro.add_roles(*adicionar, reason=motivo)
+
+
+async def garantir_cargo_geral(membro) -> bool:
+    """Quem tem um cargo de divisão (ex.: Platina 1) SEMPRE tem o cargo geral do
+    rank (Platina). Só adiciona o que falta, nunca tira nada. True se mudou algo."""
+    ids = {r.id for r in membro.roles}
+    faltando = {
+        CARGO_GERAL_POR_DIVISAO[div_id]
+        for div_id in ids & CARGO_GERAL_POR_DIVISAO.keys()
+        if CARGO_GERAL_POR_DIVISAO[div_id] not in ids
+    }
+    cargos = [c for c in (membro.guild.get_role(i) for i in faltando) if c is not None]
+    if not cargos:
+        return False
+    try:
+        await membro.add_roles(*cargos, reason="Rank: o cargo geral acompanha o cargo da divisão")
+    except discord.HTTPException as e:
+        print(f"[PLAYERS] ⚠️ Não consegui dar o cargo geral de rank pra {membro}: {e}")
+        return False
+    return True
+
+
 CARGOS_RANK      = [c for c in CARGOS if c["secao"] == "rank"]
 
 
@@ -278,13 +299,17 @@ class Players(commands.Cog):
         self.message_id = None
         self.bot.add_view(PainelRankView())
         self.atualizar_lista.start()
+        self.sincronizar_cargos_gerais.start()
 
     def cog_unload(self):
         self.atualizar_lista.cancel()
+        self.sincronizar_cargos_gerais.cancel()
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-
+        # rank: mexeu em cargo? garante que quem tem a divisão (Platina 1) também tem o geral (Platina)
+        if before.roles != after.roles:
+            await garantir_cargo_geral(after)
 
         cargos_antes  = {r.id for r in before.roles}
         cargos_depois = {r.id for r in after.roles}
@@ -325,6 +350,30 @@ class Players(commands.Cog):
 
     @atualizar_lista.before_loop
     async def antes_do_loop(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(minutes=10)
+    async def sincronizar_cargos_gerais(self):
+        """Varredura: conserta quem já está com a divisão e sem o cargo geral (cargo
+        dado na mão, bot offline na hora, etc.). O listener acima cuida do dia a dia."""
+        corrigidos = 0
+        vistos = set()
+        for guild in self.bot.guilds:
+            for div_id in CARGO_GERAL_POR_DIVISAO:
+                cargo = guild.get_role(div_id)
+                if cargo is None:
+                    continue
+                for membro in list(cargo.members):
+                    if membro.bot or membro.id in vistos:
+                        continue
+                    vistos.add(membro.id)
+                    if await garantir_cargo_geral(membro):
+                        corrigidos += 1
+        if corrigidos:
+            print(f"[PLAYERS] 🏷️ Cargo geral de rank corrigido pra {corrigidos} jogador(es).")
+
+    @sincronizar_cargos_gerais.before_loop
+    async def antes_sincronizar_cargos(self):
         await self.bot.wait_until_ready()
 
     async def _editar_ou_criar(self, channel: discord.TextChannel):
