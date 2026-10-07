@@ -143,6 +143,14 @@ CARGOS_VISUALIZAM_TICKET_DEV = {
     1523835085475020932,
 }
 
+# Tíquete de DESENVOLVIMENTO: só essa pessoa assume, responde e manda mensagem.
+# Além dela, só o dono do tíquete (quem abriu) escreve: qualquer outra mensagem
+# no canal o bot apaga na hora.
+DEV_TICKET_RESPONSAVEL_ID = 1487452210605588592
+
+# um lock por canal: dois cliques em "Assumir" ao mesmo tempo não passam os dois
+_locks_assumir: dict[int, asyncio.Lock] = {}
+
 # cargos marcados na abertura de tíquete de desenvolvimento (no lugar do
 # cargo de equipe normal)
 CARGO_DEV_PING_1 = 1532739361198833874
@@ -366,9 +374,13 @@ async def criar_ticket(interaction: discord.Interaction, valor: str):
         for cargo_id in CARGOS_VISUALIZAM_TICKET_DEV:
             cargo = guild.get_role(cargo_id)
             if cargo is not None:
-                overwrites[cargo] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+                # os cargos só ENXERGAM o canal; quem escreve é o responsável (abaixo)
+                overwrites[cargo] = discord.PermissionOverwrite(view_channel=True, send_messages=False)
             else:
                 print(f"[TICKET] ⚠️ Cargo {cargo_id} (visualização de ticket dev) não encontrado no servidor.")
+        responsavel = guild.get_member(DEV_TICKET_RESPONSAVEL_ID)
+        if responsavel is not None:
+            overwrites[responsavel] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
     elif valor == "administracao":
 
 
@@ -604,6 +616,7 @@ class TicketSetupView(discord.ui.View):
 class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._ultimo_aviso_intruso: dict[int, float] = {}
 
 
     @staticmethod
@@ -634,6 +647,31 @@ class Tickets(commands.Cog):
 
         dono_id = self._extrair_dono_id(canal.name)
 
+        # tíquete de desenvolvimento: só o dono do tíquete e o responsável escrevem.
+        # Admin com permissão de administrador ignora a permissão do canal, então a
+        # mensagem é apagada na unha.
+        if canal.name.startswith(f"ticket-{NOMES['dev']}-") and message.author.id not in (dono_id, DEV_TICKET_RESPONSAVEL_ID):
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound):
+                pass
+            except discord.HTTPException as e:
+                print(f"[TICKET] ⚠️ Não consegui apagar mensagem de {message.author} em {canal.name}: {e}")
+            agora = time.monotonic()
+            if agora - self._ultimo_aviso_intruso.get(canal.id, -999) >= 15:  # um aviso a cada 15s, não um por mensagem
+                self._ultimo_aviso_intruso[canal.id] = agora
+                responsavel = message.guild.get_member(DEV_TICKET_RESPONSAVEL_ID)
+                nome = responsavel.mention if responsavel else f"<@{DEV_TICKET_RESPONSAVEL_ID}>"
+                try:
+                    await canal.send(
+                        f"⚠️ {message.author.mention}, nos tíquetes de desenvolvimento só {nome} (e quem abriu o tíquete) pode escrever.",
+                        delete_after=8,
+                        allowed_mentions=discord.AllowedMentions(users=[message.author]),
+                    )
+                except discord.HTTPException:
+                    pass
+            return
+
         abertos = _ler_abertos()
         info = abertos.get(str(canal.id))
 
@@ -651,7 +689,7 @@ class Tickets(commands.Cog):
                 nome = responsavel.mention if responsavel else f"<@{assumido_por}>"
                 aviso = await canal.send(
                     f"⚠️ {message.author.mention}, esse tíquete já foi assumido por {nome}. "
-                    f"Só ele (ou um admin, clicando em **Assumir Tíquete** de novo) pode responder aqui.",
+                    f"Só ele (e quem abriu o tíquete) pode responder aqui.",
                     delete_after=8,
                 )
             except discord.HTTPException:
@@ -1003,95 +1041,122 @@ class Tickets(commands.Cog):
     async def assumir_ticket(self, interaction: discord.Interaction):
         canal = interaction.channel
         guild = interaction.guild
+        usuario = interaction.user
+        eh_dev = canal.name.startswith(f"ticket-{NOMES['dev']}-")
+        eh_super = mu.eh_super_admin(usuario.id)
+        eh_admin = usuario.guild_permissions.administrator or eh_super
 
-        pode_assumir = (
-            interaction.user.guild_permissions.administrator
-            or mu.eh_super_admin(interaction.user.id)
-            or any(role.id == CARGO_EQUIPE_ID for role in interaction.user.roles)
-        )
-        if not pode_assumir and canal.name.startswith(f"ticket-{NOMES['dev']}-"):
-            pode_assumir = any(role.id in CARGOS_VISUALIZAM_TICKET_DEV for role in interaction.user.roles)
-
-        if canal.name.startswith(f"ticket-{NOMES['administracao']}-"):
-            pode_assumir = (
-                interaction.user.guild_permissions.administrator
-                or mu.eh_super_admin(interaction.user.id)
-            )
+        if eh_dev:
+            # tíquete de desenvolvimento: só o responsável assume
+            pode_assumir = usuario.id == DEV_TICKET_RESPONSAVEL_ID
+        elif canal.name.startswith(f"ticket-{NOMES['administracao']}-"):
+            pode_assumir = eh_admin
+        else:
+            pode_assumir = eh_admin or any(role.id == CARGO_EQUIPE_ID for role in usuario.roles)
 
         if not pode_assumir:
-            await interaction.response.send_message(
-                "❌ Você não tem permissão para assumir este tíquete.",
-                ephemeral=True
+            texto = (
+                f"❌ Só <@{DEV_TICKET_RESPONSAVEL_ID}> pode assumir tíquetes de desenvolvimento."
+                if eh_dev else "❌ Você não tem permissão para assumir este tíquete."
             )
+            await interaction.response.send_message(texto, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
             return
 
-        abertos = _ler_abertos()
-        info = abertos.get(str(canal.id), {})
-        assumido_por = info.get("assumido_por")
+        # um clique de cada vez por canal, e relê o estado DENTRO do lock: antes, dois
+        # cliques quase juntos passavam os dois pela checagem e o último "roubava" o tíquete
+        lock = _locks_assumir.setdefault(canal.id, asyncio.Lock())
+        async with lock:
+            abertos = _ler_abertos()
+            info = abertos.get(str(canal.id), {})
+            assumido_por = info.get("assumido_por")
 
-        if assumido_por and assumido_por != interaction.user.id:
-            responsavel = guild.get_member(assumido_por)
-            nome = responsavel.mention if responsavel else f"<@{assumido_por}>"
-            eh_admin = interaction.user.guild_permissions.administrator or mu.eh_super_admin(interaction.user.id)
-            if not eh_admin:
+            if assumido_por and assumido_por != usuario.id and not eh_super:
+                # ninguém "toma" um tíquete já assumido (nem administrador): quem assumiu
+                # precisa liberar clicando de novo em Assumir Tíquete
+                responsavel = guild.get_member(assumido_por)
+                nome = responsavel.mention if responsavel else f"<@{assumido_por}>"
                 await interaction.response.send_message(
-                    f"⚠️ Esse tíquete já foi assumido por {nome}. Só um administrador pode passar pra outra pessoa.",
-                    ephemeral=True
+                    f"⚠️ Esse tíquete já foi assumido por {nome}. Só quem assumiu pode liberar.",
+                    ephemeral=True,
+                    allowed_mentions=discord.AllowedMentions.none(),
                 )
                 return
 
-        if assumido_por == interaction.user.id:
+            # as mudanças de permissão abaixo podem passar dos 3s do Discord
+            await interaction.response.defer()
 
-            cargos_bloqueados = info.get("cargos_bloqueados", [])
-            for cargo_id in cargos_bloqueados:
-                cargo = guild.get_role(cargo_id)
-                if cargo is not None:
-                    try:
-                        await canal.set_permissions(cargo, view_channel=True, send_messages=True)
-                    except discord.Forbidden:
-                        pass
-            try:
-                await canal.set_permissions(interaction.user, overwrite=None)
-            except discord.Forbidden:
-                pass
+            if assumido_por == usuario.id:
+                for cargo_id in info.get("cargos_bloqueados", []):
+                    cargo = guild.get_role(cargo_id)
+                    if cargo is not None:
+                        try:
+                            await canal.set_permissions(cargo, view_channel=True, send_messages=True)
+                        except discord.HTTPException:
+                            pass
+                try:
+                    if eh_dev:
+                        await canal.set_permissions(usuario, view_channel=True, send_messages=True)  # o responsável sempre escreve
+                    else:
+                        await canal.set_permissions(usuario, overwrite=None)
+                except discord.HTTPException:
+                    pass
 
-            info["assumido_por"] = None
-            info["cargos_bloqueados"] = []
+                info["assumido_por"] = None
+                info["cargos_bloqueados"] = []
+                abertos[str(canal.id)] = info
+                _salvar_abertos(abertos)
+
+                await interaction.followup.send(
+                    f"🔓 {usuario.mention} liberou o tíquete."
+                    + ("" if eh_dev else " A equipe toda pode responder de novo."),
+                )
+                return
+
+            # grava a posse ANTES de mexer nas permissões (que demoram): quem clicar
+            # logo depois já encontra o tíquete assumido
+            cargos_bloqueados = list(info.get("cargos_bloqueados", []))
+            info["assumido_por"] = usuario.id
+            info["cargos_bloqueados"] = cargos_bloqueados
             abertos[str(canal.id)] = info
             _salvar_abertos(abertos)
 
-            await interaction.response.send_message(
-                f"🔓 {interaction.user.mention} liberou o tíquete. A equipe toda pode responder de novo.",
+            # (só o super admin chega aqui com o tíquete já assumido por outro: retoma)
+            if assumido_por:
+                anterior = guild.get_member(assumido_por)
+                if anterior is not None:
+                    try:
+                        await canal.set_permissions(anterior, overwrite=None)
+                    except discord.HTTPException:
+                        pass
+
+            for alvo, overwrite in list(canal.overwrites.items()):
+                if isinstance(alvo, discord.Role) and overwrite.send_messages:
+                    try:
+                        await canal.set_permissions(alvo, overwrite=discord.PermissionOverwrite(
+                            view_channel=True, send_messages=False
+                        ))
+                        if alvo.id not in cargos_bloqueados:
+                            cargos_bloqueados.append(alvo.id)
+                    except discord.HTTPException:
+                        pass
+
+            try:
+                await canal.set_permissions(usuario, view_channel=True, send_messages=True)
+            except discord.HTTPException:
+                pass
+
+            abertos = _ler_abertos()
+            info = abertos.get(str(canal.id), info)
+            info["assumido_por"] = usuario.id
+            info["cargos_bloqueados"] = cargos_bloqueados
+            abertos[str(canal.id)] = info
+            _salvar_abertos(abertos)
+
+            await interaction.followup.send(
+                f"🙋 {usuario.mention} assumiu esse tíquete. Só ele vai poder responder por aqui agora "
+                f"(clica em **Assumir Tíquete** de novo pra liberar)."
             )
-            return
-
-
-        cargos_bloqueados = []
-        for alvo, overwrite in list(canal.overwrites.items()):
-            if isinstance(alvo, discord.Role) and overwrite.send_messages:
-                try:
-                    await canal.set_permissions(alvo, overwrite=discord.PermissionOverwrite(
-                        view_channel=True, send_messages=False
-                    ))
-                    cargos_bloqueados.append(alvo.id)
-                except discord.Forbidden:
-                    pass
-
-        try:
-            await canal.set_permissions(interaction.user, view_channel=True, send_messages=True)
-        except discord.Forbidden:
-            pass
-
-        info["assumido_por"] = interaction.user.id
-        info["cargos_bloqueados"] = cargos_bloqueados
-        abertos[str(canal.id)] = info
-        _salvar_abertos(abertos)
-
-        await interaction.response.send_message(
-            f"🙋 {interaction.user.mention} assumiu esse tíquete. Só ele vai poder responder por aqui agora "
-            f"(clica em **Assumir Tíquete** de novo pra liberar)."
-        )
-        print(f"[TICKET] 🙋 {interaction.user} assumiu o tíquete {canal.name}.")
+            print(f"[TICKET] 🙋 {usuario} assumiu o tíquete {canal.name}.")
 
 
     async def reabrir_ticket(self, interaction: discord.Interaction):
