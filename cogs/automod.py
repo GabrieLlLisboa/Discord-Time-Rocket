@@ -36,12 +36,25 @@ IDS_EXPULSAO_AUTOMATICA = set()
 # IDs de canais onde qualquer pessoa que mandar mensagem é expulsa automaticamente do servidor
 CANAIS_EXPULSAO_AUTOMATICA = {1539989820137275392}
 
+# Anti-spam / anti-flood: depois de pegar alguém, o bot apaga TUDO que a pessoa mandar
+# até ela ficar FLOOD_CASTIGO_SEGUNDOS sem mandar nada (cada mensagem apagada renova
+# esse tempo). Sem isso a pessoa voltava a "zerar" a contagem e passavam 2 de cada 3.
+FLOOD_CASTIGO_SEGUNDOS = 8
+
+# Mensagens iguais seguidas só contam como flood se forem enviadas dentro dessa janela
+# (configurável em /automod limite -> anti_flood_janela). Antes não tinha limite de
+# tempo: "ok", "ok", "ok" com uma hora de diferença virava flood.
+FLOOD_JANELA_PADRAO = 30
+
 
 class Automod(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-        self.historico_msgs: dict[tuple[int, int], deque] = defaultdict(lambda: deque(maxlen=15))
+        # (momento, texto_normalizado, id_canal, id_mensagem) — só ids, não guarda a mensagem inteira
+        self.historico_msgs: dict[tuple[int, int], deque] = defaultdict(lambda: deque(maxlen=60))
+        # (servidor, usuário) -> até quando tudo que a pessoa mandar é apagado (castigo do flood/spam)
+        self.castigo_ate: dict[tuple[int, int], float] = {}
 
 
     def _imune(self, membro: discord.Member, cfg_mod: dict) -> bool:
@@ -53,6 +66,26 @@ class Automod(commands.Cog):
             return True
         cargos_imunes = set(cfg_mod.get("cargos_imunes_automod", []) + cfg_mod.get("cargos_staff", []))
         return any(r.id in cargos_imunes for r in membro.roles)
+
+    async def _apagar_ids(self, canal_id: int, ids: list[int]):
+        """Apaga várias mensagens de uma vez (uma chamada só, bem mais rápido que uma a uma);
+        se o Discord recusar (mensagem velha, já apagada...), tenta uma por uma."""
+        canal = self.bot.get_channel(canal_id)
+        if canal is None or not ids:
+            return
+        try:
+            if len(ids) >= 2:
+                await canal.delete_messages([discord.Object(id=i) for i in ids])
+            else:
+                await canal.get_partial_message(ids[0]).delete()
+            return
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException, AttributeError):
+            pass
+        for i in ids:
+            try:
+                await canal.get_partial_message(i).delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException, AttributeError):
+                pass
 
     async def _acao(self, message: discord.Message, motivo: str, gatilho: str, cfg_auto: dict):
         """Executa a ação configurada (apagar+avisar, timeout ou kick) e loga."""
@@ -158,6 +191,16 @@ class Automod(commands.Cog):
         chave = (message.guild.id, message.author.id)
         agora = time.time()
 
+        # Já foi pego por spam/flood agora há pouco? Apaga tudo em silêncio (sem novo aviso
+        # nem novo log a cada mensagem) até a pessoa parar.
+        castigo_ate = self.castigo_ate.get(chave)
+        if castigo_ate is not None:
+            if agora < castigo_ate:
+                self.castigo_ate[chave] = agora + FLOOD_CASTIGO_SEGUNDOS
+                await self._apagar_ids(message.channel.id, [message.id])
+                return
+            self.castigo_ate.pop(chave, None)
+
 
         if cfg.get("anti_phishing") and REGEX_PHISHING.search(conteudo):
             await self._acao(message, "Link/mensagem de phishing detectado", conteudo, cfg)
@@ -220,26 +263,53 @@ class Automod(commands.Cog):
                 return
 
 
+        norm = " ".join(conteudo.casefold().split())   # "A", "a " e "a" contam como a mesma mensagem
         historico = self.historico_msgs[chave]
-        historico.append((agora, conteudo))
+        intervalo = cfg.get("anti_spam_intervalo", 5)
+        janela_flood = cfg.get("anti_flood_janela", FLOOD_JANELA_PADRAO)
+
+        # esquece o que já saiu das janelas de tempo
+        while historico and agora - historico[0][0] > max(intervalo, janela_flood):
+            historico.popleft()
+        historico.append((agora, norm, message.channel.id, message.id))
+
+        motivo = None
+        rajada = []
 
         if cfg.get("anti_spam"):
-            intervalo = cfg.get("anti_spam_intervalo", 5)
             limite = cfg.get("anti_spam_limite", 5)
-            recentes = [t for t, _ in historico if agora - t <= intervalo]
+            recentes = [e for e in historico if agora - e[0] <= intervalo]
             if len(recentes) >= limite:
-                await self._acao(message, "Spam detectado (muitas mensagens em pouco tempo)", conteudo, cfg)
-                historico.clear()
-                return
+                motivo = "Spam detectado (muitas mensagens em pouco tempo)"
+                rajada = recentes
 
-        if cfg.get("anti_flood"):
+        if motivo is None and cfg.get("anti_flood") and norm:
             limite_flood = cfg.get("anti_flood_limite", 3)
-            if len(historico) >= limite_flood:
-                ultimas = list(historico)[-limite_flood:]
-                if len({c for _, c in ultimas}) == 1 and conteudo.strip():
-                    await self._acao(message, "Flood detectado (mensagens repetidas)", conteudo, cfg)
-                    historico.clear()
-                    return
+            ultimas = list(historico)[-limite_flood:]
+            if (
+                len(ultimas) >= limite_flood
+                and all(agora - e[0] <= janela_flood for e in ultimas)
+                and len({e[1] for e in ultimas}) == 1
+            ):
+                motivo = "Flood detectado (mensagens repetidas)"
+                rajada = ultimas
+
+        if motivo is not None:
+            # marca o castigo ANTES de qualquer await: as mensagens que chegarem enquanto o
+            # bot ainda está apagando já caem na regra do castigo lá em cima
+            self.castigo_ate[chave] = agora + FLOOD_CASTIGO_SEGUNDOS
+            historico.clear()
+
+            # apaga também as mensagens ANTERIORES da rajada (antes só a última era apagada)
+            por_canal = defaultdict(list)
+            for _, _, canal_id, msg_id in rajada:
+                if msg_id != message.id:
+                    por_canal[canal_id].append(msg_id)
+            for canal_id, ids in por_canal.items():
+                await self._apagar_ids(canal_id, ids)
+
+            await self._acao(message, f"{motivo} — {len(rajada)} mensagem(ns) removida(s)", conteudo, cfg)
+            return
 
 
     automod_group = app_commands.Group(name="automod", description="Configurações do sistema de AutoMod.",
@@ -251,7 +321,7 @@ class Automod(commands.Cog):
         linhas = [
             f"**Ativo:** {'✅' if cfg['ativo'] else '❌'}",
             f"**Anti-spam:** {'✅' if cfg['anti_spam'] else '❌'} ({cfg['anti_spam_limite']} msgs / {cfg['anti_spam_intervalo']}s)",
-            f"**Anti-flood:** {'✅' if cfg['anti_flood'] else '❌'} ({cfg['anti_flood_limite']} repetidas)",
+            f"**Anti-flood:** {'✅' if cfg['anti_flood'] else '❌'} ({cfg['anti_flood_limite']} repetidas em {cfg.get('anti_flood_janela', FLOOD_JANELA_PADRAO)}s)",
             f"**Anti-links:** {'✅' if cfg['anti_links'] else '❌'}",
             f"**Anti-convites:** {'✅' if cfg['anti_convites'] else '❌'}",
             f"**Anti-CAPS:** {'✅' if cfg['anti_caps'] else '❌'} ({cfg['anti_caps_percentual']}%)",
@@ -323,6 +393,7 @@ class Automod(commands.Cog):
         app_commands.Choice(name="Limite de mensagens (anti-spam)", value="anti_spam_limite"),
         app_commands.Choice(name="Intervalo em segundos (anti-spam)", value="anti_spam_intervalo"),
         app_commands.Choice(name="Repetições seguidas (anti-flood)", value="anti_flood_limite"),
+        app_commands.Choice(name="Janela em segundos (anti-flood)", value="anti_flood_janela"),
         app_commands.Choice(name="Percentual de CAPS", value="anti_caps_percentual"),
         app_commands.Choice(name="Limite de menções", value="anti_mencoes_limite"),
         app_commands.Choice(name="Limite de emojis", value="anti_emojis_limite"),

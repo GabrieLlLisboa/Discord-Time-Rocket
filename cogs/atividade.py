@@ -6,7 +6,9 @@ from datetime import datetime, timedelta, timezone
 
 from cogs.players import CARGOS as _CARGOS_JOGADORES
 from cogs.json_store import ler_json, salvar_json
-from cogs.atividade_incentivos import MENSAGENS_INCENTIVO, MENSAGENS_MARCANDO, MENSAGENS_CHAT_PARADO
+from cogs.atividade_incentivos import (
+    MENSAGENS_INCENTIVO, MENSAGENS_MARCANDO, MENSAGENS_CHAT_PARADO, MENSAGENS_CHAT_PARADO_SERIES,
+)
 
 RANKS_ORDENADOS = [c for c in _CARGOS_JOGADORES if c["secao"] == "rank"]
 RANK_IDS_SET = {c["id"] for c in RANKS_ORDENADOS}
@@ -39,11 +41,15 @@ INCENTIVO_CHANCE_MARCAR = 0.6
 MARCACAO_COOLDOWN_DIAS = 3
 
 # Chat parado: se ninguém mandar mensagem no canal acima por CHAT_PARADO_MINUTOS,
-# o bot manda uma das 45 mensagens de MENSAGENS_CHAT_PARADO (mesmo horário do
+# o bot manda uma das mensagens de MENSAGENS_CHAT_PARADO (45 de papo solto) ou de
+# MENSAGENS_CHAT_PARADO_SERIES (25 sobre as séries do pessoal) (mesmo horário do
 # incentivo, só entre INCENTIVO_HORA_INICIO e INCENTIVO_HORA_FIM). REGRA: o bot
 # NUNCA manda se a última mensagem do canal já é dele (nem esta, nem o incentivo
 # dos inativos): ele espera alguém falar antes de mandar de novo.
 CHAT_PARADO_MINUTOS = 30
+# todas juntas: as de papo solto primeiro, as de séries depois (a ordem importa pro
+# controle de 'já usadas', então só acrescente no fim)
+MENSAGENS_CHAT_COMPLETAS = MENSAGENS_CHAT_PARADO + MENSAGENS_CHAT_PARADO_SERIES
 CHAT_PARADO_PATH = "data/atividade_chat_parado.json"
 
 
@@ -478,16 +484,16 @@ class Atividade(commands.Cog):
 
         # sorteia sem repetir até passar pelas 45 (e sem repetir a última ao recomeçar)
         estado = ler_json(CHAT_PARADO_PATH, dict)
-        usadas = [i for i in estado.get("usadas", []) if isinstance(i, int) and 0 <= i < len(MENSAGENS_CHAT_PARADO)]
-        livres = [i for i in range(len(MENSAGENS_CHAT_PARADO)) if i not in usadas]
+        usadas = [i for i in estado.get("usadas", []) if isinstance(i, int) and 0 <= i < len(MENSAGENS_CHAT_COMPLETAS)]
+        livres = [i for i in range(len(MENSAGENS_CHAT_COMPLETAS)) if i not in usadas]
         if not livres:
             ultima_usada = usadas[-1] if usadas else None
             usadas = []
-            livres = [i for i in range(len(MENSAGENS_CHAT_PARADO)) if i != ultima_usada]
+            livres = [i for i in range(len(MENSAGENS_CHAT_COMPLETAS)) if i != ultima_usada]
         indice = random.choice(livres)
 
         try:
-            msg = await canal.send(MENSAGENS_CHAT_PARADO[indice], allowed_mentions=discord.AllowedMentions.none())
+            msg = await canal.send(MENSAGENS_CHAT_COMPLETAS[indice], allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException as e:
             print(f"[ATIVIDADE] ⚠️ Erro ao enviar mensagem de chat parado: {e}")
             return

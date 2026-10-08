@@ -135,3 +135,38 @@ MENSAGENS_CHAT_PARADO: list[str] = [
 ]
 
 assert len(MENSAGENS_CHAT_PARADO) == 45, "precisa ter exatamente 45 mensagens"
+
+
+# Mensagens do chat parado sobre as SÉRIES que o pessoal assiste (The Walking Dead,
+# Breaking Bad, The Mentalist, Dexter, The End of the F***ing World). Entram no mesmo
+# sorteio das de cima. Sem spoilers; os asteriscos do título vão escapados
+# com barra (\\*, dentro da string) pro Discord não transformar em itálico. Pode editar/acrescentar à vontade.
+MENSAGENS_CHAT_PARADO_SERIES: list[str] = [
+    "🧟 The Walking Dead: qual seria o seu plano pra sobreviver no apocalipse zumbi? Vale tudo, menos 'eu me escondo e pronto'!",
+    "🏹 Curiosidade: o Daryl Dixon não existe nos quadrinhos de The Walking Dead, foi criado só pra série e virou queridinho do público. Time Daryl aqui?",
+    "🦇 Vilão mais assustador de The Walking Dead: Governador, Negan ou Alpha? Vota aí!",
+    "🧠 Uma coisa que The Walking Dead deixa bem claro: no apocalipse, o maior perigo quase sempre são as pessoas, não os zumbis. Concordam?",
+    "🧪 Breaking Bad: time Walter White ou time Jesse Pinkman? Defendam o seu lado!",
+    "🍕 A pizza jogada no telhado é uma das cenas mais icônicas de Breaking Bad. Qual é a SUA cena favorita da série?",
+    "🏆 O episódio 'Ozymandias' de Breaking Bad costuma aparecer entre os melhores episódios de série de todos os tempos. Quem concorda?",
+    "⚖️ Quem já assistiu Better Call Saul, o spin-off de Breaking Bad? Tem gente que diz que é tão bom quanto a série original. Vale a maratona?",
+    "🔍 The Mentalist: o Patrick Jane finge ser vidente, mas na real só observa tudo ao redor. Qual foi o caso que mais te impressionou?",
+    "🍵 O Patrick Jane vive de chá e cochilo no sofá do escritório e mesmo assim resolve tudo. Esse é o tipo de produtividade que eu respeito.",
+    "🔴 The Mentalist: alguém aqui chegou a chutar quem era o Red John antes da revelação? Sem spoiler, hein!",
+    "🕵️ Time Jane ou time Lisbon em The Mentalist? Os dois juntos resolvem tudo, mas quem rouba a cena?",
+    "🩸 Dexter: o Código do Harry faz sentido pra vocês ou o Dexter só tava justificando o que gostava de fazer? Debate liberado!",
+    "🔪 A 4ª temporada de Dexter, com o Trinity Killer, é citada por muita gente como a melhor da série. Concordam? (sem spoiler!)",
+    "📺 Dexter é baseado nos livros do Jeff Lindsay, e a série ficou famosa pela abertura com a rotina matinal dele. Quem nunca reparou em cada detalhe?",
+    "🎬 O que vocês acharam do final original de Dexter? E do Dexter: New Blood? Quero ouvir as opiniões!",
+    "🎸 The End of the F\\*\\*\\*ing World tem uma trilha sonora incrível, feita pelo Graham Coxon, ex-guitarrista do Blur. Quem reparou?",
+    "⏱️ The End of the F\\*\\*\\*ing World tem episódios de uns 20 minutos, dá pra maratonar a série inteira em um dia. Quem já fez isso?",
+    "🖤 James ou Alyssa: qual dos dois de The End of the F\\*\\*\\*ing World você mais entende? A série mistura comédia e drama sombrio como poucas.",
+    "📚 The End of the F\\*\\*\\*ing World nasceu de uma HQ do Charles Forsman. Alguém já leu? Vale a pena?",
+    "🍿 Ranking sem dó: The Walking Dead, Breaking Bad, The Mentalist, Dexter e The End of the F\\*\\*\\*ing World. Qual é o seu top 1?",
+    "🚗 Montando o time de Rocket League com personagens das séries: Walter White, Rick Grimes, Patrick Jane, Dexter ou Daryl? Quem vocês escolhem pro 3v3?",
+    "🛋️ Fim de semana chegando: qual dessas séries vocês assistiriam do zero de novo? Breaking Bad, Dexter, The Mentalist, The Walking Dead ou The End of the F\\*\\*\\*ing World?",
+    "🤯 Qual série fez você pensar 'só mais um episódio' e quando viu já era de madrugada?",
+    "🎞️ Qual a última série que vocês maratonaram e valeu muito a pena? Indica aí pra galera!",
+]
+
+assert len(MENSAGENS_CHAT_PARADO_SERIES) == 25, "precisa ter exatamente 25 mensagens de séries"
