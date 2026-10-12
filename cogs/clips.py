@@ -160,6 +160,8 @@ def eh_arquivo_video(nome: str, content_type: Optional[str]) -> bool:
         return True
     return (nome or "").lower().endswith(EXTENSOES_VIDEO)
 
+    
+
 
 def validar_envio(conteudo: str, anexos: list, tem_sticker: bool = False) -> Optional[str]:
     """Devolve None se a mensagem é um envio válido, ou o motivo da recusa.
@@ -176,10 +178,20 @@ def validar_envio(conteudo: str, anexos: list, tem_sticker: bool = False) -> Opt
     texto = (conteudo or "").strip()
     if len(texto) > MAX_LEGENDA:
         return f"A legenda pode ter no máximo **{MAX_LEGENDA} caracteres**."
-    if re.search(r"https?://|discord\.gg/|www\.", texto, re.IGNORECASE):
+    if contem_link(texto):
         return "Links não são permitidos — envie o **arquivo** do vídeo."
     return None
 
+def contem_link(texto: str) -> bool:
+    """Detecta URLs, com ou sem protocolo (ex.: https://medal.tv/x ou medal.tv/x)."""
+    if not texto:
+        return False
+    return bool(re.search(
+        r"https?://|discord\.gg/|www\."
+        r"|\b[\w-]+\.(?:tv|com|net|org|gg|io|br|co|me|app|xyz|link|fm|live|club|video|to|cc|dev|games|game|stream|site|online|shop|store|tech|edu|gov|info|biz)\b",
+        texto,
+        re.IGNORECASE,
+    ))
 
 def escolher_finalistas(candidatos: dict, votos: dict, limite: int = MAX_FINALISTAS) -> list:
     """Top `limite` clips por voto, no máximo 1 por autor (o melhor de cada).
@@ -343,8 +355,9 @@ class Clips(commands.Cog):
             )
             return
 
-        if motivo:
-            if staff:  # staff pode conversar no canal
+        i        if motivo:
+            # Staff pode conversar no canal, mas links continuam proibidos.
+            if staff and not contem_link(message.content):
                 self.agendar_rodape()
                 return
             await self._rejeitar(message, motivo)
