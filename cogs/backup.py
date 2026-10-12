@@ -27,6 +27,7 @@ FILES = {
     "anuncios_config":  "data/anuncios_config.json",
     "loja":             "data/loja.json",
     "conversas_pv":     "data/conversas_pv.json",
+    "clips":            "data/clips.json",
 }
 
 os.makedirs(DATA_DIR, exist_ok=True)

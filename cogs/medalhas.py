@@ -43,6 +43,11 @@ MEDALHAS = [
     {"id": "lenda_do_chat",     "emoji": "📢",  "nome": "Lenda do Chat",        "descricao": "Mande 2.000 mensagens no servidor.",  "criterio": _criterio("mensagens_totais", 2000)},
     {"id": "membro_fiel",       "emoji": "⏳",  "nome": "Membro Fiel",          "descricao": "Fique 6 meses no servidor.",          "criterio": _criterio("dias_no_servidor", 180)},
     {"id": "veterano_do_clube", "emoji": "🏛️", "nome": "Veterano do Clube",    "descricao": "Fique 1 ano no servidor.",            "criterio": _criterio("dias_no_servidor", 365)},
+    # Medalhas concedidas por EVENTO pelo cogs/clips.py (Clip do Mês) — aqui só
+    # ficam registradas pra aparecerem no /medalhas; o critério nunca dispara sozinho.
+    {"id": "melhor_clip_mes",   "emoji": "🎬",  "nome": "Melhor Clip (Mês)",    "descricao": "Vença o Clip do Mês no canal de clips.", "criterio": lambda ctx: False},
+    {"id": "finalista_clips",   "emoji": "🏅",  "nome": "Finalista de Clips",   "descricao": "Chegue ao top 3 do Clip do Mês.",        "criterio": lambda ctx: False},
+    {"id": "clipador",          "emoji": "🎞️", "nome": "Clipador",             "descricao": "Envie 10 clips no canal de clips.",      "criterio": lambda ctx: False},
 ]
 MEDALHAS_POR_ID = {m["id"]: m for m in MEDALHAS}
 

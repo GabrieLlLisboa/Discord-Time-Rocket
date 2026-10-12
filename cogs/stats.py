@@ -142,6 +142,27 @@ class Stats(commands.Cog):
         embed.add_field(name="\u200b", value="```╔══════════  ⭐  DESTAQUES  ══════════╗```", inline=False)
         embed.add_field(name="\u200b", value=destaques_txt, inline=False)
 
+        # clips: medalhas e números do concurso "Clip do Mês" (cogs/clips.py)
+        clips = dados.get("clips") or {}
+        if clips.get("vitorias") or clips.get("finais") or clips.get("enviados"):
+            nomes_medalhas_clips = {
+                "melhor_clip_mes": "🎬 Melhor Clip (Mês)",
+                "finalista_clips": "🏅 Finalista de Clips",
+                "clipador":        "🎞️ Clipador",
+            }
+            medalhas_clips = [n for mid, n in nomes_medalhas_clips.items() if mid in dados.get("medalhas", [])]
+            embed.add_field(name="\u200b", value="```╔══════════  🎬  CLIPS  ══════════╗```", inline=False)
+            if medalhas_clips:
+                embed.add_field(name="🎖️  Medalhas", value="\n".join(medalhas_clips), inline=False)
+            embed.add_field(name="🏆  Melhor Clip (Mês)", value=f"`×{clips.get('vitorias', 0)}`", inline=True)
+            embed.add_field(
+                name="🔥  Sequência",
+                value=f"`{clips.get('sequencia_atual', 0)}` (recorde `{clips.get('melhor_sequencia', 0)}`)",
+                inline=True,
+            )
+            embed.add_field(name="🏅  Finais", value=f"`{clips.get('finais', 0)}`", inline=True)
+            embed.add_field(name="🎞️  Clips enviados", value=f"`{clips.get('enviados', 0)}`", inline=True)
+
         # staff da whitelist: quantas whitelists já aprovou/recusou
         if any(r.id == CARGO_STAFF_WHITELIST_ID for r in membro.roles):
             aprovadas, recusadas = obter_stats_whitelist(membro.id)
