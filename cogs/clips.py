@@ -70,7 +70,7 @@ HORA_RESULTADO = 18           # hora (Brasília) do resultado
 MIN_CLIPADOR = 10             # clips enviados pra medalha "Clipador"
 RODAPE_ATRASO = 2.0           # segundos de espera antes de refazer o rodapé
 MAX_TENTATIVAS_PASSO = 3
-AUDITORIA_LIMITE = 200        # quantas mensagens recentes a auditoria confere
+AUDITORIA_LIMITE = 500        # quantas mensagens recentes a auditoria confere
 AUDITORIA_CADA_TICKS = 4      # a cada 4 ticks de 30s = a cada 2 minutos
 
 ARQUIVO = "data/clips.json"
@@ -344,7 +344,7 @@ class Clips(commands.Cog):
             if ciclo:
                 await self._processar_mensagem(message, ciclo)
 
-    async def _processar_mensagem(self, message: discord.Message, ciclo: dict) -> str:
+    async def _processar_mensagem(self, message: discord.Message, ciclo: dict, adotar: bool = False) -> str:
         """Valida uma mensagem do canal. Devolve 'aceito' (virou candidato e
         recebeu o 🚀), 'rejeitado' (apagada) ou 'ignorado' (staff conversando)."""
         staff = self._eh_staff(message.author) and self.cfg.get("staff_livre", True)
@@ -375,7 +375,7 @@ class Clips(commands.Cog):
             c for c in ciclo["candidatos"].values()
             if c["autor_id"] == autor_id and not c.get("removido")
         ]
-        if len(ativos) >= MAX_CLIPS_POR_PESSOA:
+        if len(ativos) >= MAX_CLIPS_POR_PESSOA and not adotar:  # clip antigo (de antes do ciclo) nunca é apagado pelo limite
             await self._rejeitar(
                 message,
                 f"Você já enviou **{MAX_CLIPS_POR_PESSOA} clips** neste ciclo (limite por pessoa). "
@@ -588,16 +588,18 @@ class Clips(commands.Cog):
         candidato = ciclo["candidatos"].get(mid)
         eh_candidato = bool(candidato) and not candidato.get("removido")
 
-        # 1) mensagem de membro que o bot nunca processou
-        if candidato is None and not m.author.bot and mid != campeao and m.created_at >= inicio:
-            status = await self._processar_mensagem(m, ciclo)
+        # 1) mensagem de membro que o bot nunca processou (inclusive clips que
+        #    já estavam no canal antes do ciclo abrir: são adotados)
+        antigo_ignorado = bool(ciclo.get("ignorar_antes_de")) and m.created_at < inicio
+        if candidato is None and not m.author.bot and mid != campeao and not antigo_ignorado:
+            status = await self._processar_mensagem(m, ciclo, adotar=m.created_at < inicio)
             if status != "ignorado":
                 resumo["mensagens_tratadas"] += 1
             if status in ("rejeitado", "aceito"):
                 return  # apagada, ou já recebeu o 🚀
 
-        if not (eh_candidato or mid == campeao or m.created_at >= inicio):
-            return  # mensagem antiga, de antes deste ciclo: não mexe
+        if not (eh_candidato or mid == campeao):
+            return  # mensagem do bot, da staff conversando etc.: não mexe
 
         # 2) clip concorrendo sem o 🚀 do bot
         valido = self._voto_valido(ciclo, EMOJI_VOTO, mid)
@@ -1571,6 +1573,84 @@ class Clips(commands.Cog):
         await interaction.response.send_message(
             "✅ Staff **livre** pra conversar no canal." if ativo
             else "✅ Agora **todo mundo**, inclusive a staff, só pode mandar vídeo no canal de clips.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="reiniciar-ciclo",
+        description="Reenvia as regras no canal de clips e recomeça o ciclo do Clip do Mês.",
+    )
+    @app_commands.describe(
+        manter_clips="Manter os clips que já estão no canal (o bot põe o 🚀 neles). Não = só recomeça o ciclo",
+        mencionar_everyone="Marcar @everyone avisando que o canal está aberto",
+    )
+    async def reiniciar_cmd(
+        self,
+        interaction: discord.Interaction,
+        manter_clips: bool = True,
+        mencionar_everyone: bool = False,
+    ):
+        if not await self._exigir_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        canal = self._canal()
+        if canal is None:
+            await interaction.followup.send(
+                "❌ Não encontrei o canal de clips. Veja `/clips diagnostico`.", ephemeral=True
+            )
+            return
+
+        avisos = []
+        async with self._lock:
+            antigo = self.ciclo
+            campeao = None
+            if antigo and self._ciclo_do_canal_atual():
+                campeao = antigo.get("campeao_anterior_id")
+                # destranca o canal se estava na fase final
+                try:
+                    await self._destravar_canal(canal, antigo)
+                except Exception as e:
+                    avisos.append(f"⚠️ Não consegui destravar o canal ({e}).")
+                for chave in ("cabecalho_id", "rodape_id", "final_msg_id"):
+                    await self._api_deletar(canal, antigo.get(chave))
+            self.estado["ciclo"] = None
+            self._salvar()
+
+            try:
+                ciclo = self._novo_ciclo(agora_utc(), campeao_anterior_id=campeao)
+                self.estado["ciclo"] = ciclo
+                msg = await canal.send(
+                    "@everyone 🎬 **O ciclo de clips foi reiniciado!** Já podem mandar seus clips! 🚀"
+                    if mencionar_everyone else None,
+                    embed=self._embed_ciclo(ciclo),
+                    allowed_mentions=discord.AllowedMentions(everyone=mencionar_everyone),
+                )
+                ciclo["cabecalho_id"] = msg.id
+                self._salvar()
+            except discord.HTTPException as e:
+                self.estado["ciclo"] = None
+                self._salvar()
+                await interaction.followup.send(f"❌ Não consegui postar no canal de clips: {e}", ephemeral=True)
+                return
+            self._rejeitadas.clear()
+            if not manter_clips:
+                # sem adotar: só vale o que for enviado daqui pra frente
+                ciclo["ignorar_antes_de"] = ciclo["inicio"]
+            self._salvar()
+
+        r = {"reacoes_adicionadas": 0, "mensagens_tratadas": 0, "reacoes_removidas": 0, "erros": 0}
+        if manter_clips:
+            r = await self._auditar_canal()
+        self.agendar_rodape()
+        validos = sum(1 for c in (self.ciclo or {}).get("candidatos", {}).values() if not c.get("removido"))
+        await interaction.followup.send(
+            f"✅ **Ciclo reiniciado** em {canal.mention} — regras reenviadas.\n"
+            f"• Envios até {discord.utils.format_dt(_dt(ciclo['fim_aberto']), 'F')}\n"
+            f"• Resultado em {discord.utils.format_dt(_dt(ciclo['fim_final']), 'F')}\n"
+            + (f"• {validos} clip(s) do canal entraram no ciclo ({r['reacoes_adicionadas']} {EMOJI_VOTO} colocados, "
+               f"{r['mensagens_tratadas']} mensagens tratadas).\n" if manter_clips else "")
+            + ("\n".join(avisos) if avisos else "")
+            + (f"\n⚠️ A auditoria teve {r['erros']} erro(s) — veja `/clips diagnostico`." if r["erros"] else ""),
             ephemeral=True,
         )
 

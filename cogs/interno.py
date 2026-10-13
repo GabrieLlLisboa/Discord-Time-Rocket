@@ -1,243 +1,121 @@
 import asyncio
-import itertools
-import random
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 
+from cogs import mod_utils as mu
 from cogs.backup import ler, salvar
+from cogs.friendly import (
+    AMISTOSOS_CHANNEL_ID,
+    CATEGORIA_VOZ_AMISTOSOS_ID,
+    DIAS_SEMANA,
+    _calcular_data_hora,
+    extrair_cargos_extras,
+    montar_ranks_display,
+    rank_info,
+)
 from cogs.json_store import ler_json, salvar_json
 from cogs.mod_utils import eh_super_admin_membro
-from cogs.players import CARGOS_RANK, STAFF_IDS
+from cogs.players import STAFF_IDS
 
 # ─────────────────────────────────────────────────────────────────────────
 #  Cog: Amistoso Interno
 #  Arquivo: cogs/interno.py
 #
-#  Competição interna do clube: 1v1, 2v2 e 3v3 entre os próprios membros,
-#  com MMR e tiers próprios (separados dos amistosos contra outros times,
-#  que continuam no cogs/friendly.py e cogs/resultados.py).
+#  Mesma lógica do /amistoso, mas entre os próprios membros do clube
+#  (1v1, 2v2 ou 3v3):
 #
-#  COMO FUNCIONA
-#   1. A staff roda /interno setup canal:#canal — o bot cria os cargos de
-#      tier e posta o painel de fila (botões 1v1 / 2v2 / 3v3).
-#   2. Os jogadores clicam no modo pra entrar na fila (dá pra estar em mais
-#      de uma fila ao mesmo tempo). Quando uma fila enche, o bot monta os
-#      dois times MAIS EQUILIBRADOS pelo MMR e abre o lobby: mensagem com
-#      os times, nome/senha da sala e uma thread só da partida.
-#   3. Depois do jogo, SÓ A STAFF registra o resultado (botões na mensagem
-#      da partida ou /interno resultado). O bot calcula o Elo, atualiza o
-#      /perfil e troca o cargo de tier de quem subiu/desceu.
-#   4. Errou o resultado? /interno desfazer reabre a partida.
+#   1. A staff usa  /interno modo:2v2 [dia] [horário] [ranks]  e o bot
+#      anuncia no canal de amistosos, com os botões Entrar / Sair.
+#   2. Os jogadores entram pelo botão. Os times se formam PELA ORDEM DE
+#      ENTRADA: os primeiros N são o Time 1 e os N seguintes, o Time 2.
+#   3. Quando lota, o bot cria um canal de texto privado e uma call pra
+#      cada time, e mostra os times, o nome e a senha da sala.
+#   4. Depois do jogo, a STAFF diz quem ganhou (botões no canal da partida
+#      ou /interno-resultado). O bot divulga o resultado, soma vitória/derrota
+#      no /perfil de cada um, leva todo mundo da call pro lobby e apaga os
+#      canais.
 #
-#  MMR / TIERS
-#   • Cada modo tem seu próprio MMR. Quem estreia começa com um MMR
-#     "semente" tirado do cargo de rank do clube (Platina 3 = 1000 ...
-#     Super Sonic Legend = 1900); sem cargo de rank começa em 1000.
-#   • Elo com média do time. K = 40 nas 10 primeiras partidas do modo, 24 depois.
-#   • O tier (cargo no Discord) só aparece depois de 5 partidas num modo e
-#     usa o MAIOR MMR do jogador entre os modos.
+#  Outros comandos da staff: /interno-cancelar e /interno-desfazer.
 #
-#  Dados: data/interno.json (fila, partidas, config) e, por jogador,
-#  data/perfis.json -> perfil["interno"][modo] = {mmr, jogos, vitorias, derrotas}.
+#  Dados: data/interno.json (partidas) e data/perfis.json -> perfil["interno"]
+#  [modo] = {vitorias, derrotas}. Não mexe nos números dos amistosos
+#  contra outros times.
 #
-#  PERMISSÕES DO BOT: Gerenciar Cargos (cargo do bot ACIMA dos cargos de tier),
-#  Enviar mensagens, Incorporar links, Criar threads públicas e Enviar
-#  mensagens em threads no canal do painel.
+#  PERMISSÕES DO BOT: Gerenciar Canais, Gerenciar Cargos/Permissões (pra criar
+#  canais privados), Mover Membros e Enviar Mensagens/Incorporar Links.
 # ─────────────────────────────────────────────────────────────────────────
 
 ARQUIVO = "data/interno.json"
 
 MODOS = {"1v1": 1, "2v2": 2, "3v3": 3}      # jogadores por time
-
-MMR_PADRAO = 1000
-PARTIDAS_CALIBRAGEM = 5        # partidas no modo pra aparecer o tier
-PARTIDAS_K_ALTO = 10
-K_ALTO = 40
-K_NORMAL = 24
-
-FILA_TIMEOUT_MIN = 60          # tira da fila quem ficou parado
-PARTIDA_EXPIRA_H = 24          # partida sem resultado é cancelada (sem mexer no MMR)
-
 EMOJI_TIME = {0: "🔵", 1: "🟠"}
-
-# (MMR mínimo, nome, emoji, cor) — do maior pro menor
-TIERS = [
-    (1900, "Lenda",      "🌌", 0x9B59B6),
-    (1700, "Mestre",     "🔥", 0xE74C3C),
-    (1500, "Elite",      "💠", 0x3498DB),
-    (1300, "Veterano",   "🛡️", 0x2ECC71),
-    (1100, "Competidor", "⚔️", 0xE67E22),
-    (0,    "Aspirante",  "🌱", 0x95A5A6),
-]
-
-# MMR inicial pelo cargo de rank do clube
-SEMENTE_TIER = {"Platina": 1000, "Diamante": 1200, "Champion": 1400, "Grand Champion": 1600}
-SEMENTE_SSL = 1900
-SEMENTE_DIVISAO = {3: 0, 2: 40, 1: 80}
+ATRASO_APAGAR_CANAIS = 3                    # segundos (igual ao /resultado do amistoso)
 
 
 # ═════════════════════════════════════════════════════════════════════════
 #  Funções puras (sem Discord) — fáceis de testar
 # ═════════════════════════════════════════════════════════════════════════
 
-def agora_utc() -> datetime:
-    return datetime.now(timezone.utc)
+def agora_str_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-def _iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).isoformat()
-
-
-def _dt(texto: str) -> datetime:
-    return datetime.fromisoformat(texto)
-
-
-def tier_para_mmr(mmr: int):
-    """(nome, emoji, cor) do tier de um MMR."""
-    for minimo, nome, emoji, cor in TIERS:
-        if mmr >= minimo:
-            return nome, emoji, cor
-    return TIERS[-1][1], TIERS[-1][2], TIERS[-1][3]
-
-
-def semente_por_nome_cargo(nome: str) -> Optional[int]:
-    """'Grand Champion 2' -> 1640; 'Super Sonic Legend' -> 1900; outro -> None."""
-    if nome == "Super Sonic Legend":
-        return SEMENTE_SSL
-    partes = nome.rsplit(" ", 1)
-    if len(partes) != 2 or partes[0] not in SEMENTE_TIER or not partes[1].isdigit():
-        return None
-    return SEMENTE_TIER[partes[0]] + SEMENTE_DIVISAO.get(int(partes[1]), 0)
-
-
-_NOME_RANK_POR_ID = {c["id"]: c["nome"] for c in CARGOS_RANK}
-
-
-def mmr_semente(membro) -> int:
-    melhor = None
-    for r in getattr(membro, "roles", []):
-        nome = _NOME_RANK_POR_ID.get(r.id)
-        if nome is None:
-            continue
-        s = semente_por_nome_cargo(nome)
-        if s is not None and (melhor is None or s > melhor):
-            melhor = s
-    return melhor if melhor is not None else MMR_PADRAO
-
-
-def balancear(jogadores: list, por_time: int):
-    """jogadores = [(id, mmr)] com 2*por_time itens -> (time1, time2) de ids,
-    escolhendo a divisão com a menor diferença de MMR total (sorteia entre
-    as empatadas, pra não repetir sempre os mesmos times)."""
-    total = sum(m for _, m in jogadores)
-    melhor_dif, melhores = None, []
-    for combo in itertools.combinations(range(len(jogadores)), por_time):
-        if 0 not in combo:  # evita contar a mesma divisão duas vezes (espelhada)
-            continue
-        a = sum(jogadores[i][1] for i in combo)
-        dif = abs(a - (total - a))
-        if melhor_dif is None or dif < melhor_dif:
-            melhor_dif, melhores = dif, [combo]
-        elif dif == melhor_dif:
-            melhores.append(combo)
-    combo = random.choice(melhores)
-    t1 = [jogadores[i][0] for i in combo]
-    t2 = [jogadores[i][0] for i in range(len(jogadores)) if i not in combo]
-    if random.random() < 0.5:
-        t1, t2 = t2, t1
-    return t1, t2
-
-
-def k_fator(jogos: int) -> int:
-    return K_ALTO if jogos < PARTIDAS_K_ALTO else K_NORMAL
-
-
-def calcular_deltas(times: list, mmr: dict, jogos: dict, vencedor: int) -> dict:
-    """Elo com média do time. times = [[ids], [ids]]; vencedor = 0 ou 1.
-    Devolve {id: delta}. Ganhar sempre dá pelo menos +1 e perder, pelo menos -1;
-    o MMR nunca fica abaixo de 0."""
-    ra = sum(mmr[u] for u in times[0]) / len(times[0])
-    rb = sum(mmr[u] for u in times[1]) / len(times[1])
-    esperado = [1 / (1 + 10 ** ((rb - ra) / 400)), 1 / (1 + 10 ** ((ra - rb) / 400))]
-    deltas = {}
-    for i, time in enumerate(times):
-        resultado = 1.0 if i == vencedor else 0.0
-        for u in time:
-            d = round(k_fator(jogos[u]) * (resultado - esperado[i]))
-            if d == 0:
-                d = 1 if resultado == 1.0 else -1
-            if mmr[u] + d < 0:
-                d = -mmr[u]
-            deltas[u] = d
-    return deltas
+def montar_times(jogadores: list, por_time: int):
+    """Times pela ORDEM DE ENTRADA: os primeiros `por_time` são o Time 1,
+    os seguintes são o Time 2."""
+    return list(jogadores[:por_time]), list(jogadores[por_time:por_time * 2])
 
 
 def estado_padrao() -> dict:
-    return {
-        "config": {"canal_id": None, "painel_msg_id": None, "cargos": {}},
-        "filas": {m: [] for m in MODOS},
-        "partidas": {},
-        "contador": 0,
-    }
+    return {"contador": 0, "partidas": {}}
 
 
 def carregar_estado() -> dict:
     bruto = ler_json(ARQUIVO, dict)
     estado = estado_padrao()
-    if not isinstance(bruto, dict):
-        return estado
-    for chave, valor in bruto.items():
-        if chave in ("config", "filas") and isinstance(valor, dict):
-            estado[chave].update(valor)
-        else:
-            estado[chave] = valor
-    for m in MODOS:
-        estado["filas"].setdefault(m, [])
+    if isinstance(bruto, dict):
+        estado["contador"] = int(bruto.get("contador", 0))
+        # ignora partidas de versões antigas do sistema (sem a lista de jogadores)
+        estado["partidas"] = {
+            k: p for k, p in (bruto.get("partidas") or {}).items()
+            if isinstance(p, dict) and "jogadores" in p
+        }
     return estado
 
 
-def todos_jogadores(partida: dict) -> list:
-    return [u for time in partida["times"] for u in time]
+def todos_jogadores(p: dict) -> list:
+    if p.get("times"):
+        return [u for time in p["times"] for u in time]
+    return list(p["jogadores"])
 
 
 # ═════════════════════════════════════════════════════════════════════════
-#  Views persistentes (botões continuam funcionando depois de reiniciar)
+#  Views persistentes (os botões continuam funcionando depois de reiniciar)
 # ═════════════════════════════════════════════════════════════════════════
 
-class PainelView(discord.ui.View):
+class EntrarView(discord.ui.View):
+    """Botões do anúncio. A partida é descoberta pelo ID da mensagem clicada."""
+
     def __init__(self, cog: "Interno"):
         super().__init__(timeout=None)
         self.cog = cog
 
-    @discord.ui.button(label="1v1", emoji="⚔️", style=discord.ButtonStyle.primary, custom_id="interno:fila:1v1", row=0)
-    async def entrar_1v1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.entrar_fila(interaction, "1v1")
+    @discord.ui.button(label="✅  Entrar", style=discord.ButtonStyle.success, custom_id="interno:entrar")
+    async def entrar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.clique_entrar(interaction)
 
-    @discord.ui.button(label="2v2", emoji="🤝", style=discord.ButtonStyle.primary, custom_id="interno:fila:2v2", row=0)
-    async def entrar_2v2(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.entrar_fila(interaction, "2v2")
-
-    @discord.ui.button(label="3v3", emoji="🚀", style=discord.ButtonStyle.primary, custom_id="interno:fila:3v3", row=0)
-    async def entrar_3v3(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.entrar_fila(interaction, "3v3")
-
-    @discord.ui.button(label="Sair das filas", emoji="🚪", style=discord.ButtonStyle.secondary, custom_id="interno:sair", row=1)
+    @discord.ui.button(label="🚪  Sair", style=discord.ButtonStyle.danger, custom_id="interno:sair")
     async def sair(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.sair_das_filas(interaction)
-
-    @discord.ui.button(label="Meu rank", emoji="📊", style=discord.ButtonStyle.secondary, custom_id="interno:rank", row=1)
-    async def meu_rank(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(embed=self.cog.embed_rank(interaction.user), ephemeral=True)
+        await self.cog.clique_sair(interaction)
 
 
 class ResultadoView(discord.ui.View):
-    """Botões da mensagem da partida. A partida é descoberta pelo ID da
-    mensagem clicada (igual ao padrão do cogs/whitelist.py)."""
+    """Botões da staff no canal da partida (a partida é descoberta pelo ID do canal)."""
 
     def __init__(self, cog: "Interno"):
         super().__init__(timeout=None)
@@ -261,26 +139,16 @@ class ResultadoView(discord.ui.View):
 # ═════════════════════════════════════════════════════════════════════════
 
 class Interno(commands.Cog):
-    interno = app_commands.Group(name="interno", description="Amistoso interno do clube (1v1, 2v2, 3v3).")
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.estado = carregar_estado()
         self._lock = asyncio.Lock()
 
     async def cog_load(self):
-        self.bot.add_view(PainelView(self))
+        self.bot.add_view(EntrarView(self))
         self.bot.add_view(ResultadoView(self))
-        self.tick.start()
-
-    def cog_unload(self):
-        self.tick.cancel()
 
     # ── atalhos ─────────────────────────────────────────────────────────
-    @property
-    def cfg(self) -> dict:
-        return self.estado["config"]
-
     def _salvar(self):
         salvar_json(ARQUIVO, self.estado)
 
@@ -291,258 +159,310 @@ class Interno(commands.Cog):
             return True
         return any(r.id in STAFF_IDS for r in membro.roles)
 
-    def _partida_aberta_de(self, uid: int) -> Optional[dict]:
+    def _canal_anuncio(self) -> Optional[discord.TextChannel]:
+        c = self.bot.get_channel(AMISTOSOS_CHANNEL_ID)
+        return c if isinstance(c, discord.TextChannel) else None
+
+    def _partida_por_msg(self, msg_id: int) -> Optional[dict]:
+        return next((p for p in self.estado["partidas"].values() if p.get("msg_id") == msg_id), None)
+
+    def _partida_por_canal(self, canal_id: int) -> Optional[dict]:
+        return next((p for p in self.estado["partidas"].values() if p.get("canal_id") == canal_id), None)
+
+    def _partida_em_andamento_de(self, uid: int) -> Optional[dict]:
         for p in self.estado["partidas"].values():
-            if p["status"] == "aberta" and uid in todos_jogadores(p):
+            if p["status"] == "andamento" and uid in todos_jogadores(p):
                 return p
         return None
 
-    def _canal(self) -> Optional[discord.TextChannel]:
-        cid = self.cfg.get("canal_id")
-        c = self.bot.get_channel(int(cid)) if cid else None
-        return c if isinstance(c, discord.TextChannel) else None
-
-    # ── perfil (MMR por modo) ───────────────────────────────────────────
+    # ── perfil: vitórias/derrotas por modo ──────────────────────────────
     @staticmethod
-    def _perfil(perfis: dict, uid: int, nome: str) -> dict:
+    def _stats_modo(perfis: dict, uid: int, modo: str, membro=None) -> dict:
         sid = str(uid)
         if sid not in perfis:
-            perfis[sid] = {"nome": nome, "amistosos": 0, "vitorias": 0, "derrotas": 0}
+            perfis[sid] = {
+                "nome": getattr(membro, "display_name", str(uid)),
+                "amistosos": 0, "vitorias": 0, "derrotas": 0,
+            }
         dados = perfis[sid]
         dados.setdefault("amistosos", 0)
         dados.setdefault("vitorias", 0)
         dados.setdefault("derrotas", 0)
-        dados.setdefault("interno", {})
-        return dados
-
-    def _dados_modo(self, perfis: dict, uid: int, modo: str, membro=None) -> dict:
-        nome = getattr(membro, "display_name", str(uid))
-        dados = self._perfil(perfis, uid, nome)
-        if modo not in dados["interno"]:
-            dados["interno"][modo] = {
-                "mmr": mmr_semente(membro) if membro is not None else MMR_PADRAO,
-                "jogos": 0, "vitorias": 0, "derrotas": 0,
-            }
-        return dados["interno"][modo]
-
-    @staticmethod
-    def tier_geral(perfis: dict, uid: int):
-        """Tier (nome, emoji, cor) pelo maior MMR entre os modos já calibrados, ou None."""
-        interno = perfis.get(str(uid), {}).get("interno", {})
-        calibrados = [d["mmr"] for d in interno.values() if isinstance(d, dict) and d.get("jogos", 0) >= PARTIDAS_CALIBRAGEM]
-        return tier_para_mmr(max(calibrados)) if calibrados else None
+        interno = dados.setdefault("interno", {})
+        d = interno.setdefault(modo, {})
+        d.setdefault("vitorias", 0)
+        d.setdefault("derrotas", 0)
+        return d
 
     # ═════════════════════════════════════════════════════════════════════
-    #  Painel e fila
+    #  Anúncio
     # ═════════════════════════════════════════════════════════════════════
-    def _embed_painel(self) -> discord.Embed:
-        emb = discord.Embed(
-            title="⚔️ Amistoso Interno — Fila",
-            description=(
-                "Clique no modo pra entrar na fila. Quando completar, o bot monta os **times equilibrados "
-                "pelo MMR** e abre o lobby com uma thread só da partida.\n"
-                "O resultado é registrado pela **staff** e atualiza seu MMR, seu tier e o `/perfil`."
-            ),
-            color=0xD4A843,
-            timestamp=agora_utc(),
-        )
-        for modo, por_time in MODOS.items():
-            fila = self.estado["filas"][modo]
-            lista = "\n".join(f"▸ <@{e['id']}>" for e in fila) or "_ninguém na fila_"
-            emb.add_field(name=f"{modo} — {len(fila)}/{por_time * 2}", value=lista, inline=True)
-        abertas = sum(1 for p in self.estado["partidas"].values() if p["status"] == "aberta")
-        emb.set_footer(text=f"Partidas em andamento: {abertas} • Fila expira após {FILA_TIMEOUT_MIN} min parado")
+    def _linhas_time(self, p: dict, idx: int) -> str:
+        por_time = p["por_time"]
+        if p.get("times"):
+            jogadores = p["times"][idx]
+        else:
+            jogadores = p["jogadores"][idx * por_time:(idx + 1) * por_time]
+        linhas = [f"  ▸  <@{u}>" for u in jogadores]
+        linhas += ["  ▸  _vaga livre_"] * (por_time - len(jogadores))
+        return "\n".join(linhas)
+
+    def _embed_anuncio(self, p: dict) -> discord.Embed:
+        status = p["status"]
+        titulo = {
+            "aberta": f"⚔️  AMISTOSO INTERNO — {p['modo']}",
+            "andamento": f"🎮  INTERNO #{p['id']} — {p['modo']} • em andamento",
+            "finalizada": f"✅  INTERNO #{p['id']} — {p['modo']} • finalizado",
+            "cancelada": f"🚫  INTERNO #{p['id']} — {p['modo']} • cancelado",
+        }.get(status, f"INTERNO #{p['id']}")
+        cor = {"aberta": 0xD4A843, "andamento": 0xE67E22, "finalizada": 0x2ECC71, "cancelada": 0x95A5A6}.get(status, 0xD4A843)
+        emb = discord.Embed(title=titulo, color=cor, timestamp=datetime.now(timezone.utc))
+        emb.add_field(name="🎮  Modo", value=f"**{p['modo']}**", inline=True)
+        emb.add_field(name="📅  Data / Hora", value=f"**{p['data_hora']}**", inline=True)
+        if p.get("rank_display"):
+            emb.add_field(name="🏅  Rank", value=p["rank_display"], inline=True)
+        if p.get("info"):
+            emb.add_field(name="📝  Informações", value=p["info"], inline=False)
+
+        for i in (0, 1):
+            vencedor = " 🏆" if status == "finalizada" and p.get("vencedor") == i else ""
+            ocupados = len(p["times"][i]) if p.get("times") else len(p["jogadores"][i * p["por_time"]:(i + 1) * p["por_time"]])
+            emb.add_field(
+                name=f"{EMOJI_TIME[i]}  Time {i + 1}{vencedor}  `({ocupados}/{p['por_time']})`",
+                value=self._linhas_time(p, i),
+                inline=True,
+            )
+
+        if status == "aberta":
+            total = p["por_time"] * 2
+            emb.add_field(
+                name="​",
+                value=(
+                    f"{p.get('mencao', '')}\n" if p.get("mencao") else ""
+                ) + (
+                    f"Clique em **✅ Entrar**. Os times se formam **pela ordem de entrada**: os "
+                    f"{p['por_time']} primeiros são o Time 1 e os {p['por_time']} seguintes, o Time 2.\n"
+                    f"Quando lotar ({len(p['jogadores'])}/{total}), o bot cria o canal e a call da partida."
+                ),
+                inline=False,
+            )
+        elif status == "andamento":
+            emb.add_field(
+                name="​",
+                value=f"📁 Canal: <#{p['canal_id']}>\n🔊 Calls: " + " • ".join(f"<#{v}>" for v in p["voz_ids"]),
+                inline=False,
+            )
+        emb.set_footer(text=f"Interno #{p['id']} • anunciado por {p.get('criada_por_nome', 'staff')}")
         return emb
 
-    async def _atualizar_painel(self, guild: Optional[discord.Guild] = None):
-        canal = self._canal()
-        mid = self.cfg.get("painel_msg_id")
-        if canal is None or not mid:
+    async def _atualizar_anuncio(self, p: dict):
+        canal = self._canal_anuncio()
+        if canal is None or not p.get("msg_id"):
             return
         try:
-            await canal.get_partial_message(int(mid)).edit(embed=self._embed_painel())
+            await canal.get_partial_message(int(p["msg_id"])).edit(
+                embed=self._embed_anuncio(p),
+                view=EntrarView(self) if p["status"] == "aberta" else None,
+            )
         except discord.HTTPException as e:
-            print(f"[INTERNO] ⚠️ Não consegui atualizar o painel: {e}")
+            print(f"[INTERNO] ⚠️ Não consegui atualizar o anúncio do interno #{p['id']}: {e}")
 
-    async def entrar_fila(self, interaction: discord.Interaction, modo: str):
+    # ═════════════════════════════════════════════════════════════════════
+    #  Entrar / sair
+    # ═════════════════════════════════════════════════════════════════════
+    async def clique_entrar(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        guild, membro = interaction.guild, interaction.user
-        if guild is None:
-            return
-        formada = None
+        membro, guild = interaction.user, interaction.guild
+        iniciou = None
         async with self._lock:
-            aberta = self._partida_aberta_de(membro.id)
-            if aberta:
+            p = self._partida_por_msg(interaction.message.id)
+            if p is None or p["status"] != "aberta":
+                await interaction.followup.send("⚠️ As inscrições desse interno já foram encerradas.", ephemeral=True)
+                return
+            if p["rank_ids"] and not any(r.id in p["rank_ids"] for r in membro.roles):
                 await interaction.followup.send(
-                    f"⏳ Você está na **partida #{aberta['id']}** ({aberta['modo']}). "
-                    "Aguarde a staff registrar o resultado antes de entrar em outra fila.",
+                    f"❌ Apenas jogadores **{p['rank_display']}** podem entrar neste interno.", ephemeral=True
+                )
+                return
+            if membro.id in p["jogadores"]:
+                await interaction.followup.send("⚠️ Você já está nesse interno!", ephemeral=True)
+                return
+            outra = self._partida_em_andamento_de(membro.id)
+            if outra:
+                await interaction.followup.send(
+                    f"⏳ Você ainda está no **interno #{outra['id']}** (em andamento). Termine ele antes de entrar em outro.",
                     ephemeral=True,
                 )
                 return
-            fila = self.estado["filas"][modo]
-            if any(e["id"] == membro.id for e in fila):
-                await interaction.followup.send(
-                    f"ℹ️ Você já está na fila de **{modo}** ({len(fila)}/{MODOS[modo] * 2}).", ephemeral=True
-                )
-                return
 
-            perfis = ler("perfis")
-            self._dados_modo(perfis, membro.id, modo, membro)  # garante MMR semente
-            salvar("perfis", perfis)
-
-            fila.append({"id": membro.id, "t": _iso(agora_utc())})
+            p["jogadores"].append(membro.id)
+            total = p["por_time"] * 2
             try:
-                formada = await self._tentar_formar(guild, modo)
+                if len(p["jogadores"]) >= total:
+                    await self._iniciar_partida(guild, p)
+                    iniciou = p
             except (discord.HTTPException, RuntimeError) as e:
-                fila[:] = [x for x in fila if x["id"] != membro.id]
+                p["jogadores"].remove(membro.id)
                 self._salvar()
                 await interaction.followup.send(
-                    f"❌ Não consegui abrir a partida ({e}). Avise a staff — confira o canal do painel e as permissões do bot.",
+                    f"❌ Não consegui criar o canal da partida ({e}). Avise a staff — o bot precisa de **Gerenciar Canais**.",
                     ephemeral=True,
                 )
                 return
             self._salvar()
 
-        await self._atualizar_painel(guild)
-        if formada:
-            canal = self._canal()
+        await self._atualizar_anuncio(p)
+        if iniciou:
             await interaction.followup.send(
-                f"🎮 **Partida #{formada['id']} encontrada!** Veja em {canal.mention if canal else 'o canal do painel'}.",
-                ephemeral=True,
+                f"🎮 Interno lotado! Sua partida: <#{p['canal_id']}> 🚀", ephemeral=True
             )
         else:
-            fila = self.estado["filas"][modo]
             await interaction.followup.send(
-                f"✅ Você entrou na fila de **{modo}** ({len(fila)}/{MODOS[modo] * 2}). Te marco quando a partida abrir!",
+                f"✅ Você entrou no interno ({len(p['jogadores'])}/{p['por_time'] * 2}). Quando lotar, te marco no canal da partida!",
                 ephemeral=True,
             )
 
-    async def sair_das_filas(self, interaction: discord.Interaction):
+    async def clique_sair(self, interaction: discord.Interaction):
         async with self._lock:
-            saiu = False
-            for modo in MODOS:
-                fila = self.estado["filas"][modo]
-                novo = [e for e in fila if e["id"] != interaction.user.id]
-                if len(novo) != len(fila):
-                    self.estado["filas"][modo] = novo
-                    saiu = True
-            if saiu:
+            p = self._partida_por_msg(interaction.message.id)
+            if p is None or p["status"] != "aberta":
+                await interaction.response.send_message("⚠️ Esse interno já não aceita saídas.", ephemeral=True)
+                return
+            if interaction.user.id not in p["jogadores"]:
+                await interaction.response.send_message("ℹ️ Você não está nesse interno.", ephemeral=True)
+                return
+            p["jogadores"].remove(interaction.user.id)
+            self._salvar()
+        await interaction.response.send_message("🚪 Você saiu do interno.", ephemeral=True)
+        await self._atualizar_anuncio(p)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, membro: discord.Member):
+        mexidas = []
+        async with self._lock:
+            for p in self.estado["partidas"].values():
+                if p["status"] == "aberta" and membro.id in p["jogadores"]:
+                    p["jogadores"].remove(membro.id)
+                    mexidas.append(p)
+            if mexidas:
                 self._salvar()
-        if saiu:
-            await interaction.response.send_message("🚪 Você saiu de todas as filas.", ephemeral=True)
-            await self._atualizar_painel(interaction.guild)
-        else:
-            await interaction.response.send_message("ℹ️ Você não estava em nenhuma fila.", ephemeral=True)
+        for p in mexidas:
+            await self._atualizar_anuncio(p)
 
-    async def _tentar_formar(self, guild: discord.Guild, modo: str) -> Optional[dict]:
-        """Se a fila do modo encheu, monta os times e publica a partida.
-        Só altera o estado depois que a mensagem foi enviada com sucesso."""
-        fila = self.estado["filas"][modo]
-        fila[:] = [e for e in fila if guild.get_member(e["id"]) is not None]
-        tamanho = MODOS[modo] * 2
-        if len(fila) < tamanho:
-            return None
+    @commands.Cog.listener()
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        """Anúncio apagado antes de lotar = interno cancelado (igual ao amistoso)."""
+        if payload.channel_id != AMISTOSOS_CHANNEL_ID:
+            return
+        async with self._lock:
+            p = self._partida_por_msg(payload.message_id)
+            if p is None or p["status"] != "aberta":
+                return
+            p["status"] = "cancelada"
+            p["finalizada_em"] = agora_str_iso()
+            self._salvar()
 
-        escolhidos = [e["id"] for e in fila[:tamanho]]
-        perfis = ler("perfis")
-        mmr = {u: self._dados_modo(perfis, u, modo, guild.get_member(u))["mmr"] for u in escolhidos}
-        t1, t2 = balancear([(u, mmr[u]) for u in escolhidos], MODOS[modo])
+    # ═════════════════════════════════════════════════════════════════════
+    #  Criação dos canais quando lota
+    # ═════════════════════════════════════════════════════════════════════
+    @staticmethod
+    def _ow_membros(guild: discord.Guild, ids: list, voz: bool) -> dict:
+        def perm():
+            if voz:
+                return discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
+            return discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
-        pid = int(self.estado["contador"]) + 1
-        partida = {
-            "id": pid,
-            "modo": modo,
-            "times": [t1, t2],
-            "mmr_antes": {str(u): mmr[u] for u in escolhidos},
-            "status": "aberta",
-            "criada_em": _iso(agora_utc()),
-            "sala": {"nome": f"TH{pid:04d}", "senha": f"{secrets.randbelow(10000):04d}"},
-            "msg_id": None,
-            "thread_id": None,
+        ow = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False) if voz
+            else discord.PermissionOverwrite(view_channel=False),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, connect=True, speak=True, manage_channels=True),
         }
-        msg, thread = await self._publicar_partida(guild, partida)
+        for rid in STAFF_IDS:
+            role = guild.get_role(rid)
+            if role:
+                ow[role] = perm()
+        for uid in ids:
+            membro = guild.get_member(uid)
+            if membro:
+                ow[membro] = perm()
+        return ow
 
-        # sucesso: agora sim muda o estado
-        partida["msg_id"] = msg.id
-        partida["thread_id"] = thread.id if thread else None
-        self.estado["contador"] = pid
-        self.estado["partidas"][str(pid)] = partida
-        for m in MODOS:
-            self.estado["filas"][m] = [e for e in self.estado["filas"][m] if e["id"] not in escolhidos]
-        print(f"[INTERNO] 🎮 Partida #{pid} ({modo}) criada: {t1} x {t2}")
-        return partida
-
-    def _linhas_time(self, partida: dict, idx: int, deltas: Optional[dict] = None) -> str:
-        linhas = []
-        for u in partida["times"][idx]:
-            antes = partida["mmr_antes"][str(u)]
-            if deltas is None:
-                linhas.append(f"▸ <@{u}> — `{antes}`")
-            else:
-                d = deltas[str(u)]
-                linhas.append(f"▸ <@{u}> — `{antes}` → `{antes + d}` ({'+' if d > 0 else ''}{d})")
-        return "\n".join(linhas)
-
-    def _embed_partida(self, partida: dict) -> discord.Embed:
-        modo, status = partida["modo"], partida["status"]
-        medias = [
-            round(sum(partida["mmr_antes"][str(u)] for u in t) / len(t)) for t in partida["times"]
-        ]
-        if status == "finalizada":
-            v = partida["vencedor"]
-            emb = discord.Embed(
-                title=f"✅ Partida #{partida['id']} — {modo} • {EMOJI_TIME[v]} Time {v + 1} venceu",
-                color=0x2ECC71,
+    async def _criar_canais(self, guild: discord.Guild, p: dict):
+        """Cria o canal de texto da partida e uma call por time. Se algo falhar
+        no meio, apaga o que já criou pra não deixar canal órfão."""
+        ref = guild.get_channel(AMISTOSOS_CHANNEL_ID)
+        categoria = ref.category if ref else None
+        categoria_voz = guild.get_channel(CATEGORIA_VOZ_AMISTOSOS_ID)
+        criados, vozes = [], []
+        try:
+            texto = await guild.create_text_channel(
+                name=f"interno-{p['id']}-{p['modo']}",
+                overwrites=self._ow_membros(guild, todos_jogadores(p), voz=False),
+                category=categoria,
+                reason=f"Interno #{p['id']} ({p['modo']}) lotou",
             )
-            deltas = partida["deltas"]
-        elif status == "cancelada":
-            emb = discord.Embed(title=f"🚫 Partida #{partida['id']} — {modo} • cancelada", color=0x95A5A6)
-            deltas = None
-        else:
-            emb = discord.Embed(title=f"🎮 Partida #{partida['id']} — {modo}", color=0xD4A843, timestamp=agora_utc())
-            deltas = None
+            criados.append(texto)
+            for i, time in enumerate(p["times"]):
+                voz = await guild.create_voice_channel(
+                    name=f"{EMOJI_TIME[i]}│Interno #{p['id']} Time {i + 1}"[:100],
+                    overwrites=self._ow_membros(guild, time, voz=True),
+                    category=categoria_voz,
+                    reason=f"Call do Time {i + 1} do interno #{p['id']}",
+                )
+                criados.append(voz)
+                vozes.append(voz)
+        except Exception:
+            for c in criados:
+                try:
+                    await c.delete(reason="Interno: falha ao montar a partida")
+                except discord.HTTPException:
+                    pass
+            raise
+        return texto, vozes
+
+    async def _iniciar_partida(self, guild: discord.Guild, p: dict):
+        t1, t2 = montar_times(p["jogadores"], p["por_time"])
+        p["times"] = [t1, t2]
+        try:
+            texto, vozes = await self._criar_canais(guild, p)
+        except Exception:
+            p.pop("times", None)
+            raise
+        p["canal_id"] = texto.id
+        p["voz_ids"] = [v.id for v in vozes]
+        p["sala"] = {"nome": f"TH{p['id']:04d}", "senha": f"{secrets.randbelow(10000):04d}"}
+        p["status"] = "andamento"
+
+        mencoes = " ".join(f"<@{u}>" for u in todos_jogadores(p))
+        emb = discord.Embed(
+            title=f"🎮  Interno #{p['id']} — {p['modo']}",
+            description="Times formados pela ordem de entrada. Boa partida! 🚀",
+            color=0xE67E22,
+        )
         for i in (0, 1):
-            vencedor_tag = " 🏆" if status == "finalizada" and partida["vencedor"] == i else ""
             emb.add_field(
-                name=f"{EMOJI_TIME[i]} Time {i + 1}{vencedor_tag} • média {medias[i]}",
-                value=self._linhas_time(partida, i, deltas),
+                name=f"{EMOJI_TIME[i]}  Time {i + 1}",
+                value="\n".join(f"  ▸  <@{u}>" for u in p["times"][i]) + f"\n🔊 <#{p['voz_ids'][i]}>",
                 inline=True,
             )
-        if status == "aberta":
-            sala = partida["sala"]
-            emb.add_field(
-                name="🏟️ Sala (partida privada)",
-                value=f"Nome: `{sala['nome']}` • Senha: ||`{sala['senha']}`||\nO **Time 1** cria a sala e o **Time 2** entra.",
-                inline=False,
-            )
-            emb.set_footer(text="Depois do jogo, a staff registra o resultado nos botões abaixo.")
-        elif status == "finalizada":
-            for t in partida.get("promocoes", []):
-                emb.add_field(name="​", value=t, inline=False)
-        return emb
-
-    async def _publicar_partida(self, guild: discord.Guild, partida: dict):
-        canal = self._canal()
-        if canal is None:
-            raise RuntimeError("canal do painel não configurado")
-        mencoes = " ".join(f"<@{u}>" for u in todos_jogadores(partida))
-        msg = await canal.send(
-            f"🎮 **Partida encontrada!** {mencoes}",
-            embed=self._embed_partida(partida),
-            view=ResultadoView(self),
-            allowed_mentions=discord.AllowedMentions(users=True),
+        emb.add_field(
+            name="🏟️  Sala (partida privada)",
+            value=f"Nome: `{p['sala']['nome']}` • Senha: ||`{p['sala']['senha']}`||\nO **Time 1** cria a sala e o **Time 2** entra.",
+            inline=False,
         )
-        thread = None
+        emb.add_field(
+            name="​",
+            value="Quando acabar, **a staff registra quem ganhou** pelos botões abaixo.",
+            inline=False,
+        )
         try:
-            thread = await msg.create_thread(name=f"Partida #{partida['id']} • {partida['modo']}", auto_archive_duration=1440)
-            await thread.send(
-                f"{mencoes}\nBoa partida! Combinem aqui e criem a sala (`{partida['sala']['nome']}`). "
-                "Quando acabar, **avisem a staff** pra registrar o resultado. 🚀",
+            await texto.send(
+                mencoes, embed=emb, view=ResultadoView(self),
                 allowed_mentions=discord.AllowedMentions(users=True),
             )
         except discord.HTTPException as e:
-            print(f"[INTERNO] ⚠️ Não consegui criar a thread da partida #{partida['id']}: {e}")
-        return msg, thread
+            print(f"[INTERNO] ⚠️ Não consegui postar a mensagem no canal da partida #{p['id']}: {e}")
+        print(f"[INTERNO] 🎮 Interno #{p['id']} ({p['modo']}) lotou: {p['times']}")
 
     # ═════════════════════════════════════════════════════════════════════
     #  Resultado (somente staff)
@@ -551,311 +471,252 @@ class Interno(commands.Cog):
         if not self._eh_staff(interaction.user):
             await interaction.response.send_message("🚫 Só a staff registra o resultado.", ephemeral=True)
             return
-        partida = next(
-            (p for p in self.estado["partidas"].values() if p.get("msg_id") == interaction.message.id), None
-        )
-        if partida is None or partida["status"] != "aberta":
-            await interaction.response.send_message("ℹ️ Essa partida não está mais aberta.", ephemeral=True)
+        p = self._partida_por_canal(interaction.channel.id)
+        if p is None or p["status"] != "andamento":
+            await interaction.response.send_message("ℹ️ Essa partida não está mais em andamento.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         if vencedor is None:
-            ok = await self.cancelar_partida(interaction.guild, partida, interaction.user)
-            texto = f"🚫 Partida #{partida['id']} cancelada." if ok else "ℹ️ Essa partida não está mais aberta."
+            ok = await self.cancelar(interaction.guild, p, interaction.user)
+            texto = f"🚫 Interno #{p['id']} cancelado." if ok else "ℹ️ Essa partida não está mais em andamento."
         else:
-            res = await self.finalizar_partida(interaction.guild, partida, vencedor, interaction.user)
-            texto = (
-                f"✅ Partida #{partida['id']} registrada: **Time {vencedor + 1}** venceu."
-                if res else "ℹ️ Essa partida não está mais aberta."
-            )
-        await interaction.followup.send(texto, ephemeral=True)
-
-    async def finalizar_partida(self, guild: discord.Guild, partida: dict, vencedor: int, staff) -> bool:
-        async with self._lock:
-            if partida["status"] != "aberta":
-                return False
-            modo = partida["modo"]
-            perfis = ler("perfis")
-            ids = todos_jogadores(partida)
-            mmr, jogos = {}, {}
-            for u in ids:
-                d = self._dados_modo(perfis, u, modo, guild.get_member(u))
-                mmr[u], jogos[u] = d["mmr"], d["jogos"]
-            tier_antes = {u: self.tier_geral(perfis, u) for u in ids}
-            partida["mmr_antes"] = {str(u): mmr[u] for u in ids}
-            deltas = calcular_deltas(partida["times"], mmr, jogos, vencedor)
-            for u in ids:
-                d = perfis[str(u)]["interno"][modo]
-                d["mmr"] += deltas[u]
-                d["jogos"] += 1
-                d["vitorias" if u in partida["times"][vencedor] else "derrotas"] += 1
-            salvar("perfis", perfis)
-
-            promocoes = []
-            ordem_tiers = [t[1] for t in TIERS]  # índice menor = tier mais alto
-            for u in ids:
-                antes, depois = tier_antes[u], self.tier_geral(perfis, u)
-                if depois and (antes is None or depois[0] != antes[0]):
-                    sobe = antes is None or ordem_tiers.index(depois[0]) < ordem_tiers.index(antes[0])
-                    seta = "⬆️" if sobe else "⬇️"
-                    promocoes.append(f"{seta} <@{u}> agora é {depois[1]} **{depois[0]}**")
-
-            partida.update({
-                "status": "finalizada",
-                "vencedor": vencedor,
-                "deltas": {str(u): deltas[u] for u in ids},
-                "promocoes": promocoes,
-                "finalizada_em": _iso(agora_utc()),
-                "registrado_por": getattr(staff, "id", None),
-            })
-            self._salvar()
-
-        await self._atualizar_mensagem_partida(guild, partida, f"🏁 Resultado registrado: **Time {vencedor + 1}** venceu.")
-        await self._sincronizar_cargos(guild, ids)
-        await self._atualizar_painel(guild)
-        return True
-
-    async def cancelar_partida(self, guild: discord.Guild, partida: dict, staff, motivo: str = "cancelada pela staff") -> bool:
-        async with self._lock:
-            if partida["status"] != "aberta":
-                return False
-            partida["status"] = "cancelada"
-            partida["finalizada_em"] = _iso(agora_utc())
-            partida["registrado_por"] = getattr(staff, "id", None)
-            self._salvar()
-        await self._atualizar_mensagem_partida(guild, partida, f"🚫 Partida {motivo}. Ninguém perdeu nem ganhou MMR.")
-        await self._atualizar_painel(guild)
-        return True
-
-    async def desfazer_partida(self, guild: discord.Guild, partida: dict) -> bool:
-        """Reverte o resultado registrado e reabre a partida pra staff registrar de novo."""
-        async with self._lock:
-            if partida["status"] != "finalizada":
-                return False
-            modo = partida["modo"]
-            perfis = ler("perfis")
-            for u in todos_jogadores(partida):
-                d = self._dados_modo(perfis, u, modo, guild.get_member(u))
-                d["mmr"] = max(0, d["mmr"] - partida["deltas"][str(u)])
-                d["jogos"] = max(0, d["jogos"] - 1)
-                chave = "vitorias" if u in partida["times"][partida["vencedor"]] else "derrotas"
-                d[chave] = max(0, d[chave] - 1)
-            salvar("perfis", perfis)
-            for k in ("vencedor", "deltas", "promocoes", "finalizada_em", "registrado_por"):
-                partida.pop(k, None)
-            partida["status"] = "aberta"
-            self._salvar()
-        await self._atualizar_mensagem_partida(guild, partida, "↩️ Resultado desfeito. A partida foi reaberta — a staff pode registrar de novo.")
-        await self._sincronizar_cargos(guild, todos_jogadores(partida))
-        await self._atualizar_painel(guild)
-        return True
-
-    async def _atualizar_mensagem_partida(self, guild: discord.Guild, partida: dict, aviso: str):
-        canal = self._canal()
-        if canal is None or not partida.get("msg_id"):
-            return
-        aberta = partida["status"] == "aberta"
+            ok = await self.finalizar(interaction.guild, p, vencedor, interaction.user)
+            texto = f"✅ Interno #{p['id']} registrado: **Time {vencedor + 1}** venceu." if ok else "ℹ️ Essa partida não está mais em andamento."
         try:
-            await canal.get_partial_message(int(partida["msg_id"])).edit(
-                embed=self._embed_partida(partida),
-                view=ResultadoView(self) if aberta else None,
-            )
-        except discord.HTTPException as e:
-            print(f"[INTERNO] ⚠️ Não consegui editar a mensagem da partida #{partida['id']}: {e}")
-        if partida.get("thread_id"):
+            await interaction.followup.send(texto, ephemeral=True)
+        except discord.HTTPException:
+            pass  # o canal pode já ter sido apagado
+
+    async def finalizar(self, guild: discord.Guild, p: dict, vencedor: int, staff) -> bool:
+        async with self._lock:
+            if p["status"] != "andamento":
+                return False
+            perfis = ler("perfis")
+            for i, time in enumerate(p["times"]):
+                for u in time:
+                    d = self._stats_modo(perfis, u, p["modo"], guild.get_member(u))
+                    d["vitorias" if i == vencedor else "derrotas"] += 1
+            salvar("perfis", perfis)
+            p["status"] = "finalizada"
+            p["vencedor"] = vencedor
+            p["finalizada_em"] = agora_str_iso()
+            p["registrado_por"] = getattr(staff, "id", None)
+            self._salvar()
+        await self._atualizar_anuncio(p)
+        await self._anunciar_resultado(p)
+        await self._apagar_canais(guild, p, "resultado registrado")
+        return True
+
+    async def cancelar(self, guild: discord.Guild, p: dict, staff) -> bool:
+        async with self._lock:
+            if p["status"] not in ("aberta", "andamento"):
+                return False
+            tinha_canais = p["status"] == "andamento"
+            p["status"] = "cancelada"
+            p["finalizada_em"] = agora_str_iso()
+            p["registrado_por"] = getattr(staff, "id", None)
+            self._salvar()
+        await self._atualizar_anuncio(p)
+        if tinha_canais:
+            await self._apagar_canais(guild, p, "partida cancelada")
+        return True
+
+    async def desfazer(self, guild: discord.Guild, p: dict) -> bool:
+        """Tira as vitórias/derrotas de um resultado registrado por engano.
+        (Os canais já foram apagados, então a partida não reabre.)"""
+        async with self._lock:
+            if p["status"] != "finalizada":
+                return False
+            perfis = ler("perfis")
+            for i, time in enumerate(p["times"]):
+                for u in time:
+                    d = self._stats_modo(perfis, u, p["modo"], guild.get_member(u))
+                    chave = "vitorias" if i == p["vencedor"] else "derrotas"
+                    d[chave] = max(0, d[chave] - 1)
+            salvar("perfis", perfis)
+            p["status"] = "desfeita"
+            self._salvar()
+        canal = self._canal_anuncio()
+        if canal and p.get("msg_id"):
             try:
-                thread = guild.get_thread(int(partida["thread_id"])) or await guild.fetch_channel(int(partida["thread_id"]))
-                await thread.edit(archived=False, locked=False)
-                await thread.send(aviso)
-                if not aberta:
-                    await thread.edit(archived=True, locked=True)
-            except discord.HTTPException as e:
-                print(f"[INTERNO] ⚠️ Não consegui atualizar a thread da partida #{partida['id']}: {e}")
-
-    # ── cargos de tier ──────────────────────────────────────────────────
-    @staticmethod
-    def _nome_cargo(nome: str, emoji: str) -> str:
-        return f"{emoji} Interno {nome}"
-
-    async def _garantir_cargos(self, guild: discord.Guild) -> dict:
-        ids = self.cfg.setdefault("cargos", {})
-        roles = {}
-        for _, nome, emoji, cor in TIERS:
-            role = guild.get_role(ids.get(nome, 0)) or discord.utils.get(guild.roles, name=self._nome_cargo(nome, emoji))
-            if role is None:
-                role = await guild.create_role(
-                    name=self._nome_cargo(nome, emoji),
-                    colour=discord.Colour(cor),
-                    mentionable=False,
-                    reason="Amistoso interno: cargo de tier",
+                await canal.get_partial_message(int(p["msg_id"])).edit(
+                    embed=discord.Embed(
+                        title=f"↩️  INTERNO #{p['id']} — {p['modo']} • resultado desfeito",
+                        description="A staff desfez o resultado desta partida. Nada foi somado ao perfil.",
+                        color=0x95A5A6,
+                    ),
+                    view=None,
                 )
-            ids[nome] = role.id
-            roles[nome] = role
-        self._salvar()
-        return roles
+            except discord.HTTPException:
+                pass
+        return True
 
-    async def _sincronizar_cargos(self, guild: discord.Guild, uids: list):
-        if not self.cfg.get("cargos"):
+    async def _anunciar_resultado(self, p: dict):
+        canal = self._canal_anuncio()
+        if canal is None:
             return
+        v = p["vencedor"]
+        perdedor = 1 - v
+        emb = discord.Embed(
+            title=f"🏆  Interno #{p['id']} ({p['modo']}) — Time {v + 1} venceu!",
+            color=0x2ECC71,
+            timestamp=datetime.now(timezone.utc),
+        )
+        emb.add_field(name=f"{EMOJI_TIME[v]}  Time {v + 1} 🏆", value="\n".join(f"  ▸  <@{u}>" for u in p["times"][v]), inline=True)
+        emb.add_field(name=f"{EMOJI_TIME[perdedor]}  Time {perdedor + 1}", value="\n".join(f"  ▸  <@{u}>" for u in p["times"][perdedor]), inline=True)
+        sem_ping = discord.AllowedMentions.none()
         try:
-            roles = await self._garantir_cargos(guild)
-        except discord.HTTPException as e:
-            print(f"[INTERNO] ⚠️ Não consegui garantir os cargos de tier: {e}")
-            return
-        perfis = ler("perfis")
-        for uid in uids:
-            membro = guild.get_member(uid)
-            if membro is None:
-                continue
-            tier = self.tier_geral(perfis, uid)
-            desejado = roles[tier[0]] if tier else None
+            msg = await canal.fetch_message(int(p["msg_id"]))
+            await msg.reply(embed=emb, allowed_mentions=sem_ping)
+        except (discord.NotFound, discord.HTTPException):
             try:
-                for nome, role in roles.items():
-                    if role in membro.roles and role != desejado:
-                        await membro.remove_roles(role, reason="Interno: mudou de tier")
-                if desejado is not None and desejado not in membro.roles:
-                    await membro.add_roles(desejado, reason="Interno: novo tier")
+                await canal.send(embed=emb, allowed_mentions=sem_ping)
             except discord.HTTPException as e:
-                print(f"[INTERNO] ⚠️ Não consegui atualizar o cargo de {membro}: {e}")
+                print(f"[INTERNO] ⚠️ Não consegui divulgar o resultado do interno #{p['id']}: {e}")
 
-    # ── rank de um jogador ──────────────────────────────────────────────
-    def embed_rank(self, membro) -> discord.Embed:
-        perfis = ler("perfis")
-        interno = perfis.get(str(membro.id), {}).get("interno", {})
-        emb = discord.Embed(title=f"📊 Rank interno de {membro.display_name}", color=0xD4A843)
-        emb.set_thumbnail(url=membro.display_avatar.url)
-        geral = self.tier_geral(perfis, membro.id)
-        emb.description = f"{geral[1]} **{geral[0]}**" if geral else "🧪 _Ainda em calibragem — jogue mais partidas pra aparecer o tier._"
-        for modo in MODOS:
-            d = interno.get(modo)
-            if not d or d.get("jogos", 0) == 0:
-                emb.add_field(name=modo, value="_sem partidas_", inline=True)
+    async def _apagar_canais(self, guild: discord.Guild, p: dict, motivo: str):
+        """Igual ao /resultado do amistoso: avisa, espera uns segundos, apaga o canal
+        de texto, leva o pessoal da call pro lobby e apaga as calls."""
+        texto = guild.get_channel(p["canal_id"]) if p.get("canal_id") else None
+        if texto is not None:
+            try:
+                await texto.send(f"🏁 Interno #{p['id']} encerrado ({motivo}). Este canal será apagado em instantes!")
+            except discord.HTTPException:
+                pass
+            await asyncio.sleep(ATRASO_APAGAR_CANAIS)
+            try:
+                await texto.delete(reason=f"Interno #{p['id']} encerrado — {motivo}.")
+            except discord.HTTPException as e:
+                print(f"[INTERNO] ⚠️ Erro ao apagar o canal do interno #{p['id']}: {e}")
+        for vid in p.get("voz_ids", []):
+            voz = guild.get_channel(vid)
+            if voz is None:
                 continue
-            jogos = d["jogos"]
-            wr = round(d["vitorias"] / jogos * 100)
-            if jogos >= PARTIDAS_CALIBRAGEM:
-                nome, emoji, _ = tier_para_mmr(d["mmr"])
-                topo = f"`{d['mmr']}` MMR • {emoji} {nome}"
-            else:
-                topo = f"`{d['mmr']}` MMR • 🧪 calibrando ({jogos}/{PARTIDAS_CALIBRAGEM})"
-            emb.add_field(name=modo, value=f"{topo}\n`{d['vitorias']}V {d['derrotas']}D` • {wr}%", inline=True)
-        return emb
-
-    # ═════════════════════════════════════════════════════════════════════
-    #  Manutenção automática
-    # ═════════════════════════════════════════════════════════════════════
-    @tasks.loop(minutes=1)
-    async def tick(self):
-        try:
-            mudou_fila = False
-            limite = agora_utc() - timedelta(minutes=FILA_TIMEOUT_MIN)
-            async with self._lock:
-                for modo in MODOS:
-                    fila = self.estado["filas"][modo]
-                    novo = [e for e in fila if _dt(e["t"]) > limite]
-                    if len(novo) != len(fila):
-                        self.estado["filas"][modo] = novo
-                        mudou_fila = True
-                if mudou_fila:
-                    self._salvar()
-            if mudou_fila:
-                await self._atualizar_painel()
-
-            expiradas = [
-                p for p in self.estado["partidas"].values()
-                if p["status"] == "aberta" and _dt(p["criada_em"]) < agora_utc() - timedelta(hours=PARTIDA_EXPIRA_H)
-            ]
-            for p in expiradas:
-                canal = self._canal()
-                if canal is not None:
-                    await self.cancelar_partida(canal.guild, p, None, motivo=f"expirada (sem resultado em {PARTIDA_EXPIRA_H}h)")
-        except Exception as e:
-            print(f"[INTERNO] ❌ Erro na manutenção automática: {e}")
-
-    @tick.before_loop
-    async def _antes_tick(self):
-        await self.bot.wait_until_ready()
-
-    @commands.Cog.listener()
-    async def on_member_remove(self, membro: discord.Member):
-        mexeu = False
+            try:
+                await mu.mover_membros_pos_amistoso(self.bot, voz)
+            except Exception as e:
+                print(f"[INTERNO] ⚠️ Erro ao mover o pessoal da call pro lobby: {e}")
+            try:
+                await voz.delete(reason=f"Interno #{p['id']} encerrado — {motivo}.")
+            except discord.HTTPException as e:
+                print(f"[INTERNO] ⚠️ Erro ao apagar a call do interno #{p['id']}: {e}")
         async with self._lock:
-            for modo in MODOS:
-                fila = self.estado["filas"][modo]
-                novo = [e for e in fila if e["id"] != membro.id]
-                if len(novo) != len(fila):
-                    self.estado["filas"][modo] = novo
-                    mexeu = True
-            if mexeu:
-                self._salvar()
-        if mexeu:
-            await self._atualizar_painel(membro.guild)
+            p["canal_id"] = None
+            p["voz_ids"] = []
+            self._salvar()
 
     # ═════════════════════════════════════════════════════════════════════
-    #  Comandos
+    #  Comandos (staff)
     # ═════════════════════════════════════════════════════════════════════
     async def _exigir_staff(self, interaction: discord.Interaction) -> bool:
         if self._eh_staff(interaction.user):
             return True
-        await interaction.response.send_message("🚫 Só a staff pode usar esse comando.", ephemeral=True)
+        await interaction.response.send_message("❌ Apenas a **staff** pode usar esse comando.", ephemeral=True)
         return False
 
-    def _achar_partida(self, numero: int) -> Optional[dict]:
-        return self.estado["partidas"].get(str(numero))
-
-    @interno.command(name="setup", description="[Staff] Cria os cargos de tier e posta o painel de fila.")
-    @app_commands.describe(canal="Canal onde o painel de fila e as partidas vão aparecer")
-    async def setup_cmd(self, interaction: discord.Interaction, canal: discord.TextChannel):
-        if not isinstance(interaction.user, discord.Member) or not (
-            interaction.user.guild_permissions.administrator or eh_super_admin_membro(interaction.user)
-        ):
-            await interaction.response.send_message("🚫 Só administradores podem usar esse comando.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        avisos = []
-        try:
-            await self._garantir_cargos(interaction.guild)
-        except discord.HTTPException as e:
-            avisos.append(f"⚠️ Não consegui criar os cargos de tier ({e}). Dê **Gerenciar Cargos** ao bot.")
-        try:
-            msg = await canal.send(embed=self._embed_painel(), view=PainelView(self))
-        except discord.HTTPException as e:
-            await interaction.followup.send(f"❌ Não consegui postar o painel em {canal.mention}: {e}", ephemeral=True)
-            return
-        async with self._lock:
-            self.cfg["canal_id"] = canal.id
-            self.cfg["painel_msg_id"] = msg.id
-            self._salvar()
-        await interaction.followup.send(
-            f"✅ Painel do **Amistoso Interno** postado em {canal.mention}.\n" + "\n".join(avisos), ephemeral=True
-        )
-
-    @interno.command(name="rank", description="Veja o MMR e o tier interno de um jogador.")
-    @app_commands.describe(membro="Jogador (deixe vazio pra ver o seu)")
-    async def rank_cmd(self, interaction: discord.Interaction, membro: Optional[discord.Member] = None):
-        await interaction.response.send_message(embed=self.embed_rank(membro or interaction.user))
-
-    @interno.command(name="sair", description="Sai de todas as filas do amistoso interno.")
-    async def sair_cmd(self, interaction: discord.Interaction):
-        await self.sair_das_filas(interaction)
-
-    @interno.command(name="pendentes", description="[Staff] Lista as partidas aguardando resultado.")
-    async def pendentes_cmd(self, interaction: discord.Interaction):
+    @app_commands.command(name="interno", description="[Staff] Anuncia um amistoso interno (1v1, 2v2 ou 3v3) entre os membros.")
+    @app_commands.describe(
+        modo="Formato da partida",
+        dia_semana="Dia (opcional)",
+        horario="Horário, ex: 20h00 (opcional)",
+        rank1="Só deixa entrar quem tem esse cargo de rank (opcional)",
+        rank2="Segundo cargo de rank (opcional)",
+        rank3="Terceiro cargo de rank (opcional)",
+        mais_cargos="Mais cargos (opcional): marque com @ ou cole os IDs, separados por espaço",
+        info_extra="Informações extras (opcional)",
+    )
+    @app_commands.choices(
+        modo=[app_commands.Choice(name=m, value=m) for m in MODOS],
+        dia_semana=[app_commands.Choice(name=d, value=d) for d in DIAS_SEMANA],
+    )
+    async def interno(
+        self,
+        interaction: discord.Interaction,
+        modo: app_commands.Choice[str],
+        dia_semana: Optional[app_commands.Choice[str]] = None,
+        horario: str = "",
+        rank1: Optional[discord.Role] = None,
+        rank2: Optional[discord.Role] = None,
+        rank3: Optional[discord.Role] = None,
+        mais_cargos: str = "",
+        info_extra: str = "",
+    ):
         if not await self._exigir_staff(interaction):
             return
-        abertas = [p for p in self.estado["partidas"].values() if p["status"] == "aberta"]
-        if not abertas:
-            await interaction.response.send_message("✅ Nenhuma partida aguardando resultado.", ephemeral=True)
+        guild = interaction.guild
+        canal = self._canal_anuncio()
+        if canal is None:
+            await interaction.response.send_message("❌ Canal de amistosos não encontrado.", ephemeral=True)
             return
-        linhas = []
-        for p in sorted(abertas, key=lambda p: p["id"]):
-            t1 = " ".join(f"<@{u}>" for u in p["times"][0])
-            t2 = " ".join(f"<@{u}>" for u in p["times"][1])
-            quando = discord.utils.format_dt(_dt(p["criada_em"]), "R")
-            linhas.append(f"**#{p['id']}** ({p['modo']}) {quando}\n🔵 {t1}\n🟠 {t2}")
-        await interaction.response.send_message("\n\n".join(linhas)[:1900], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        outros, erro = extrair_cargos_extras(guild, mais_cargos)
+        if erro:
+            await interaction.response.send_message(erro, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
 
-    @interno.command(name="resultado", description="[Staff] Registra o vencedor de uma partida.")
-    @app_commands.describe(partida="Número da partida", vencedor="Qual time venceu")
+        ranks_ids = []
+        for cargo in [rank1, rank2, rank3, *outros]:
+            if cargo is None or cargo.id in ranks_ids:
+                continue
+            if rank_info(cargo) is None:
+                await interaction.followup.send(f"❌ O cargo {cargo.mention} não é um rank válido.", ephemeral=True)
+                return
+            ranks_ids.append(cargo.id)
+
+        rank_display, mencao = "", ""
+        if ranks_ids:
+            nomes, emojis = montar_ranks_display(ranks_ids)
+            rank_display = " + ".join(f"{e} {n}" for e, n in zip(emojis, nomes))
+            mencao = " ".join(guild.get_role(rid).mention for rid in ranks_ids if guild.get_role(rid))
+
+        if dia_semana is None and not horario.strip():
+            data_hora = "Assim que lotar"
+        else:
+            data_hora, _ = _calcular_data_hora(dia_semana.value if dia_semana else "Hoje", horario)
+
+        async with self._lock:
+            self.estado["contador"] += 1
+            pid = self.estado["contador"]
+            p = {
+                "id": pid,
+                "modo": modo.value,
+                "por_time": MODOS[modo.value],
+                "status": "aberta",
+                "jogadores": [],
+                "rank_ids": ranks_ids,
+                "rank_display": rank_display,
+                "mencao": mencao,
+                "data_hora": data_hora,
+                "info": info_extra,
+                "criada_por": interaction.user.id,
+                "criada_por_nome": interaction.user.display_name,
+                "criada_em": agora_str_iso(),
+                "msg_id": None,
+                "canal_id": None,
+                "voz_ids": [],
+            }
+            try:
+                msg = await canal.send(
+                    content=mencao or None,
+                    embed=self._embed_anuncio(p),
+                    view=EntrarView(self),
+                    allowed_mentions=discord.AllowedMentions(roles=True),
+                )
+            except discord.HTTPException as e:
+                self.estado["contador"] -= 1
+                await interaction.followup.send(f"❌ Não consegui postar no canal de amistosos: {e}", ephemeral=True)
+                return
+            p["msg_id"] = msg.id
+            self.estado["partidas"][str(pid)] = p
+            self._salvar()
+        await interaction.followup.send(f"✅ Interno **#{pid}** ({modo.value}) anunciado em {canal.mention}!", ephemeral=True)
+        print(f"[INTERNO] ✅ {interaction.user} anunciou o interno #{pid} ({modo.value})")
+
+    def _achar(self, numero: int) -> Optional[dict]:
+        return self.estado["partidas"].get(str(numero))
+
+    @app_commands.command(name="interno-resultado", description="[Staff] Diz quem ganhou um interno em andamento.")
+    @app_commands.describe(partida="Número do interno", vencedor="Qual time venceu")
     @app_commands.choices(vencedor=[
         app_commands.Choice(name="🔵 Time 1", value=1),
         app_commands.Choice(name="🟠 Time 2", value=2),
@@ -863,65 +724,39 @@ class Interno(commands.Cog):
     async def resultado_cmd(self, interaction: discord.Interaction, partida: int, vencedor: app_commands.Choice[int]):
         if not await self._exigir_staff(interaction):
             return
-        p = self._achar_partida(partida)
-        if p is None or p["status"] != "aberta":
-            await interaction.response.send_message("❌ Partida não encontrada ou já finalizada.", ephemeral=True)
+        p = self._achar(partida)
+        if p is None or p["status"] != "andamento":
+            await interaction.response.send_message("❌ Interno não encontrado ou não está em andamento.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        await self.finalizar_partida(interaction.guild, p, vencedor.value - 1, interaction.user)
-        await interaction.followup.send(f"✅ Partida #{partida} registrada: **Time {vencedor.value}** venceu.", ephemeral=True)
+        await self.finalizar(interaction.guild, p, vencedor.value - 1, interaction.user)
+        await interaction.followup.send(f"✅ Interno #{partida} registrado: **Time {vencedor.value}** venceu.", ephemeral=True)
 
-    @interno.command(name="cancelar", description="[Staff] Cancela uma partida aberta (sem mexer no MMR).")
-    @app_commands.describe(partida="Número da partida")
+    @app_commands.command(name="interno-cancelar", description="[Staff] Cancela um interno (aberto ou em andamento).")
+    @app_commands.describe(partida="Número do interno")
     async def cancelar_cmd(self, interaction: discord.Interaction, partida: int):
         if not await self._exigir_staff(interaction):
             return
-        p = self._achar_partida(partida)
-        if p is None or p["status"] != "aberta":
-            await interaction.response.send_message("❌ Partida não encontrada ou já finalizada.", ephemeral=True)
+        p = self._achar(partida)
+        if p is None or p["status"] not in ("aberta", "andamento"):
+            await interaction.response.send_message("❌ Interno não encontrado ou já encerrado.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        await self.cancelar_partida(interaction.guild, p, interaction.user)
-        await interaction.followup.send(f"🚫 Partida #{partida} cancelada.", ephemeral=True)
+        await self.cancelar(interaction.guild, p, interaction.user)
+        await interaction.followup.send(f"🚫 Interno #{partida} cancelado.", ephemeral=True)
 
-    @interno.command(name="desfazer", description="[Staff] Desfaz o resultado de uma partida e reabre ela.")
-    @app_commands.describe(partida="Número da partida")
+    @app_commands.command(name="interno-desfazer", description="[Staff] Desfaz um resultado registrado por engano (tira as vitórias/derrotas).")
+    @app_commands.describe(partida="Número do interno")
     async def desfazer_cmd(self, interaction: discord.Interaction, partida: int):
         if not await self._exigir_staff(interaction):
             return
-        p = self._achar_partida(partida)
+        p = self._achar(partida)
         if p is None or p["status"] != "finalizada":
-            await interaction.response.send_message("❌ Partida não encontrada ou sem resultado registrado.", ephemeral=True)
+            await interaction.response.send_message("❌ Interno não encontrado ou sem resultado registrado.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        await self.desfazer_partida(interaction.guild, p)
-        await interaction.followup.send(f"↩️ Resultado da partida #{partida} desfeito. Ela foi reaberta.", ephemeral=True)
-
-    @interno.command(name="ajustar-mmr", description="[Staff] Define o MMR de um jogador num modo.")
-    @app_commands.describe(membro="Jogador", modo="Modo", valor="Novo MMR (0 a 3000)")
-    @app_commands.choices(modo=[app_commands.Choice(name=m, value=m) for m in MODOS])
-    async def ajustar_cmd(
-        self,
-        interaction: discord.Interaction,
-        membro: discord.Member,
-        modo: app_commands.Choice[str],
-        valor: app_commands.Range[int, 0, 3000],
-    ):
-        if not await self._exigir_staff(interaction):
-            return
-        await interaction.response.defer(ephemeral=True)
-        async with self._lock:
-            perfis = ler("perfis")
-            d = self._dados_modo(perfis, membro.id, modo.value, membro)
-            antes = d["mmr"]
-            d["mmr"] = valor
-            salvar("perfis", perfis)
-        await self._sincronizar_cargos(interaction.guild, [membro.id])
-        await interaction.followup.send(
-            f"✅ MMR de {membro.mention} em **{modo.value}**: `{antes}` → `{valor}`.",
-            ephemeral=True,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        await self.desfazer(interaction.guild, p)
+        await interaction.followup.send(f"↩️ Resultado do interno #{partida} desfeito. As vitórias/derrotas foram retiradas.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
