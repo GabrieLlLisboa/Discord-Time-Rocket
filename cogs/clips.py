@@ -70,6 +70,8 @@ HORA_RESULTADO = 18           # hora (Brasília) do resultado
 MIN_CLIPADOR = 10             # clips enviados pra medalha "Clipador"
 RODAPE_ATRASO = 2.0           # segundos de espera antes de refazer o rodapé
 MAX_TENTATIVAS_PASSO = 3
+AUDITORIA_LIMITE = 200        # quantas mensagens recentes a auditoria confere
+AUDITORIA_CADA_TICKS = 4      # a cada 4 ticks de 30s = a cada 2 minutos
 
 ARQUIVO = "data/clips.json"
 
@@ -269,6 +271,7 @@ class Clips(commands.Cog):
         self._rodape_tarefa: Optional[asyncio.Task] = None
         self._ticks = 0
         self._avisou_canal = False
+        self._rejeitadas: set = set()
 
     # ── ciclo de vida ───────────────────────────────────────────────────
     async def cog_load(self):
@@ -341,7 +344,9 @@ class Clips(commands.Cog):
             if ciclo:
                 await self._processar_mensagem(message, ciclo)
 
-    async def _processar_mensagem(self, message: discord.Message, ciclo: dict):
+    async def _processar_mensagem(self, message: discord.Message, ciclo: dict) -> str:
+        """Valida uma mensagem do canal. Devolve 'aceito' (virou candidato e
+        recebeu o 🚀), 'rejeitado' (apagada) ou 'ignorado' (staff conversando)."""
         staff = self._eh_staff(message.author) and self.cfg.get("staff_livre", True)
         anexos = [(a.filename, a.content_type) for a in message.attachments]
         motivo = validar_envio(message.content, anexos, bool(message.stickers))
@@ -350,20 +355,20 @@ class Clips(commands.Cog):
         if fechado:
             if staff:
                 self.agendar_rodape()
-                return
+                return "ignorado"
             await self._rejeitar(
                 message,
                 "O canal de clips está **fechado** agora (votação final). "
                 "Fica ligado que ele reabre já já! 🚀",
             )
-            return
+            return "rejeitado"
 
         if motivo:
             if staff:  # staff pode conversar no canal
                 self.agendar_rodape()
-                return
+                return "ignorado"
             await self._rejeitar(message, motivo)
-            return
+            return "rejeitado"
 
         autor_id = message.author.id
         ativos = [
@@ -376,7 +381,7 @@ class Clips(commands.Cog):
                 f"Você já enviou **{MAX_CLIPS_POR_PESSOA} clips** neste ciclo (limite por pessoa). "
                 "Se quiser trocar, apague um dos seus.",
             )
-            return
+            return "rejeitado"
 
         ciclo["candidatos"][str(message.id)] = {
             "autor_id": autor_id,
@@ -396,14 +401,21 @@ class Clips(commands.Cog):
 
         self._registrar_envio(message.author)
         self.agendar_rodape()
+        return "aceito"
 
     async def _rejeitar(self, message: discord.Message, motivo: str):
+        primeira_vez = message.id not in self._rejeitadas  # a auditoria pode tentar de novo sem repetir o aviso
+        if len(self._rejeitadas) > 2000:
+            self._rejeitadas.clear()
+        self._rejeitadas.add(message.id)
         try:
             await message.delete()
         except discord.Forbidden:
             self._erro(self.ciclo, "SEM PERMISSÃO pra apagar mensagens no canal de clips — dê **Gerenciar Mensagens** ao bot.")
         except discord.HTTPException as e:
             self._erro(self.ciclo, f"Não consegui apagar a mensagem {message.id}: {e}")
+        if not primeira_vez:
+            return
         try:
             await message.channel.send(
                 f"{message.author.mention} ⚠️ {motivo}",
@@ -433,19 +445,22 @@ class Clips(commands.Cog):
         ciclo = self.ciclo
         if not ciclo or payload.channel_id != self._canal_id():
             return
-        if payload.user_id == self.bot.user.id or str(payload.emoji) != EMOJI_VOTO:
+        if payload.user_id == self.bot.user.id:
             return
-        mid = str(payload.message_id)
-        c = ciclo["candidatos"].get(mid)
-        if not c or c.get("removido"):
+        if payload.member is not None and payload.member.bot:
             return
         canal = self._canal()
-        if canal is None:
-            return
+        if canal is None or ciclo.get("transicao"):
+            return  # no meio de uma transição a auditoria arruma depois
+        mid = str(payload.message_id)
+        c = ciclo["candidatos"].get(mid)
         fase = ciclo["fase"]
-        if fase == "final" and mid not in ciclo.get("finalistas", []):
-            return
-        if fase == "aberto" and ciclo.get("transicao"):
+
+        # só vale 🚀 de gente em clip que está concorrendo; qualquer outra
+        # reação feita por um membro (outro emoji, 🚀 em mensagem que não é
+        # clip, em clip eliminado...) é removida na hora
+        if not self._voto_valido(ciclo, str(payload.emoji), mid):
+            await self._remover_reacao(canal, payload.message_id, payload.user_id, payload.emoji)
             return
 
         # voto no próprio clip não vale: remove a reação
@@ -459,9 +474,22 @@ class Clips(commands.Cog):
                 if outro != mid:
                     await self._remover_reacao(canal, int(outro), payload.user_id)
 
-    async def _remover_reacao(self, canal, msg_id: int, user_id: int):
+    def _voto_valido(self, ciclo: dict, emoji: str, mid: str) -> bool:
+        """Esse emoji, feito por um membro nessa mensagem, é um voto que conta?"""
+        if emoji != EMOJI_VOTO:
+            return False
+        c = ciclo["candidatos"].get(mid)
+        if not c or c.get("removido"):
+            return False
+        if ciclo["fase"] == "final":
+            return mid in ciclo.get("finalistas", [])
+        return ciclo["fase"] == "aberto"
+
+    async def _remover_reacao(self, canal, msg_id: int, user_id: int, emoji=EMOJI_VOTO):
         try:
-            await canal.get_partial_message(msg_id).remove_reaction(EMOJI_VOTO, discord.Object(id=user_id))
+            await canal.get_partial_message(msg_id).remove_reaction(emoji, discord.Object(id=user_id))
+        except discord.Forbidden:
+            self._erro(self.ciclo, "SEM PERMISSÃO pra remover reações — dê **Gerenciar mensagens** ao bot.")
         except discord.HTTPException:
             pass
 
@@ -498,6 +526,9 @@ class Clips(commands.Cog):
             topo = m
         if topo is None or topo.id == ciclo.get("rodape_id"):
             return
+        async for ultima in canal.history(limit=1):
+            if ultima.id == ciclo.get("rodape_id"):
+                return  # o rodapé já é a última mensagem; não precisa repostar
         nova = await canal.send(
             f"⬆️ [**Voltar ao topo**]({topo.jump_url})",
             allowed_mentions=discord.AllowedMentions.none(),
@@ -518,6 +549,80 @@ class Clips(commands.Cog):
                 self.agendar_rodape()
 
     # ═════════════════════════════════════════════════════════════════════
+    #  Auditoria do canal (roda a cada 2 min e em /clips auditar)
+    #   • clip sem o 🚀 do bot  -> o bot reage
+    #   • reação de membro que não é voto válido -> removida
+    #   • mensagem que o bot não viu (ex.: ficou offline) -> é validada agora
+    # ═════════════════════════════════════════════════════════════════════
+    async def _auditar_canal(self) -> dict:
+        resumo = {"reacoes_adicionadas": 0, "reacoes_removidas": 0, "mensagens_tratadas": 0, "erros": 0}
+        async with self._lock:
+            canal, ciclo = self._canal(), self.ciclo
+            if canal is None or not ciclo or ciclo.get("transicao") or not self._ciclo_do_canal_atual():
+                return resumo
+            inicio = _dt(ciclo["inicio"])
+            campeao = str(ciclo.get("campeao_anterior_id") or "")
+            try:
+                mensagens = [m async for m in canal.history(limit=AUDITORIA_LIMITE)]
+            except discord.HTTPException as e:
+                self._erro(ciclo, f"Auditoria: não consegui ler o histórico do canal: {e}")
+                resumo["erros"] += 1
+                return resumo
+            for m in reversed(mensagens):  # do mais antigo pro mais novo
+                if ciclo.get("transicao"):
+                    break
+                try:
+                    await self._auditar_mensagem(ciclo, m, inicio, campeao, resumo)
+                except discord.Forbidden:
+                    resumo["erros"] += 1
+                    self._erro(ciclo, "Auditoria: SEM PERMISSÃO (precisa de Gerenciar mensagens, Adicionar reações e Ler histórico).")
+                except discord.HTTPException as e:
+                    resumo["erros"] += 1
+                    self._erro(ciclo, f"Auditoria: erro na mensagem {m.id}: {e}")
+        if resumo["reacoes_adicionadas"] or resumo["reacoes_removidas"] or resumo["mensagens_tratadas"]:
+            print(f"[CLIPS] 🔎 Auditoria: {resumo}")
+        return resumo
+
+    async def _auditar_mensagem(self, ciclo: dict, m: discord.Message, inicio: datetime, campeao: str, resumo: dict):
+        mid = str(m.id)
+        candidato = ciclo["candidatos"].get(mid)
+        eh_candidato = bool(candidato) and not candidato.get("removido")
+
+        # 1) mensagem de membro que o bot nunca processou
+        if candidato is None and not m.author.bot and mid != campeao and m.created_at >= inicio:
+            status = await self._processar_mensagem(m, ciclo)
+            if status != "ignorado":
+                resumo["mensagens_tratadas"] += 1
+            if status in ("rejeitado", "aceito"):
+                return  # apagada, ou já recebeu o 🚀
+
+        if not (eh_candidato or mid == campeao or m.created_at >= inicio):
+            return  # mensagem antiga, de antes deste ciclo: não mexe
+
+        # 2) clip concorrendo sem o 🚀 do bot
+        valido = self._voto_valido(ciclo, EMOJI_VOTO, mid)
+        if valido and not any(str(r.emoji) == EMOJI_VOTO and r.me for r in m.reactions):
+            await m.add_reaction(EMOJI_VOTO)
+            resumo["reacoes_adicionadas"] += 1
+
+        # 3) reações de membros que não valem (mantém as do próprio bot)
+        for r in m.reactions:
+            if str(r.emoji) == EMOJI_VOTO and valido:
+                continue
+            de_membros = r.count - (1 if r.me else 0)
+            if de_membros <= 0:
+                continue
+            if not r.me:
+                await m.clear_reaction(r.emoji)
+                resumo["reacoes_removidas"] += de_membros
+            else:
+                async for u in r.users():
+                    if u.bot:
+                        continue
+                    await m.remove_reaction(r.emoji, u)
+                    resumo["reacoes_removidas"] += 1
+
+    # ═════════════════════════════════════════════════════════════════════
     #  Relógio do ciclo
     # ═════════════════════════════════════════════════════════════════════
     @tasks.loop(seconds=30)
@@ -525,6 +630,8 @@ class Clips(commands.Cog):
         try:
             await self._avancar_ciclo()
             self._ticks += 1
+            if self._ticks == 1 or self._ticks % AUDITORIA_CADA_TICKS == 0:
+                await self._auditar_canal()
             if self._ticks % 10 == 0:
                 await self._checar_rodape()
         except Exception as e:
@@ -1438,6 +1545,21 @@ class Clips(commands.Cog):
         if ciclo and ciclo.get("erros"):
             linhas.append("⚠️ **Últimos erros:**\n" + "\n".join(ciclo["erros"][-5:]))
         await interaction.response.send_message("\n".join(linhas)[:1900], ephemeral=True)
+
+    @clips.command(name="auditar", description="Confere o canal agora: põe o 🚀 em clip sem reação e remove emojis que não são voto.")
+    async def auditar_cmd(self, interaction: discord.Interaction):
+        if not await self._exigir_admin(interaction):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        r = await self._auditar_canal()
+        await interaction.followup.send(
+            f"🔎 **Auditoria concluída** (últimas {AUDITORIA_LIMITE} mensagens)\n"
+            f"• {EMOJI_VOTO} colocados em clips sem reação: **{r['reacoes_adicionadas']}**\n"
+            f"• Reações removidas (não eram voto): **{r['reacoes_removidas']}**\n"
+            f"• Mensagens que o bot ainda não tinha tratado: **{r['mensagens_tratadas']}**\n"
+            + (f"• ⚠️ Erros: **{r['erros']}** — veja `/clips diagnostico`" if r["erros"] else "• Sem erros."),
+            ephemeral=True,
+        )
 
     @clips.command(name="staff-livre", description="Liga/desliga a staff poder conversar no canal sem ter mensagem apagada.")
     @app_commands.describe(ativo="Sim = a staff pode falar no canal; Não = a staff também só pode mandar vídeo (bom pra testar)")
