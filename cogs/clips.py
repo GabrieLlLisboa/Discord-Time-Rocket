@@ -70,6 +70,7 @@ HORA_RESULTADO = 18           # hora (Brasília) do resultado
 MIN_CLIPADOR = 10             # clips enviados pra medalha "Clipador"
 RODAPE_ATRASO = 2.0           # segundos de espera antes de refazer o rodapé
 MAX_TENTATIVAS_PASSO = 3
+TESTE_VALIDADE_H = 3          # modo teste expira sozinho depois disso
 AUDITORIA_LIMITE = 500        # quantas mensagens recentes a auditoria confere
 AUDITORIA_CADA_TICKS = 4      # a cada 4 ticks de 30s = a cada 2 minutos
 
@@ -310,6 +311,35 @@ class Clips(commands.Cog):
     def _ciclo_do_canal_atual(self) -> bool:
         ciclo = self.ciclo
         return bool(ciclo) and int(ciclo.get("canal_id", CANAL_CLIPS_ID_ANTIGO)) == self._canal_id()
+
+    def _teste_ativo(self) -> bool:
+        """Modo teste (prazos curtos) só vale por poucas horas depois de ligado.
+        Assim ele nunca fica 'esquecido' ligado e encurta um ciclo de verdade."""
+        mt = self.cfg["modo_teste"]
+        if not mt.get("ativo"):
+            return False
+        try:
+            valido = agora_utc() - _dt(mt["ligado_em"]) < timedelta(hours=TESTE_VALIDADE_H)
+        except Exception:
+            valido = False  # sem data de quando foi ligado (estado antigo): não vale
+        if not valido:
+            mt["ativo"] = False
+            self._salvar()
+            print("[CLIPS] 🧪 Modo teste expirado: voltando aos prazos do calendário.")
+        return valido
+
+    def _corrigir_prazos(self, ciclo: dict) -> bool:
+        """Se o ciclo aberto não está com os prazos do calendário (e não há modo
+        teste de propósito), conserta: fecha no dia 1 do mês seguinte à abertura."""
+        if self._teste_ativo() or ciclo.get("prazo_manual") or ciclo["fase"] != "aberto" or ciclo.get("transicao"):
+            return False
+        fa, ff = calcular_prazos_calendario(_dt(ciclo["inicio"]))
+        if _dt(ciclo["fim_aberto"]) == fa and _dt(ciclo["fim_final"]) == ff:
+            return False
+        print(f"[CLIPS] 🗓️ Prazos do ciclo corrigidos: fecha em {fa.astimezone(TZ):%d/%m/%Y %H:%M}.")
+        ciclo["fim_aberto"], ciclo["fim_final"] = _iso(fa), _iso(ff)
+        self._salvar()
+        return True
 
     def _erro(self, ciclo: Optional[dict], texto: str):
         print(f"[CLIPS] ⚠️ {texto}")
@@ -674,6 +704,7 @@ class Clips(commands.Cog):
                 await self._iniciar_ciclo(canal)
                 return
             agora = agora_utc()
+            self._corrigir_prazos(ciclo)
 
             if ciclo.get("transicao") == "final":
                 await self._executar_final(canal, ciclo)
@@ -799,7 +830,7 @@ class Clips(commands.Cog):
     async def _estender_ciclo(self, canal: discord.TextChannel, ciclo: dict):
         """Menos de MIN_PARTICIPANTES autores: sem prêmio, o ciclo segue (nada é apagado)."""
         agora = agora_utc()
-        if self.cfg["modo_teste"]["ativo"]:
+        if self._teste_ativo():
             mt = self.cfg["modo_teste"]
             fim_aberto, fim_final = calcular_prazos_teste(agora, mt["aberto_min"], mt["final_min"])
         else:
@@ -1248,7 +1279,7 @@ class Clips(commands.Cog):
         self.estado["contador_ciclos"] = self.estado.get("contador_ciclos", 0) + 1
         local = agora.astimezone(TZ)
         mt = self.cfg["modo_teste"]
-        if mt["ativo"]:
+        if self._teste_ativo():
             fim_aberto, fim_final = calcular_prazos_teste(agora, mt["aberto_min"], mt["final_min"])
         else:
             fim_aberto, fim_final = calcular_prazos_calendario(agora)
@@ -1423,7 +1454,7 @@ class Clips(commands.Cog):
             inline=True,
         )
         emb.add_field(name="Ranking parcial", value="\n".join(linhas) or "_Sem clips ainda._", inline=False)
-        if self.cfg["modo_teste"]["ativo"]:
+        if self._teste_ativo():
             emb.add_field(name="🧪 Modo teste", value="ATIVO (prazos curtos)", inline=False)
         if ciclo.get("erros"):
             emb.add_field(name="⚠️ Últimos erros", value="\n".join(ciclo["erros"][-5:])[:1000], inline=False)
@@ -1443,6 +1474,7 @@ class Clips(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
         chave = "fim_aberto" if ciclo["fase"] == "aberto" else "fim_final"
         ciclo[chave] = _iso(agora_utc())
+        ciclo["prazo_manual"] = True  # a staff mandou encerrar: não "corrige" o prazo de volta
         self._salvar()
         await self._avancar_ciclo()
         await interaction.followup.send(
@@ -1484,7 +1516,7 @@ class Clips(commands.Cog):
     ):
         if not await self._exigir_admin(interaction):
             return
-        self.cfg["modo_teste"] = {"ativo": ativo, "aberto_min": aberto_min, "final_min": final_min}
+        self.cfg["modo_teste"] = {"ativo": ativo, "aberto_min": aberto_min, "final_min": final_min, "ligado_em": _iso(agora_utc())}
         ciclo = self.ciclo
         agora = agora_utc()
         if ciclo and not ciclo.get("transicao"):
@@ -1614,6 +1646,7 @@ class Clips(commands.Cog):
                 for chave in ("cabecalho_id", "rodape_id", "final_msg_id"):
                     await self._api_deletar(canal, antigo.get(chave))
             self.estado["ciclo"] = None
+            self.cfg["modo_teste"]["ativo"] = False  # reiniciar sempre usa as datas reais
             self._salvar()
 
             try:
