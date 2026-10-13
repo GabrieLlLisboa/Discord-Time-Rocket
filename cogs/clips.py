@@ -55,7 +55,8 @@ from cogs.players import STAFF_IDS
 #  Perfil: data/perfis.json  ->  perfil["clips"] + perfil["medalhas"].
 # ─────────────────────────────────────────────────────────────────────────
 
-CANAL_CLIPS_ID = 1559274806044524695
+CANAL_CLIPS_ID = 1559290258481483906          # canal de clips atual
+CANAL_CLIPS_ID_ANTIGO = 1559274806044524695   # canal usado antes (ciclos sem canal salvo eram dele)
 
 EMOJI_VOTO = "🚀"
 EMOJI_VENCEDOR = "🏆"
@@ -160,8 +161,6 @@ def eh_arquivo_video(nome: str, content_type: Optional[str]) -> bool:
         return True
     return (nome or "").lower().endswith(EXTENSOES_VIDEO)
 
-    
-
 
 def validar_envio(conteudo: str, anexos: list, tem_sticker: bool = False) -> Optional[str]:
     """Devolve None se a mensagem é um envio válido, ou o motivo da recusa.
@@ -178,20 +177,10 @@ def validar_envio(conteudo: str, anexos: list, tem_sticker: bool = False) -> Opt
     texto = (conteudo or "").strip()
     if len(texto) > MAX_LEGENDA:
         return f"A legenda pode ter no máximo **{MAX_LEGENDA} caracteres**."
-    if contem_link(texto):
+    if re.search(r"https?://|discord\.gg/|www\.", texto, re.IGNORECASE):
         return "Links não são permitidos — envie o **arquivo** do vídeo."
     return None
 
-def contem_link(texto: str) -> bool:
-    """Detecta URLs, com ou sem protocolo (ex.: https://medal.tv/x ou medal.tv/x)."""
-    if not texto:
-        return False
-    return bool(re.search(
-        r"https?://|discord\.gg/|www\."
-        r"|\b[\w-]+\.(?:tv|com|net|org|gg|io|br|co|me|app|xyz|link|fm|live|club|video|to|cc|dev|games|game|stream|site|online|shop|store|tech|edu|gov|info|biz)\b",
-        texto,
-        re.IGNORECASE,
-    ))
 
 def escolher_finalistas(candidatos: dict, votos: dict, limite: int = MAX_FINALISTAS) -> list:
     """Top `limite` clips por voto, no máximo 1 por autor (o melhor de cada).
@@ -238,7 +227,9 @@ def chave_cargo(sequencia: int) -> str:
 def estado_padrao() -> dict:
     return {
         "config": {
-            "canal_id": CANAL_CLIPS_ID,
+            "canal_id": None,            # só vale se canal_manual (definido em /clips setup canal:)
+            "canal_manual": False,
+            "staff_livre": True,         # staff pode conversar no canal sem ter a mensagem apagada
             "hall_canal_id": None,
             "cargos": {},
             "modo_teste": {"ativo": False, "aberto_min": 10, "final_min": 5},
@@ -277,6 +268,7 @@ class Clips(commands.Cog):
         self._rodape_sujo = False
         self._rodape_tarefa: Optional[asyncio.Task] = None
         self._ticks = 0
+        self._avisou_canal = False
 
     # ── ciclo de vida ───────────────────────────────────────────────────
     async def cog_load(self):
@@ -301,9 +293,20 @@ class Clips(commands.Cog):
     def _salvar(self):
         salvar_json(ARQUIVO, self.estado)
 
+    def _canal_id(self) -> int:
+        """O canal vem da constante CANAL_CLIPS_ID, a não ser que alguém tenha
+        escolhido outro de propósito com /clips setup canal:#canal."""
+        if self.cfg.get("canal_manual") and self.cfg.get("canal_id"):
+            return int(self.cfg["canal_id"])
+        return CANAL_CLIPS_ID
+
     def _canal(self) -> Optional[discord.TextChannel]:
-        canal = self.bot.get_channel(int(self.cfg["canal_id"]))
+        canal = self.bot.get_channel(self._canal_id())
         return canal if isinstance(canal, discord.TextChannel) else None
+
+    def _ciclo_do_canal_atual(self) -> bool:
+        ciclo = self.ciclo
+        return bool(ciclo) and int(ciclo.get("canal_id", CANAL_CLIPS_ID_ANTIGO)) == self._canal_id()
 
     def _erro(self, ciclo: Optional[dict], texto: str):
         print(f"[CLIPS] ⚠️ {texto}")
@@ -329,9 +332,9 @@ class Clips(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.guild is None or message.author.bot:
             return
-        if message.channel.id != int(self.cfg["canal_id"]):
+        if message.channel.id != self._canal_id():
             return
-        if not self.ciclo:
+        if not self._ciclo_do_canal_atual():
             return
         async with self._lock:
             ciclo = self.ciclo
@@ -339,7 +342,7 @@ class Clips(commands.Cog):
                 await self._processar_mensagem(message, ciclo)
 
     async def _processar_mensagem(self, message: discord.Message, ciclo: dict):
-        staff = self._eh_staff(message.author)
+        staff = self._eh_staff(message.author) and self.cfg.get("staff_livre", True)
         anexos = [(a.filename, a.content_type) for a in message.attachments]
         motivo = validar_envio(message.content, anexos, bool(message.stickers))
         fechado = ciclo["fase"] != "aberto" or bool(ciclo.get("transicao"))
@@ -355,9 +358,8 @@ class Clips(commands.Cog):
             )
             return
 
-        i        if motivo:
-            # Staff pode conversar no canal, mas links continuam proibidos.
-            if staff and not contem_link(message.content):
+        if motivo:
+            if staff:  # staff pode conversar no canal
                 self.agendar_rodape()
                 return
             await self._rejeitar(message, motivo)
@@ -387,6 +389,8 @@ class Clips(commands.Cog):
 
         try:
             await message.add_reaction(EMOJI_VOTO)
+        except discord.Forbidden:
+            self._erro(ciclo, "SEM PERMISSÃO pra reagir no canal de clips — dê **Adicionar Reações** e **Ler histórico** ao bot.")
         except discord.HTTPException as e:
             self._erro(ciclo, f"Não consegui reagir no clip {message.id}: {e}")
 
@@ -396,8 +400,10 @@ class Clips(commands.Cog):
     async def _rejeitar(self, message: discord.Message, motivo: str):
         try:
             await message.delete()
-        except discord.HTTPException:
-            pass
+        except discord.Forbidden:
+            self._erro(self.ciclo, "SEM PERMISSÃO pra apagar mensagens no canal de clips — dê **Gerenciar Mensagens** ao bot.")
+        except discord.HTTPException as e:
+            self._erro(self.ciclo, f"Não consegui apagar a mensagem {message.id}: {e}")
         try:
             await message.channel.send(
                 f"{message.author.mention} ⚠️ {motivo}",
@@ -410,7 +416,7 @@ class Clips(commands.Cog):
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
         ciclo = self.ciclo
-        if not ciclo or payload.channel_id != int(self.cfg["canal_id"]):
+        if not ciclo or payload.channel_id != self._canal_id():
             return
         c = ciclo["candidatos"].get(str(payload.message_id))
         if c and not c.get("removido"):
@@ -425,7 +431,7 @@ class Clips(commands.Cog):
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         ciclo = self.ciclo
-        if not ciclo or payload.channel_id != int(self.cfg["canal_id"]):
+        if not ciclo or payload.channel_id != self._canal_id():
             return
         if payload.user_id == self.bot.user.id or str(payload.emoji) != EMOJI_VOTO:
             return
@@ -528,11 +534,35 @@ class Clips(commands.Cog):
     async def _antes_tick(self):
         await self.bot.wait_until_ready()
 
+    async def _iniciar_ciclo(self, canal: discord.TextChannel):
+        """Abre um ciclo novo no canal (cabeçalho com as regras + rodapé)."""
+        ciclo = self._novo_ciclo(agora_utc())
+        msg = await canal.send(embed=self._embed_ciclo(ciclo), allowed_mentions=discord.AllowedMentions.none())
+        ciclo["cabecalho_id"] = msg.id
+        self.estado["ciclo"] = ciclo
+        self._salvar()
+        self.agendar_rodape()
+        print(f"[CLIPS] 🟢 Ciclo {ciclo['id']} aberto em #{canal.name} ({canal.id}).")
+        return ciclo, msg
+
     async def _avancar_ciclo(self):
         async with self._lock:
-            ciclo = self.ciclo
             canal = self._canal()
-            if not ciclo or canal is None:
+            if canal is None:
+                if not self._avisou_canal:
+                    print(f"[CLIPS] ⚠️ Canal de clips {self._canal_id()} não encontrado — o bot não enxerga esse canal.")
+                    self._avisou_canal = True
+                return
+            self._avisou_canal = False
+
+            ciclo = self.ciclo
+            if ciclo and not self._ciclo_do_canal_atual():
+                print("[CLIPS] ↪️ O canal de clips mudou: abandonando o ciclo do canal antigo e abrindo um novo.")
+                self.estado["ciclo"] = ciclo = None
+                self._salvar()
+            if not ciclo:
+                # não precisa de /clips setup pra funcionar: sem ciclo, abre um
+                await self._iniciar_ciclo(canal)
                 return
             agora = agora_utc()
 
@@ -1115,6 +1145,7 @@ class Clips(commands.Cog):
             fim_aberto, fim_final = calcular_prazos_calendario(agora)
         return {
             "numero": self.estado["contador_ciclos"],
+            "canal_id": self._canal_id(),
             "id": f"{local.year}-{local.month:02d}",
             "fase": "aberto",
             "transicao": None,
@@ -1161,6 +1192,7 @@ class Clips(commands.Cog):
         guild = interaction.guild
         if canal is not None:
             self.cfg["canal_id"] = canal.id
+            self.cfg["canal_manual"] = True
         canal_clips = self._canal()
         if canal_clips is None:
             await interaction.followup.send("❌ Não encontrei o canal de clips. Informe o parâmetro `canal`.", ephemeral=True)
@@ -1191,6 +1223,8 @@ class Clips(commands.Cog):
                 avisos.append(f"⚠️ Não consegui criar o Hall da Fama ({e}).")
 
         async with self._lock:
+            if self.ciclo and not self._ciclo_do_canal_atual():
+                self.estado["ciclo"] = None  # ciclo era de outro canal
             if self.ciclo:
                 self._salvar()
                 await interaction.followup.send(
@@ -1200,11 +1234,11 @@ class Clips(commands.Cog):
                 return
 
             agora = agora_utc()
-            ciclo = self._novo_ciclo(agora)
-            self.estado["ciclo"] = ciclo
-            msg = await canal_clips.send(embed=self._embed_ciclo(ciclo), allowed_mentions=discord.AllowedMentions.none())
-            ciclo["cabecalho_id"] = msg.id
-            self._salvar()
+            try:
+                ciclo, msg = await self._iniciar_ciclo(canal_clips)
+            except discord.HTTPException as e:
+                await interaction.followup.send(f"❌ Não consegui postar no canal de clips: {e}", ephemeral=True)
+                return
 
             importados = 0
             if importar_existentes:
@@ -1365,6 +1399,58 @@ class Clips(commands.Cog):
             if ativo else "✅ Modo teste **desligado**: prazos voltaram pro calendário normal."
         )
         await interaction.response.send_message(txt, ephemeral=True)
+
+    @clips.command(name="diagnostico", description="Confere se o bot está configurado direito pro canal de clips.")
+    async def diag_cmd(self, interaction: discord.Interaction):
+        if not await self._exigir_admin(interaction):
+            return
+        linhas = []
+
+        def item(ok: bool, texto: str):
+            linhas.append(("✅ " if ok else "❌ ") + texto)
+
+        canal = self._canal()
+        item(canal is not None, f"Canal `{self._canal_id()}` encontrado pelo bot"
+             + (f": {canal.mention}" if canal else " — **o bot não enxerga esse canal** (ID errado ou sem acesso)."))
+        if canal is not None:
+            p = canal.permissions_for(canal.guild.me)
+            for nome, attr in [
+                ("Ver canal", "view_channel"),
+                ("Ler histórico de mensagens", "read_message_history"),
+                ("Enviar mensagens", "send_messages"),
+                ("**Gerenciar mensagens** (apagar o que não é vídeo)", "manage_messages"),
+                ("**Adicionar reações** (o 🚀 em cada clip)", "add_reactions"),
+                ("Incorporar links", "embed_links"),
+                ("Anexar arquivos (Hall da Fama)", "attach_files"),
+                ("Mencionar @everyone", "mention_everyone"),
+                ("Gerenciar permissões do canal (trancar na final)", "manage_roles"),
+            ]:
+                item(getattr(p, attr), nome)
+            item(canal.guild.me.guild_permissions.manage_roles, "Gerenciar cargos no servidor (cargos de campeão)")
+        ciclo = self.ciclo
+        item(bool(ciclo) and self._ciclo_do_canal_atual(),
+             "Ciclo ativo neste canal" + (f" (`{ciclo['id']}`, fase **{ciclo['fase']}**)" if ciclo else " — ainda não abriu; o relógio abre em até 30s"))
+        item(self.tick.is_running(), "Relógio do ciclo rodando")
+        linhas.append(
+            f"ℹ️ Staff livre pra conversar no canal: **{'sim' if self.cfg.get('staff_livre', True) else 'não'}** "
+            "(se você testa com conta de staff/admin, suas mensagens NÃO são apagadas — use `/clips staff-livre`)."
+        )
+        if ciclo and ciclo.get("erros"):
+            linhas.append("⚠️ **Últimos erros:**\n" + "\n".join(ciclo["erros"][-5:]))
+        await interaction.response.send_message("\n".join(linhas)[:1900], ephemeral=True)
+
+    @clips.command(name="staff-livre", description="Liga/desliga a staff poder conversar no canal sem ter mensagem apagada.")
+    @app_commands.describe(ativo="Sim = a staff pode falar no canal; Não = a staff também só pode mandar vídeo (bom pra testar)")
+    async def staff_livre_cmd(self, interaction: discord.Interaction, ativo: bool):
+        if not await self._exigir_admin(interaction):
+            return
+        self.cfg["staff_livre"] = ativo
+        self._salvar()
+        await interaction.response.send_message(
+            "✅ Staff **livre** pra conversar no canal." if ativo
+            else "✅ Agora **todo mundo**, inclusive a staff, só pode mandar vídeo no canal de clips.",
+            ephemeral=True,
+        )
 
     @clips.command(name="historico", description="Veja os últimos campeões do Clip do Mês.")
     async def historico_cmd(self, interaction: discord.Interaction):

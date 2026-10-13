@@ -1,5 +1,5 @@
 --- orig/medalhas.py	2026-10-12 16:32:05.151072858 -0300
-+++ "zipx/Discord Time Rocket/cogs/medalhas.py"	2026-10-12 16:36:36.848151332 -0300
++++ "/tmp/claude-0/-home-claude/97f97dd7-97a8-5201-b554-8dccad32ec64/scratchpad/zipx/Discord Time Rocket/cogs/medalhas.py"	2026-10-12 16:36:36.848151332 -0300
 @@ -43,6 +43,11 @@
      {"id": "lenda_do_chat",     "emoji": "📢",  "nome": "Lenda do Chat",        "descricao": "Mande 2.000 mensagens no servidor.",  "criterio": _criterio("mensagens_totais", 2000)},
      {"id": "membro_fiel",       "emoji": "⏳",  "nome": "Membro Fiel",          "descricao": "Fique 6 meses no servidor.",          "criterio": _criterio("dias_no_servidor", 180)},
@@ -13,8 +13,8 @@
  MEDALHAS_POR_ID = {m["id"]: m for m in MEDALHAS}
  
 --- orig/stats.py	2026-10-12 16:32:05.151195474 -0300
-+++ "zipx/Discord Time Rocket/cogs/stats.py"	2026-10-12 16:38:11.618506659 -0300
-@@ -142,6 +142,27 @@
++++ "/tmp/claude-0/-home-claude/97f97dd7-97a8-5201-b554-8dccad32ec64/scratchpad/zipx/Discord Time Rocket/cogs/stats.py"	2026-10-13 08:03:53.045254173 -0300
+@@ -142,6 +142,53 @@
          embed.add_field(name="\u200b", value="```╔══════════  ⭐  DESTAQUES  ══════════╗```", inline=False)
          embed.add_field(name="\u200b", value=destaques_txt, inline=False)
  
@@ -39,26 +39,54 @@
 +            embed.add_field(name="🏅  Finais", value=f"`{clips.get('finais', 0)}`", inline=True)
 +            embed.add_field(name="🎞️  Clips enviados", value=f"`{clips.get('enviados', 0)}`", inline=True)
 +
++        # amistoso interno: MMR, tier e campanha por modo (cogs/interno.py)
++        interno = dados.get("interno") or {}
++        modos_jogados = [
++            (modo, interno[modo]) for modo in ("1v1", "2v2", "3v3")
++            if isinstance(interno.get(modo), dict) and interno[modo].get("jogos", 0) > 0
++        ]
++        if modos_jogados:
++            try:
++                from cogs.interno import tier_para_mmr, PARTIDAS_CALIBRAGEM
++            except Exception:
++                tier_para_mmr, PARTIDAS_CALIBRAGEM = None, 5
++            embed.add_field(name="\u200b", value="```╔══════════  ⚔️  INTERNO  ══════════╗```", inline=False)
++            for modo, d in modos_jogados:
++                jogos = d["jogos"]
++                if tier_para_mmr and jogos >= PARTIDAS_CALIBRAGEM:
++                    nome_tier, emoji_tier, _ = tier_para_mmr(d["mmr"])
++                    linha_tier = f"{emoji_tier} {nome_tier}"
++                else:
++                    linha_tier = f"🧪 calibrando ({jogos}/{PARTIDAS_CALIBRAGEM})"
++                wr = round(d.get("vitorias", 0) / jogos * 100)
++                embed.add_field(
++                    name=f"⚔️  {modo}",
++                    value=f"`{d['mmr']}` MMR\n{linha_tier}\n`{d.get('vitorias', 0)}V {d.get('derrotas', 0)}D` • {wr}%",
++                    inline=True,
++                )
++
          # staff da whitelist: quantas whitelists já aprovou/recusou
          if any(r.id == CARGO_STAFF_WHITELIST_ID for r in membro.roles):
              aprovadas, recusadas = obter_stats_whitelist(membro.id)
 --- orig/backup.py	2026-10-12 16:32:05.151223398 -0300
-+++ "zipx/Discord Time Rocket/cogs/backup.py"	2026-10-12 16:36:29.088151510 -0300
-@@ -27,6 +27,7 @@
++++ "/tmp/claude-0/-home-claude/97f97dd7-97a8-5201-b554-8dccad32ec64/scratchpad/zipx/Discord Time Rocket/cogs/backup.py"	2026-10-13 08:03:12.383375494 -0300
+@@ -27,6 +27,8 @@
      "anuncios_config":  "data/anuncios_config.json",
      "loja":             "data/loja.json",
      "conversas_pv":     "data/conversas_pv.json",
 +    "clips":            "data/clips.json",
++    "interno":          "data/interno.json",
  }
  
  os.makedirs(DATA_DIR, exist_ok=True)
 --- orig/main.py	2026-10-12 16:32:05.151301750 -0300
-+++ "zipx/Discord Time Rocket/main.py"	2026-10-12 16:36:27.688151542 -0300
-@@ -172,6 +172,7 @@
++++ "/tmp/claude-0/-home-claude/97f97dd7-97a8-5201-b554-8dccad32ec64/scratchpad/zipx/Discord Time Rocket/main.py"	2026-10-13 08:03:10.983375411 -0300
+@@ -172,6 +172,8 @@
      "cogs.clear",
      "cogs.estrutura_secreta",
      "cogs.eleicao",
 +    "cogs.clips",
++    "cogs.interno",
  ]
  
  async def _resultado_check(check, ctx_ou_interaction):

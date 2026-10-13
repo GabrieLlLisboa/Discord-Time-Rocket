@@ -173,6 +173,7 @@ COGS = [
     "cogs.estrutura_secreta",
     "cogs.eleicao",
     "cogs.clips",
+    "cogs.interno",
 ]
 
 async def _resultado_check(check, ctx_ou_interaction):

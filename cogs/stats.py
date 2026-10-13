@@ -163,6 +163,32 @@ class Stats(commands.Cog):
             embed.add_field(name="🏅  Finais", value=f"`{clips.get('finais', 0)}`", inline=True)
             embed.add_field(name="🎞️  Clips enviados", value=f"`{clips.get('enviados', 0)}`", inline=True)
 
+        # amistoso interno: MMR, tier e campanha por modo (cogs/interno.py)
+        interno = dados.get("interno") or {}
+        modos_jogados = [
+            (modo, interno[modo]) for modo in ("1v1", "2v2", "3v3")
+            if isinstance(interno.get(modo), dict) and interno[modo].get("jogos", 0) > 0
+        ]
+        if modos_jogados:
+            try:
+                from cogs.interno import tier_para_mmr, PARTIDAS_CALIBRAGEM
+            except Exception:
+                tier_para_mmr, PARTIDAS_CALIBRAGEM = None, 5
+            embed.add_field(name="\u200b", value="```╔══════════  ⚔️  INTERNO  ══════════╗```", inline=False)
+            for modo, d in modos_jogados:
+                jogos = d["jogos"]
+                if tier_para_mmr and jogos >= PARTIDAS_CALIBRAGEM:
+                    nome_tier, emoji_tier, _ = tier_para_mmr(d["mmr"])
+                    linha_tier = f"{emoji_tier} {nome_tier}"
+                else:
+                    linha_tier = f"🧪 calibrando ({jogos}/{PARTIDAS_CALIBRAGEM})"
+                wr = round(d.get("vitorias", 0) / jogos * 100)
+                embed.add_field(
+                    name=f"⚔️  {modo}",
+                    value=f"`{d['mmr']}` MMR\n{linha_tier}\n`{d.get('vitorias', 0)}V {d.get('derrotas', 0)}D` • {wr}%",
+                    inline=True,
+                )
+
         # staff da whitelist: quantas whitelists já aprovou/recusou
         if any(r.id == CARGO_STAFF_WHITELIST_ID for r in membro.roles):
             aprovadas, recusadas = obter_stats_whitelist(membro.id)
