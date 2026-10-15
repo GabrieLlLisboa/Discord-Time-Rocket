@@ -7,6 +7,7 @@ import re
 import time
 import unicodedata
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from cogs.backup import ler, salvar
 from cogs.players import CARGOS as PLAYER_CARGOS, aplicar_cargo_rank, CARGO_GERAL_SEM_DIVISAO_IDS
@@ -177,6 +178,27 @@ TEMPOS_JOGANDO = ["Menos de 1 ano", "1 a 2 anos", "2 a 4 anos", "Mais de 4 anos"
 
 
 HABILIDADES = ["Programação", "Designer", "Roteiro", "Editor de vídeo", "Administração"]
+
+
+# plataforma da whitelist -> nome usado na URL do Rocket League Tracker.
+# PC cai em "epic" (a maioria joga pela Epic); se o perfil for Steam, é só trocar
+# "epic" por "steam" na URL aberta.
+TRACKER_PLATAFORMAS = {
+    "PC": "epic",
+    "Xbox": "xbl",
+    "PlayStation": "psn",
+    "Switch": "switch",
+}
+
+
+def url_tracker(respostas: dict | None) -> str | None:
+    """Link do perfil no Rocket League Tracker (nick + plataforma da whitelist)."""
+    r = respostas or {}
+    nick = (r.get("nick") or "").strip()
+    plat = TRACKER_PLATAFORMAS.get(r.get("plataforma", ""))
+    if not nick or nick == "—" or not plat:
+        return None
+    return f"https://rocketleague.tracker.network/rocket-league/profile/{plat}/{quote(nick, safe='')}/overview"
 
 
 def _pode_gerir(membro) -> bool:
@@ -553,6 +575,14 @@ class ComecarWhitelistView(_ViewComErro):
             await interaction.response.send_message("❌ Apenas staff pode fechar.", ephemeral=True)
             return
         cog: Whitelist = interaction.client.get_cog("Whitelist")
+        # whitelist em análise por um manager: só ele pode fechar o canal
+        registro_canal = next(
+            (r for r in cog.dados.values() if r.get("canal_id") == interaction.channel.id), None
+        )
+        bloqueio = cog._bloqueio_analise(registro_canal, interaction.user.id)
+        if bloqueio:
+            await interaction.response.send_message(bloqueio, ephemeral=True)
+            return
         cog.marcar_cancelada(interaction.channel.id, motivo="staff")
         await interaction.response.send_message("🔒 Fechando canal em 3 segundos...")
         await asyncio.sleep(3)
@@ -813,8 +843,15 @@ class RevisaoWhitelistView(discord.ui.View):
 
     Passando guild_id e canal_id aparece o botão 📂 que abre o chat da
     whitelist (usado na mensagem do canal de log)."""
-    def __init__(self, guild_id: int | None = None, canal_id: int | None = None):
+    def __init__(self, guild_id: int | None = None, canal_id: int | None = None, tracker_url: str | None = None):
         super().__init__(timeout=None)
+        if tracker_url:
+            self.add_item(discord.ui.Button(
+                label="📊 Ver no Tracker",
+                style=discord.ButtonStyle.link,
+                url=tracker_url,
+                row=1,
+            ))
         if guild_id and canal_id and canal_id > 0:
             self.add_item(discord.ui.Button(
                 label="📂 Abrir chat da whitelist",
@@ -1805,7 +1842,7 @@ class Whitelist(commands.Cog):
             description=f"Analisa as respostas de {membro.mention} e decide abaixo.\n(apenas a **staff da whitelist**)",
             color=0xFEE75C,
         )
-        msg_revisao = await interaction.channel.send(embed=embed_revisao, view=RevisaoWhitelistView())
+        msg_revisao = await interaction.channel.send(embed=embed_revisao, view=RevisaoWhitelistView(tracker_url=url_tracker(r)))
         # guarda as mensagens de revisão: é por elas que o clique descobre de quem é a whitelist
         revisao_msgs = [{"canal_id": interaction.channel.id, "msg_id": msg_revisao.id}]
 
@@ -1822,7 +1859,7 @@ class Whitelist(commands.Cog):
                 embed.set_footer(text=f"ID: {membro.id}")
                 try:
                     # mesmos botões de revisão + 📂 "Abrir chat da whitelist" ao lado
-                    msg_log = await canal_log.send(embed=embed, view=RevisaoWhitelistView(guild.id, interaction.channel.id))
+                    msg_log = await canal_log.send(embed=embed, view=RevisaoWhitelistView(guild.id, interaction.channel.id, url_tracker(r)))
                     revisao_msgs.append({"canal_id": canal_log.id, "msg_id": msg_log.id})
                 except discord.HTTPException as e:
                     print(f"[WHITELIST] ⚠️ Não consegui enviar a revisão pro canal de log: {e}")
@@ -1898,6 +1935,20 @@ class Whitelist(commands.Cog):
             if len(edicoes) > 5:
                 linhas.insert(0, f"*(+{len(edicoes) - 5} edição(ões) anterior(es))*")
             embed.add_field(name="✏️ Editado pela staff", value="\n".join(linhas)[:1024], inline=False)
+
+    @staticmethod
+    def _bloqueio_analise(registro: dict | None, autor_id: int) -> str | None:
+        """Trava geral de "em análise": depois que um manager clicou em
+        👀 Marcar como Visualizada, SÓ ele mexe na whitelist (abrir/fechar chat,
+        editar, aprovar, recusar). Vale pra qualquer outro staff, admin e
+        até o dono do bot. Devolve o aviso, ou None se pode seguir."""
+        if not registro:
+            return None
+        dono = registro.get("visualizado_por_id")
+        if dono is not None and dono != autor_id:
+            nome = registro.get("visualizado_por_nome", "outro administrador")
+            return f"🔒 Essa whitelist está em análise por **{_limpo(nome)}** — só ela(e) pode mexer nela."
+        return None
 
     def _bloqueio_edicao(self, membro_id: int, autor_id: int) -> str | None:
         """Quando a staff NÃO pode editar. Devolve o aviso, ou None se pode."""
@@ -2047,12 +2098,22 @@ class Whitelist(commands.Cog):
                 continue
             try:
                 msg = await canal.fetch_message(ref["msg_id"])
-                if not msg.embeds or not any(f.name == "Nick RL" for f in msg.embeds[0].fields):
-                    continue  # a mensagem de revisão do canal não tem o resumo
-                embed = msg.embeds[0].copy()
-                embed.clear_fields()
-                self._campos_resumo(embed, registro)
-                await msg.edit(embed=embed)
+                kwargs = {}
+                if ref in registro.get("revisao_msgs", []):
+                    # nick/plataforma podem ter mudado: refaz o botão do tracker
+                    no_log = ref.get("canal_id") != registro.get("canal_id")
+                    kwargs["view"] = RevisaoWhitelistView(
+                        canal.guild.id if no_log else None,
+                        registro.get("canal_id") if no_log else None,
+                        url_tracker(registro.get("respostas")),
+                    )
+                if msg.embeds and any(f.name == "Nick RL" for f in msg.embeds[0].fields):
+                    embed = msg.embeds[0].copy()
+                    embed.clear_fields()
+                    self._campos_resumo(embed, registro)
+                    kwargs["embed"] = embed
+                if kwargs:  # a mensagem de revisão do canal não tem o resumo: só o botão muda
+                    await msg.edit(**kwargs)
             except discord.HTTPException:
                 continue
 
@@ -2072,6 +2133,10 @@ class Whitelist(commands.Cog):
             return
         if status == "em_andamento":
             await interaction.followup.send("ℹ️ O candidato ainda está respondendo — o chat dele já está liberado.", ephemeral=True)
+            return
+        bloqueio = self._bloqueio_analise(registro, interaction.user.id)
+        if bloqueio:
+            await interaction.followup.send(bloqueio, ephemeral=True)
             return
 
         canal = self.bot.get_channel(registro.get("canal_id") or 0)
@@ -2528,6 +2593,11 @@ class Whitelist(commands.Cog):
                 "⚠️ Informe pelo menos um campo pra alterar.",
                 ephemeral=True,
             )
+            return
+
+        bloqueio = self._bloqueio_analise(self.dados.get(str(membro.id)), interaction.user.id)
+        if bloqueio:
+            await interaction.response.send_message(bloqueio, ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
