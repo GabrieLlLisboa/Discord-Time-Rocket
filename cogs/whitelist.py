@@ -3054,6 +3054,124 @@ class Whitelist(commands.Cog):
         except discord.HTTPException:
             pass
 
+    # ══════════════════════════════════════════════════════════════════════
+    # !pconlycargos — mexe SÓ nos cargos (canais e categorias ficam como estão):
+    #   apaga todos os cargos comuns, recria os da Polícia Civil com cor,
+    #   permissões e hierarquia. Só o proprietário do servidor.
+    # ══════════════════════════════════════════════════════════════════════
+    @commands.command(name="pconlycargos")
+    @commands.guild_only()
+    async def pconlycargos(self, ctx: commands.Context):
+        guild = ctx.guild
+        if ctx.author.id != guild.owner_id:
+            await ctx.send("❌ Apenas o **proprietário do servidor** pode usar este comando.", delete_after=8)
+            return
+        if not (guild.me.guild_permissions.administrator or guild.me.guild_permissions.manage_roles):
+            await ctx.send("❌ Eu preciso da permissão **Gerenciar Cargos** (ou Administrador).")
+            return
+        lock = _PC_LOCKS.setdefault(guild.id, asyncio.Lock())
+        if lock.locked():
+            await ctx.send("⏳ Já existe uma operação em andamento. Use `!policiacivil status`.")
+            return
+
+        async with lock:
+            est = _pc_estado_novo()
+            est["fase"] = "executando"
+            est["iniciado"] = time.time()
+            est["autor"] = ctx.author.id
+            _PC_ESTADO[guild.id] = est
+            aviso = await ctx.send("⏳ Apagando os cargos antigos e recriando os da Polícia Civil... (canais não serão alterados)")
+            try:
+                await self._pc_apagar_cargos(guild, est)
+                await self._pc_criar_cargos(guild, est)
+                est["fase"] = "concluido"
+            except Exception as e:
+                _log_erro("pconlycargos", e)
+                est["fase"] = "erro"
+                est["falhas"].append(f"Erro inesperado: {str(e)[:200]}")
+            est["finalizado"] = time.time()
+
+            embed = discord.Embed(
+                title="🛡️ Relatório — só cargos",
+                color={"concluido": 0x57F287, "erro": 0xED4245}.get(est["fase"], 0x5865F2),
+            )
+            embed.add_field(name="🧹 Cargos apagados", value=str(est["apagados_cargos"]), inline=True)
+            embed.add_field(name="✅ Cargos criados", value=str(est["cargos_criados"]), inline=True)
+            embed.add_field(name="📶 Hierarquia", value="✅ ordenada" if est["hierarquia_ok"] else "⚠️ não ordenada", inline=True)
+            embed.add_field(
+                name="🔐 Permissões",
+                value=(
+                    "Chefia: moderação · Gestão (Adjunto→Delegado): mensagens/voz · Corregedoria: mensagens · "
+                    "Administrador do Servidor: gestão técnica (sem Administrador) · Bots: envio básico · demais: sem extras."
+                ),
+                inline=False,
+            )
+            falhas = est["falhas"]
+            if falhas:
+                texto = "\n".join(f"• {f}" for f in falhas[:10])
+                if len(falhas) > 10:
+                    texto += f"\n… e mais {len(falhas) - 10}"
+                embed.add_field(name=f"❌ Falhas ({len(falhas)})", value=texto[:1024], inline=False)
+            else:
+                embed.add_field(name="❌ Falhas", value="Nenhuma", inline=False)
+            embed.set_footer(text=f"Duração: {int(est['finalizado'] - est['iniciado'])}s")
+            try:
+                await aviso.edit(content=None, embed=embed)
+            except discord.HTTPException:
+                await ctx.send(embed=embed)
+
+    async def _pc_apagar_cargos(self, guild: discord.Guild, est: dict) -> None:
+        me = guild.me
+        for r in sorted(guild.roles, key=lambda x: x.position, reverse=True):
+            # fora: @everyone, cargos de bots/integrações, os cargos que o bot usa e os acima do dele
+            if r.is_default() or r.managed or r in me.roles or r.position >= me.top_role.position:
+                continue
+            try:
+                await r.delete(reason="!pconlycargos — recriando cargos")
+                est["apagados_cargos"] += 1
+            except discord.NotFound:
+                pass
+            except discord.HTTPException as e:
+                self._pc_falha(est, f"Apagar cargo '{r.name}'", e)
+            await asyncio.sleep(0.4)
+
+    async def _pc_criar_cargos(self, guild: discord.Guild, est: dict) -> None:
+        criados: list[discord.Role] = []
+        for key, nome, cor, perms, hoist in _PC_CARGOS:
+            role = _pc_achar(guild.roles, nome)  # se sobrou algum igual (não deu pra apagar), reaproveita
+            try:
+                if role is None:
+                    role = await guild.create_role(
+                        name=nome, colour=discord.Colour(int(cor, 16)),
+                        permissions=discord.Permissions(**perms), hoist=hoist,
+                        mentionable=False, reason="!pconlycargos",
+                    )
+                    est["cargos_criados"] += 1
+                else:
+                    await role.edit(
+                        colour=discord.Colour(int(cor, 16)), permissions=discord.Permissions(**perms),
+                        hoist=hoist, reason="!pconlycargos — ajustando",
+                    )
+                    est["cargos_existentes"] += 1
+                criados.append(role)
+            except discord.HTTPException as e:
+                self._pc_falha(est, f"Criar cargo '{nome}'", e)
+            await asyncio.sleep(0.5)
+
+        # hierarquia: ordem da lista _PC_CARGOS (de cima pra baixo), logo abaixo do cargo do bot
+        topo = guild.me.top_role.position - 1
+        try:
+            posicoes = {r: max(1, topo - i) for i, r in enumerate(criados)}
+            if hasattr(guild, "edit_role_positions"):
+                await guild.edit_role_positions(positions=posicoes, reason="!pconlycargos — hierarquia")
+            else:
+                for r, p in posicoes.items():
+                    await r.edit(position=p, reason="!pconlycargos — hierarquia")
+                    await asyncio.sleep(0.4)
+            est["hierarquia_ok"] = True
+        except discord.HTTPException as e:
+            self._pc_falha(est, "Ordenar hierarquia (arraste o cargo do bot para o topo e rode de novo)", e)
+
 
 # ── dados do !policiacivil ────────────────────────────────────────────────
 _PC_ESTADO: dict = {}
