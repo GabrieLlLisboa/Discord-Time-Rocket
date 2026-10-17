@@ -2711,5 +2711,540 @@ class Whitelist(commands.Cog):
             )
 
 
+    # ══════════════════════════════════════════════════════════════════════
+    # !policiacivil — reconstrução completa do servidor (Polícia Civil RP)
+    #   !policiacivil            → verificação + resumo (libera a confirmação por 5 min)
+    #   !policiacivil confirmar  → APAGA tudo e reconstrói
+    #   !policiacivil status     → progresso / resultado
+    # Só o PROPRIETÁRIO do servidor pode usar. Os dados da estrutura ficam nas
+    # constantes _PC_* logo abaixo da classe.
+    # ══════════════════════════════════════════════════════════════════════
+    @commands.command(name="policiacivil")
+    @commands.guild_only()
+    async def policiacivil(self, ctx: commands.Context, acao: str = None):
+        guild = ctx.guild
+        if ctx.author.id != guild.owner_id:
+            await ctx.send("❌ Apenas o **proprietário do servidor** pode usar este comando.", delete_after=8)
+            return
+
+        acao = (acao or "").lower().strip()
+        est = _PC_ESTADO.setdefault(guild.id, _pc_estado_novo())
+        lock = _PC_LOCKS.setdefault(guild.id, asyncio.Lock())
+
+        if acao == "status":
+            await ctx.send(embed=self._pc_relatorio(guild, est, titulo="📊 Status — !policiacivil"))
+            return
+
+        if acao not in ("", "confirmar"):
+            await ctx.send("Uso: `!policiacivil` · `!policiacivil confirmar` · `!policiacivil status`")
+            return
+
+        if lock.locked():
+            await ctx.send("⏳ Já existe uma reconstrução em andamento. Use `!policiacivil status`.")
+            return
+
+        # ── verificação de permissões do bot ──
+        me = guild.me
+        perms = me.guild_permissions
+        if not (perms.administrator or (perms.manage_roles and perms.manage_channels)):
+            await ctx.send("❌ Eu preciso das permissões **Gerenciar Cargos** e **Gerenciar Canais** (ou Administrador).")
+            return
+
+        fase_salva = self._pc_fase_salva(guild.id)
+        retomar = fase_salva == "construindo"
+
+        if acao == "":
+            est["pendente_ate"] = time.time() + 300
+            est["pendente_autor"] = ctx.author.id
+            n_canais = sum(len(c[3]) for c in _PC_ESTRUTURA) + len(_PC_VOZ)
+            aviso_pos = ""
+            if me.top_role.position < 3:
+                aviso_pos = (
+                    "\n⚠️ Meu cargo está muito embaixo na lista. **Arraste o cargo do bot para o topo** "
+                    "(Configurações → Cargos), senão não consigo ordenar a hierarquia."
+                )
+            if retomar:
+                corpo = (
+                    "🔁 Uma reconstrução anterior ficou **incompleta**. Ao confirmar, eu **não apago nada de novo**: "
+                    "só continuo criando o que faltou, sem duplicar."
+                )
+            else:
+                corpo = (
+                    "⚠️ **Ao confirmar, TUDO será apagado:** todas as categorias, canais (texto e voz) e cargos "
+                    "personalizados do servidor. Não tem como desfazer.\n"
+                    "Ficam preservados: o proprietário, @everyone, cargos de bots/integrações e os cargos que eu mesmo uso."
+                )
+            await ctx.send(
+                "🚔 **Reconstrução — Polícia Civil RP**\n"
+                f"{corpo}\n\n"
+                f"**Será criado:** {len(_PC_CARGOS)} cargos · {len(_PC_ESTRUTURA) + 1} categorias · {n_canais} canais\n"
+                f"{aviso_pos}\n"
+                "👉 Para executar, envie `!policiacivil confirmar` em até **5 minutos**."
+            )
+            return
+
+        # ── acao == "confirmar" ──
+        if est.get("pendente_autor") != ctx.author.id or time.time() > est.get("pendente_ate", 0):
+            await ctx.send("⚠️ Primeiro envie `!policiacivil` (para ver o resumo) e confirme em até 5 minutos.")
+            return
+        est["pendente_ate"] = 0
+
+        async with lock:
+            est.clear()
+            est.update(_pc_estado_novo())
+            est["fase"] = "executando"
+            est["iniciado"] = time.time()
+            est["autor"] = ctx.author.id
+            await ctx.send(
+                "🚨 **Iniciando!** " + ("Continuando a construção sem apagar." if retomar else
+                "Vou apagar a estrutura antiga — este canal também some.")
+                + "\nO relatório final vai para o canal **comandos-do-bot** e para a sua DM. Pode levar alguns minutos (respeito os limites da API)."
+            )
+            try:
+                if not retomar:
+                    self._pc_salvar_fase(guild.id, "apagando")
+                    await self._pc_apagar(guild, est)
+                    self._pc_salvar_fase(guild.id, "construindo")
+                await self._pc_construir(guild, est)
+                self._pc_salvar_fase(guild.id, "concluido")
+                est["fase"] = "concluido"
+            except Exception as e:
+                _log_erro("policiacivil", e)
+                est["fase"] = "erro"
+                est["falhas"].append(f"Erro inesperado: {str(e)[:200]} (rode `!policiacivil` e confirme de novo para continuar)")
+            est["finalizado"] = time.time()
+            await self._pc_enviar_relatorio(ctx, guild, est)
+
+    # ── persistência da fase (pra retomar sem apagar de novo) ──
+    def _pc_fase_salva(self, guild_id: int):
+        try:
+            d = ler("policiacivil")
+            return (d.get(str(guild_id)) or {}).get("fase") if isinstance(d, dict) else None
+        except Exception:
+            return None
+
+    def _pc_salvar_fase(self, guild_id: int, fase: str) -> None:
+        try:
+            d = ler("policiacivil")
+            if not isinstance(d, dict):
+                d = {}
+            d[str(guild_id)] = {"fase": fase, "ts": time.time()}
+            salvar("policiacivil", d)
+        except Exception as e:
+            _log_erro("policiacivil/salvar_fase", e)
+
+    @staticmethod
+    def _pc_falha(est: dict, o_que: str, e: BaseException) -> None:
+        motivo = getattr(e, "text", None) or str(e) or type(e).__name__
+        est["falhas"].append(f"{o_que}: {motivo}"[:300])
+        print(f"[POLICIACIVIL] ⚠️ {o_que}: {motivo}")
+
+    # ── 1) apagar a estrutura antiga ──
+    async def _pc_apagar(self, guild: discord.Guild, est: dict) -> None:
+        me = guild.me
+        # canais primeiro (categorias por último, senão os filhos ficam órfãos)
+        canais = [c for c in guild.channels if not isinstance(c, discord.CategoryChannel)] + list(guild.categories)
+        for c in canais:
+            try:
+                await c.delete(reason="!policiacivil — reconstrução total")
+                est["apagados_canais"] += 1
+            except discord.NotFound:
+                pass
+            except discord.HTTPException as e:
+                self._pc_falha(est, f"Apagar canal '{c.name}'", e)
+            await asyncio.sleep(0.4)
+
+        for r in sorted(guild.roles, key=lambda x: x.position, reverse=True):
+            # o Discord não deixa apagar @everyone, cargos gerenciados (bots/integrações) nem
+            # cargos acima do meu; e os cargos que eu uso ficam, senão perco as permissões
+            if r.is_default() or r.managed or r in me.roles or r.position >= me.top_role.position:
+                continue
+            try:
+                await r.delete(reason="!policiacivil — reconstrução total")
+                est["apagados_cargos"] += 1
+            except discord.NotFound:
+                pass
+            except discord.HTTPException as e:
+                self._pc_falha(est, f"Apagar cargo '{r.name}'", e)
+            await asyncio.sleep(0.4)
+
+    # ── 2) construir (idempotente: reaproveita o que já existe) ──
+    async def _pc_construir(self, guild: discord.Guild, est: dict) -> None:
+        mapa: dict[str, discord.Role] = {}
+
+        for key, nome, cor, perms, hoist in _PC_CARGOS:
+            role = _pc_achar(guild.roles, nome)
+            if role is not None:
+                mapa[key] = role
+                est["cargos_existentes"] += 1
+                continue
+            try:
+                mapa[key] = await guild.create_role(
+                    name=nome,
+                    colour=discord.Colour(int(cor, 16)),
+                    permissions=discord.Permissions(**perms),
+                    hoist=hoist,
+                    mentionable=False,
+                    reason="!policiacivil",
+                )
+                est["cargos_criados"] += 1
+            except discord.HTTPException as e:
+                self._pc_falha(est, f"Criar cargo '{nome}'", e)
+            await asyncio.sleep(0.5)
+
+        # hierarquia: a ordem da lista _PC_CARGOS é de cima pra baixo, logo abaixo do cargo do bot
+        ordem = [mapa[k] for k, *_ in _PC_CARGOS if k in mapa]
+        topo = guild.me.top_role.position - 1
+        try:
+            posicoes = {r: max(1, topo - i) for i, r in enumerate(ordem)}
+            if hasattr(guild, "edit_role_positions"):
+                await guild.edit_role_positions(positions=posicoes, reason="!policiacivil — hierarquia")
+            else:
+                for r, p in posicoes.items():
+                    await r.edit(position=p, reason="!policiacivil — hierarquia")
+                    await asyncio.sleep(0.4)
+            est["hierarquia_ok"] = True
+        except discord.HTTPException as e:
+            self._pc_falha(est, "Ordenar hierarquia (arraste o cargo do bot para o topo e rode de novo)", e)
+
+        # categorias + canais de texto
+        for cat_nome, view, write, canais in _PC_ESTRUTURA:
+            cat = await self._pc_categoria(guild, est, mapa, cat_nome, view, False)
+            if cat is None:
+                continue
+            for item in canais:
+                if isinstance(item, str):
+                    nome, v_ov, w_ov = item, None, None
+                else:
+                    nome, v_ov, w_ov = item
+                v = view if v_ov is None else v_ov
+                w = (write if v_ov is None else None) if w_ov is None else w_ov
+                await self._pc_canal(guild, est, mapa, cat, nome, v, w, False)
+
+        # salas de voz
+        cat_voz = await self._pc_categoria(guild, est, mapa, _PC_CATEGORIA_VOZ, [], True)
+        if cat_voz is not None:
+            for nome, view in _PC_VOZ:
+                await self._pc_canal(guild, est, mapa, cat_voz, nome, view, None, True)
+
+    async def _pc_categoria(self, guild, est, mapa, nome, view, voz):
+        ow = self._pc_overwrites(guild, mapa, view, [] if not voz else None, voz)
+        cat = _pc_achar(guild.categories, nome)
+        try:
+            if cat is None:
+                cat = await guild.create_category(name=nome, overwrites=ow, reason="!policiacivil")
+                est["categorias_criadas"] += 1
+            else:
+                await cat.edit(overwrites=ow, reason="!policiacivil — permissões")
+                est["categorias_existentes"] += 1
+            est["permissoes"] += len(ow)
+            est["perm_categorias"] += 1
+            await asyncio.sleep(0.5)
+            return cat
+        except discord.HTTPException as e:
+            self._pc_falha(est, f"Categoria '{nome}'", e)
+            return None
+
+    async def _pc_canal(self, guild, est, mapa, cat, nome, view, write, voz):
+        ow = self._pc_overwrites(guild, mapa, view, write, voz)
+        existente = _pc_achar(cat.voice_channels if voz else cat.text_channels, nome)
+        try:
+            if existente is None:
+                if voz:
+                    await guild.create_voice_channel(name=nome, category=cat, overwrites=ow, reason="!policiacivil")
+                else:
+                    await guild.create_text_channel(name=nome, category=cat, overwrites=ow, reason="!policiacivil")
+                est["canais_criados"] += 1
+            else:
+                await existente.edit(overwrites=ow, reason="!policiacivil — permissões")
+                est["canais_existentes"] += 1
+            est["permissoes"] += len(ow)
+            est["perm_canais"] += 1
+        except discord.HTTPException as e:
+            self._pc_falha(est, f"Canal '{nome}'", e)
+        await asyncio.sleep(0.5)
+
+    @staticmethod
+    def _pc_overwrites(guild: discord.Guild, mapa: dict, view, write, voz: bool = False) -> dict:
+        """Permissões EXPLÍCITAS por canal (nada de depender só de esconder o nome).
+        view  = quem enxerga (aceita "@everyone")
+        write = quem escreve (None = mesmo grupo de view; [] = ninguém além do comando/admin)
+        Chefe, Subchefe e Administrador do Servidor sempre enxergam e escrevem."""
+        view = list(view or [])
+        write = view if write is None else list(write)
+        publico = "@everyone" in view
+        ow: dict = {}
+        if voz:
+            ow[guild.default_role] = discord.PermissionOverwrite(view_channel=False, connect=False)
+        elif publico:
+            ow[guild.default_role] = discord.PermissionOverwrite(
+                view_channel=True, read_message_history=True, send_messages=False, add_reactions=False,
+                create_public_threads=False, create_private_threads=False,
+            )
+        else:
+            ow[guild.default_role] = discord.PermissionOverwrite(view_channel=False)
+        # o próprio bot sempre precisa enxergar/escrever (relatórios e outras cogs)
+        ow[guild.me] = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True,
+            embed_links=True, attach_files=True, manage_messages=True, connect=True, speak=True,
+        )
+        for k in dict.fromkeys(view + write + _PC_AUTO):
+            if k == "@everyone":
+                continue
+            role = mapa.get(k)
+            if role is None:
+                continue
+            pode = k in write or k in _PC_AUTO
+            if voz:
+                ow[role] = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
+            else:
+                ow[role] = discord.PermissionOverwrite(
+                    view_channel=True, read_message_history=True, send_messages=pode,
+                    add_reactions=True, embed_links=pode, attach_files=pode,
+                )
+        return ow
+
+    # ── relatório ──
+    def _pc_relatorio(self, guild: discord.Guild, est: dict, titulo: str = "🚔 Relatório — Polícia Civil RP") -> discord.Embed:
+        fase = est.get("fase", "ocioso")
+        cor = {"concluido": 0x57F287, "erro": 0xED4245, "executando": 0xFEE75C}.get(fase, 0x5865F2)
+        embed = discord.Embed(title=titulo, color=cor)
+        embed.description = f"**Fase:** {fase}" + (f" · salva: {self._pc_fase_salva(guild.id) or '—'}")
+        embed.add_field(name="🧹 Apagados", value=f"Canais/categorias: {est['apagados_canais']}\nCargos: {est['apagados_cargos']}", inline=True)
+        embed.add_field(name="🛡️ Cargos", value=f"Criados: {est['cargos_criados']}\nJá existiam: {est['cargos_existentes']}\nHierarquia: {'✅' if est['hierarquia_ok'] else '⚠️ não ordenada'}", inline=True)
+        embed.add_field(name="📂 Categorias", value=f"Criadas: {est['categorias_criadas']}\nJá existiam: {est['categorias_existentes']}", inline=True)
+        embed.add_field(name="💬 Canais", value=f"Criados: {est['canais_criados']}\nJá existiam: {est['canais_existentes']}", inline=True)
+        embed.add_field(
+            name="🔐 Permissões configuradas",
+            value=(
+                f"{est['permissoes']} overwrites explícitos em {est['perm_categorias']} categorias e {est['perm_canais']} canais.\n"
+                "Canais privados escondidos de @everyone com acesso só aos cargos autorizados; "
+                "Chefe/Subchefe/Administrador em todos. Permissões de servidor: Chefia (moderação), "
+                "Administrador (gestão técnica, **sem** Administrador), Bots (só envio básico)."
+            ),
+            inline=False,
+        )
+        falhas = est.get("falhas", [])
+        if falhas:
+            texto = "\n".join(f"• {f}" for f in falhas[:10])
+            if len(falhas) > 10:
+                texto += f"\n… e mais {len(falhas) - 10}"
+            embed.add_field(name=f"❌ Falhas ({len(falhas)})", value=texto[:1024], inline=False)
+        else:
+            embed.add_field(name="❌ Falhas", value="Nenhuma", inline=False)
+        if est.get("iniciado") and est.get("finalizado"):
+            embed.set_footer(text=f"Duração: {int(est['finalizado'] - est['iniciado'])}s")
+        return embed
+
+    async def _pc_enviar_relatorio(self, ctx: commands.Context, guild: discord.Guild, est: dict) -> None:
+        embed = self._pc_relatorio(guild, est)
+        enviado = False
+        destino = _pc_achar(guild.text_channels, "🤖・comandos-do-bot")
+        for canal in (destino, ctx.channel):
+            if canal is None or enviado:
+                continue
+            try:
+                await canal.send(content=f"<@{est.get('autor')}>", embed=embed,
+                                 allowed_mentions=discord.AllowedMentions(users=True))
+                enviado = True
+            except discord.HTTPException:
+                continue  # o canal pode ter sido apagado
+        try:
+            await ctx.author.send(embed=embed)
+        except discord.HTTPException:
+            pass
+
+
+# ── dados do !policiacivil ────────────────────────────────────────────────
+_PC_ESTADO: dict = {}
+_PC_LOCKS: dict = {}
+
+
+def _pc_estado_novo() -> dict:
+    return {
+        "fase": "ocioso", "iniciado": None, "finalizado": None, "autor": None,
+        "pendente_ate": 0, "pendente_autor": None,
+        "apagados_canais": 0, "apagados_cargos": 0,
+        "cargos_criados": 0, "cargos_existentes": 0, "hierarquia_ok": False,
+        "categorias_criadas": 0, "categorias_existentes": 0,
+        "canais_criados": 0, "canais_existentes": 0,
+        "permissoes": 0, "perm_categorias": 0, "perm_canais": 0,
+        "falhas": [],
+    }
+
+
+def _pc_norm(texto: str) -> str:
+    # o Discord remove o seletor de emoji (U+FE0F) e põe minúsculas nos canais de texto
+    return texto.replace("️", "").strip().lower()
+
+
+def _pc_achar(itens, nome: str):
+    alvo = _pc_norm(nome)
+    return next((i for i in itens if _pc_norm(i.name) == alvo), None)
+
+
+# permissões de servidor (nada de Administrador pra policial/divisão)
+_PC_P_CHEFIA = dict(manage_messages=True, moderate_members=True, manage_nicknames=True,
+                    mention_everyone=True, move_members=True, mute_members=True)
+_PC_P_GESTAO = dict(manage_messages=True, move_members=True, mute_members=True)
+_PC_P_CORREG = dict(manage_messages=True)
+_PC_P_ADMIN = dict(manage_guild=True, manage_roles=True, manage_channels=True, manage_messages=True,
+                   manage_nicknames=True, kick_members=True, ban_members=True, moderate_members=True,
+                   view_audit_log=True, manage_webhooks=True, mention_everyone=True)
+_PC_P_BOTS = dict(send_messages=True, embed_links=True, attach_files=True, read_message_history=True,
+                  add_reactions=True, use_external_emojis=True)
+
+# (chave, nome, cor HEX, permissões, hoist) — ordem = de CIMA pra BAIXO na hierarquia
+_PC_CARGOS = [
+    ("chefe",        "👑 Chefe da Polícia Civil",        "8B0000", _PC_P_CHEFIA, True),
+    ("subchefe",     "💠 Subchefe da Polícia Civil",     "B22222", _PC_P_CHEFIA, True),
+    ("adjunto",      "🏛️ Delegado-Geral Adjunto",        "800080", _PC_P_GESTAO, True),
+    ("diretor",      "🎖️ Diretor de Departamento",       "9932CC", _PC_P_GESTAO, True),
+    ("titular",      "⚖️ Delegado Titular",              "FF0000", _PC_P_GESTAO, True),
+    ("delegado",     "🦅 Delegado",                      "D32F2F", _PC_P_GESTAO, True),
+    ("inv_chefe",    "🔎 Investigador-Chefe",            "1565C0", {}, True),
+    ("investigador", "🕵️ Investigador",                  "1976D2", {}, True),
+    ("escrivao",     "📑 Escrivão",                      "00838F", {}, True),
+    ("agente",       "🚔 Agente de Polícia",             "00A6A6", {}, True),
+    ("perito",       "🧬 Perito Criminal",               "6A1B9A", {}, True),
+    ("instrutor",    "🎓 Instrutor da Academia",         "2E7D32", {}, True),
+    ("aluno",        "📚 Aluno da Academia",             "43A047", {}, True),
+    ("corregedoria", "🛡️ Corregedoria",                  "795548", _PC_P_CORREG, True),
+    ("admin",        "⚙️ Administrador do Servidor",     "607D8B", _PC_P_ADMIN, True),
+    # divisões (só identificam o departamento, sem poder administrativo)
+    ("dpc",          "🏢 DPC — Departamento de Polícia Civil",   "263238", {}, False),
+    ("dhpp",         "🕵️ DHPP — Homicídios e Proteção à Pessoa", "8E0000", {}, False),
+    ("denarc",       "💊 DENARC — Narcóticos",                   "6A1B9A", {}, False),
+    ("core",         "🚨 CORE — Operações Especiais",            "212121", {}, False),
+    ("inteligencia", "🧠 Inteligência Policial",                 "0D47A1", {}, False),
+    ("ptc",          "🔬 Polícia Técnico-Científica",            "00838F", {}, False),
+    ("dep_op",       "🚔 Departamento Operacional",              "1565C0", {}, False),
+    ("dep_inv",      "📂 Departamento de Investigação",          "283593", {}, False),
+    ("dep_adm",      "📋 Departamento Administrativo",           "546E7A", {}, False),
+    ("academia",     "🎓 Academia de Polícia",                   "2E7D32", {}, False),
+    ("assuntos",     "⚖️ Assuntos Internos",                     "795548", {}, False),
+    # funcionais / serviço
+    ("servico",      "🟢 Em Serviço",                  "2E7D32", {}, False),
+    ("fora",         "🔴 Fora de Serviço",             "C62828", {}, False),
+    ("licenca",      "🌴 Licença",                     "78909C", {}, False),
+    ("treino",       "📌 Em Treinamento",              "F9A825", {}, False),
+    ("destaque",     "⭐ Destaque do Mês",             "FFD700", {}, False),
+    ("pmes",         "🏆 Policial do Mês",             "FF8F00", {}, False),
+    ("recrutador",   "📨 Recrutador",                  "00897B", {}, False),
+    ("avaliador",    "📝 Avaliador",                   "3949AB", {}, False),
+    ("plantao",      "🔊 Responsável pelo Plantão",    "0277BD", {}, False),
+    # base
+    ("bots",         "🤖 Bots",                        "808080", _PC_P_BOTS, False),
+    ("cidadao",      "👤 Cidadão",                     "BDBDBD", {}, False),
+]
+
+# grupos de acesso
+_PC_AUTO = ["chefe", "subchefe", "admin"]            # enxergam e escrevem em tudo
+_PC_TOP = ["chefe", "subchefe", "adjunto", "diretor"]
+_PC_GEST = _PC_TOP + ["titular", "delegado"]
+_PC_POL = _PC_GEST + ["inv_chefe", "investigador", "escrivao", "agente", "perito"]
+_PC_INV = _PC_GEST + ["inv_chefe", "investigador", "escrivao", "perito", "dhpp", "denarc", "inteligencia", "dep_inv"]
+_PC_GERAL = ["cidadao", "aluno", "instrutor"] + _PC_POL
+
+_PC_RECR = ["cidadao", "recrutador", "avaliador"]
+_PC_TREINO = ["aluno", "instrutor", "academia"]
+_PC_ATEND = _PC_POL + ["cidadao"]
+
+# (categoria, quem vê, quem escreve, canais)
+#   quem escreve: None = igual a "quem vê" · [] = só comando/admin
+#   canal = "nome"  ou  (nome, view|None, write|None)  p/ sobrescrever o padrão da categoria
+_PC_ESTRUTURA = [
+    ("📌・CENTRAL DE INFORMAÇÕES", ["@everyone"], [], [
+        "👋・boas-vindas", "📜・regulamento", "📢・anúncios-oficiais", "🏅・hierarquia-policial",
+        "🏢・departamentos", ("❓・dúvidas", None, _PC_GERAL), "📋・como-ingressar",
+        ("🤖・comandos-do-bot", None, _PC_GERAL + ["bots"]),
+    ]),
+    ("📝・RECRUTAMENTO", _PC_RECR, ["recrutador", "avaliador"], [
+        ("📋・inscrições", None, _PC_RECR), ("📑・fichas-de-candidatura", None, _PC_RECR),
+        ("🎙️・agendamento-de-entrevistas", None, _PC_RECR), ("🧠・provas-teóricas", None, _PC_RECR),
+        "📊・resultados", "✅・aprovados", "❌・reprovados",
+        ("🔒・equipe-de-recrutamento", ["recrutador", "avaliador"], None),
+    ]),
+    ("🏛️・COMANDO-GERAL", _PC_TOP, None, [
+        "📢・comunicados-do-comando", "📅・reuniões", "📊・relatórios-de-gestão",
+        "📈・promoções-e-rebaixamentos", "📋・ordens-de-serviço", "🗳️・decisões-administrativas",
+        ("🔒・reunião-privada", [], None),
+    ]),
+    ("🚔・OPERAÇÕES POLICIAIS", _PC_POL + ["core", "dep_op"], None, [
+        "🚨・acionamentos", "📍・operações-em-andamento", "📋・planejamento-operacional", "🚓・patrulhamento",
+        "📡・comunicação-operacional", "📝・relatórios-operacionais", "📂・operações-concluídas",
+    ]),
+    ("🔎・INVESTIGAÇÕES", _PC_INV, None, [
+        "🚨・novas-ocorrências", "📁・casos-em-andamento", "📝・relatórios-investigativos",
+        "🔬・provas-e-evidências", "📂・casos-arquivados",
+        ("🔒・casos-confidenciais", ["adjunto", "diretor", "titular", "delegado", "inv_chefe"], None),
+        "🧾・depoimentos", "📋・mandados-e-intimações",
+    ]),
+    ("⚖️・DELEGACIA", _PC_POL, None, [
+        ("📄・boletins-de-ocorrência", _PC_ATEND, _PC_ATEND),
+        ("📨・intimações", _PC_ATEND, _PC_POL),
+        "🗂️・inquéritos-policiais", "📋・registro-de-ocorrências",
+        ("👥・atendimento-ao-cidadão", _PC_ATEND, _PC_ATEND),
+        "🚔・plantão-policial", "📝・termos-e-depoimentos",
+    ]),
+    ("🕵️・DHPP", ["dhpp"] + _PC_TOP, None, [
+        "📂・casos-de-homicídio", "🔎・investigações-de-pessoas", "📝・relatórios-dhpp",
+        ("🔒・arquivo-dhpp", ["dhpp"], None),
+    ]),
+    ("💊・DENARC", ["denarc"] + _PC_TOP, None, [
+        "📂・casos-denarc", "🔎・investigações-de-narcóticos", "📝・relatórios-denarc",
+        ("🔒・arquivo-denarc", ["denarc"], None),
+    ]),
+    ("🚨・CORE", ["core"] + _PC_TOP, None, [
+        "📢・comunicados-core", "🎯・planejamento-tático", "📋・missões-especiais", "📝・relatórios-core",
+        ("🔒・sala-restrita-core", ["core"], None),
+    ]),
+    ("🧠・INTELIGÊNCIA", ["inteligencia"] + _PC_TOP, None, [
+        "📡・informações-de-inteligência", "🔎・análise-de-informações", "📋・relatórios-de-inteligência",
+        ("🔒・arquivo-confidencial", ["inteligencia"], None),
+    ]),
+    ("🔬・POLÍCIA TÉCNICO-CIENTÍFICA", ["ptc", "perito", "titular"] + _PC_TOP, None, [
+        "🧪・perícias", "🔬・análise-de-evidências", "📑・laudos-periciais", "📂・arquivo-pericial",
+    ]),
+    ("🎓・ACADEMIA DE POLÍCIA", _PC_TREINO + _PC_TOP, ["instrutor", "academia"], [
+        "📚・materiais-de-estudo", "📖・legislação-do-rp",
+        ("🎯・treinamentos", None, _PC_TREINO), ("📝・avaliações", None, _PC_TREINO),
+        "🏅・certificações", "📊・desempenho-dos-alunos",
+        ("🔒・instrutores", ["instrutor", "academia"], None),
+    ]),
+    ("🛡️・CORREGEDORIA", ["corregedoria", "assuntos"], None, [
+        "📩・denúncias-internas", "⚖️・processos-disciplinares", "📝・apuração-de-conduta",
+        "📂・processos-arquivados", "🔒・reunião-da-corregedoria",
+    ]),
+    ("📋・ADMINISTRAÇÃO", _PC_TOP, None, [
+        "👥・gestão-de-membros", "🪪・atribuição-de-cargos", "📊・estatísticas", "🧾・registro-de-alterações",
+        ("🛠️・configuração-do-servidor", ["admin"], None),
+        ("🔒・administração-privada", ["admin"], None),
+    ]),
+    ("🏆・MÉRITO POLICIAL", _PC_GERAL, _PC_TOP, [
+        "⭐・destaques-do-mês", "🏆・policial-do-mês", "🎖️・condecorações", "📜・histórico-de-promoções",
+    ]),
+    ("💬・CONVIVÊNCIA", _PC_GERAL, None, [
+        "💭・chat-geral", "📸・fotos-e-clipes", "😂・memes", "💡・sugestões", "📮・suporte",
+        ("🤖・comandos-de-bots", _PC_GERAL + ["bots"], None),
+    ]),
+]
+
+_PC_CATEGORIA_VOZ = "🔊・SALAS DE VOZ"
+_PC_VOZ = [
+    ("⏳・Sala de Espera", _PC_GERAL),
+    ("👑・Comando-Geral", _PC_TOP),
+    ("🚔・Operacional", _PC_POL + ["core", "dep_op"]),
+    ("📡・Comunicação Policial", _PC_POL),
+    ("🔎・Investigações", _PC_INV),
+    ("🎓・Treinamento", _PC_TREINO),
+    ("🎙️・Entrevistas", _PC_RECR),
+    ("🛡️・Corregedoria", ["corregedoria", "assuntos"]),
+    ("🧠・Inteligência", ["inteligencia"]),
+    ("🚨・CORE", ["core"]),
+    ("💬・Convivência", _PC_GERAL),
+]
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Whitelist(bot))
