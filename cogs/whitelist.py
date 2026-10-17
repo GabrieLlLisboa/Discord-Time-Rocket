@@ -3364,5 +3364,1328 @@ _PC_VOZ = [
 ]
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  SISTEMA DA POLÍCIA CIVIL — !setap
+#  Cog separada (PoliciaSistema) porque os botões precisam ser registrados na
+#  inicialização do bot. Cria/atualiza os canais funcionais e publica os painéis.
+# ══════════════════════════════════════════════════════════════════════════
+import io
+from datetime import timedelta
+
+_PS_COR = 0x1565C0
+_PS_LIMITE_PONTO = 12 * 3600          # turno esquecido aberto é encerrado após 12h
+_PS_NOMES = {k: n for k, n, *_ in _PC_CARGOS}
+_PS_STAFF_TICKET = _PC_POL + ["plantao"]
+_PS_ESCADA = ["agente", "investigador", "inv_chefe", "delegado", "titular", "diretor", "adjunto", "subchefe"]
+
+_PS_CAT_CENTRAL = "📌・CENTRAL DE INFORMAÇÕES"
+_PS_CAT_REC = "📝・RECRUTAMENTO"
+_PS_CAT_COMANDO = "🏛️・COMANDO-GERAL"
+_PS_CAT_OPS = "🚔・OPERAÇÕES POLICIAIS"
+_PS_CAT_DELEG = "⚖️・DELEGACIA"
+_PS_CAT_CONV = "💬・CONVIVÊNCIA"
+_PS_CAT_PONTO = "🕒・PONTO E SERVIÇO"
+_PS_CAT_TICKETS = "🎫・ATENDIMENTOS"
+_PS_CAT_LOGS = "🛠️・LOGS"
+
+# categorias que o !setap cria se não existirem: nome -> quem vê
+_PS_CATEGORIAS_NOVAS = {
+    _PS_CAT_PONTO: _PC_POL,
+    _PS_CAT_TICKETS: _PS_STAFF_TICKET,
+    _PS_CAT_LOGS: _PC_TOP,
+}
+
+# (chave, categoria, nome do canal, quem vê, quem escreve)
+# Canais que já existem (criados pelo !policiacivil) são reaproveitados pelo nome.
+_PS_CANAIS = [
+    ("boas_vindas",   _PS_CAT_CENTRAL, "👋・boas-vindas",               ["@everyone"], []),
+    ("saidas",        _PS_CAT_CENTRAL, "🚪・saídas",                    _PC_GERAL, []),
+    ("regulamento",   _PS_CAT_CENTRAL, "📜・regulamento",               ["@everyone"], []),
+    ("hierarquia",    _PS_CAT_CENTRAL, "🏅・hierarquia-policial",       ["@everyone"], []),
+    ("departamentos", _PS_CAT_CENTRAL, "🏢・departamentos",             ["@everyone"], []),
+    ("como_ingressar", _PS_CAT_CENTRAL, "📋・como-ingressar",           ["@everyone"], []),
+    ("comandos",      _PS_CAT_CENTRAL, "🤖・comandos-do-bot",           ["@everyone"], _PC_GERAL + ["bots"]),
+    ("rec_painel",    _PS_CAT_REC,     "📋・inscrições",                _PC_RECR, []),
+    ("rec_equipe",    _PS_CAT_REC,     "🔒・equipe-de-recrutamento",    ["recrutador", "avaliador"], None),
+    ("aprovados",     _PS_CAT_REC,     "✅・aprovados",                 _PC_RECR, []),
+    ("reprovados",    _PS_CAT_REC,     "❌・reprovados",                _PC_RECR, []),
+    ("promocoes",     _PS_CAT_COMANDO, "📈・promoções-e-rebaixamentos", _PC_TOP, []),
+    ("acionamentos",  _PS_CAT_OPS,     "🚨・acionamentos",              _PC_POL + ["core", "dep_op"], []),
+    ("oc_painel",     _PS_CAT_DELEG,   "📋・registro-de-ocorrências",   _PC_POL, []),
+    ("oc_log",        _PS_CAT_DELEG,   "📂・ocorrências-registradas",   _PC_POL, []),
+    ("bo_painel",     _PS_CAT_DELEG,   "📄・boletins-de-ocorrência",    _PC_ATEND, []),
+    ("bo_recebidos",  _PS_CAT_DELEG,   "📥・boletins-recebidos",        _PC_POL, []),
+    ("tk_painel",     _PS_CAT_DELEG,   "👥・atendimento-ao-cidadão",    _PC_ATEND, []),
+    ("sugestoes",     _PS_CAT_CONV,    "💡・sugestões",                 _PC_GERAL, _PC_GERAL),
+    ("ponto",         _PS_CAT_PONTO,   "🕒・bater-ponto",               _PC_POL, []),
+    ("ponto_log",     _PS_CAT_PONTO,   "🧾・registro-de-ponto",         _PC_POL, []),
+    ("ranking",       _PS_CAT_PONTO,   "🏆・ranking-de-horas",          _PC_POL, []),
+    ("log_tk",        _PS_CAT_LOGS,    "🗃️・logs-de-atendimento",       _PC_TOP, []),
+    ("log_membros",   _PS_CAT_LOGS,    "🚪・entradas-e-saídas",         _PC_TOP, []),
+    ("log_msg",       _PS_CAT_LOGS,    "📨・logs-de-mensagens",         _PC_TOP, []),
+    ("log_voz",       _PS_CAT_LOGS,    "🎙️・logs-de-voz",               _PC_TOP, []),
+    ("log_cargos",    _PS_CAT_LOGS,    "🛡️・logs-de-cargos",            _PC_TOP, []),
+    ("log_mod",       _PS_CAT_LOGS,    "🔨・logs-de-moderação",         _PC_TOP, []),
+]
+
+_PS_TICKET_TIPOS = {
+    "denuncia":    ("Denúncia", "🚨", "Relatar um crime ou situação suspeita"),
+    "duvida":      ("Dúvida", "❓", "Tirar dúvidas com a corporação"),
+    "solicitacao": ("Solicitação", "📨", "Pedir um serviço ou documento"),
+    "elogio":      ("Elogio / Sugestão", "💬", "Elogiar ou sugerir melhorias"),
+    "outro":       ("Outro assunto", "🎫", "Qualquer outro assunto"),
+}
+
+_PS_DEPARTAMENTOS = [
+    ("dpc", "Sede e comando administrativo da corporação."),
+    ("dhpp", "Investiga homicídios e crimes contra a pessoa."),
+    ("denarc", "Combate ao tráfico e aos crimes de narcóticos."),
+    ("core", "Operações especiais e intervenções táticas de alto risco."),
+    ("inteligencia", "Análise de informações e inteligência policial."),
+    ("ptc", "Perícias, análise de provas e laudos técnicos."),
+    ("dep_op", "Policiamento ostensivo e atendimento a ocorrências."),
+    ("dep_inv", "Investigação de casos e condução de inquéritos."),
+    ("dep_adm", "Gestão administrativa, documentos e pessoal."),
+    ("academia", "Formação e treinamento de novos policiais."),
+    ("assuntos", "Apuração de conduta e processos disciplinares."),
+]
+
+_PS_HIERARQUIA = ["chefe", "subchefe", "adjunto", "diretor", "titular", "delegado", "inv_chefe",
+                  "investigador", "escrivao", "agente", "perito", "instrutor", "aluno", "corregedoria"]
+
+
+def _ps_dur(seg: float) -> str:
+    seg = max(0, int(seg))
+    if seg < 60:
+        return f"{seg}s"
+    h, r = divmod(seg, 3600)
+    m = r // 60
+    return f"{h}h{m:02d}min" if h else f"{m}min"
+
+
+def _ps_txt(valor, limite: int = 1000) -> str:
+    t = discord.utils.escape_mentions(str(valor or "").strip()) or "—"
+    return t if len(t) <= limite else t[: limite - 1] + "…"
+
+
+def _ps_set_field(embed: discord.Embed, nome: str, valor: str, inline: bool = True) -> None:
+    for i, f in enumerate(embed.fields):
+        if f.name == nome:
+            embed.set_field_at(i, name=nome, value=valor, inline=inline)
+            return
+    embed.add_field(name=nome, value=valor, inline=inline)
+
+
+def _ps_cog(interaction: discord.Interaction) -> "PoliciaSistema":
+    return interaction.client.get_cog("PoliciaSistema")
+
+
+class _PSView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
+        _log_erro(type(self).__name__, error)
+        await _responder(interaction, "⚠️ Algo deu errado. Tente de novo; se persistir, chame a staff.", ephemeral=True)
+
+
+class _PSModal(discord.ui.Modal):
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        _log_erro(type(self).__name__, error)
+        await _responder(interaction, "⚠️ Não consegui enviar. Tente de novo.", ephemeral=True)
+
+
+# ── modais ────────────────────────────────────────────────────────────────
+class OcorrenciaModal(_PSModal, title="Registrar ocorrência"):
+    tipo = discord.ui.TextInput(label="Tipo da ocorrência", placeholder="Ex: Roubo, Tráfico, Acidente", max_length=60)
+    local = discord.ui.TextInput(label="Local", max_length=100)
+    envolvidos = discord.ui.TextInput(label="Envolvidos", style=discord.TextStyle.paragraph, required=False, max_length=500)
+    descricao = discord.ui.TextInput(label="Descrição dos fatos", style=discord.TextStyle.paragraph, max_length=1500)
+    acao = discord.ui.TextInput(label="Ação tomada / resultado", style=discord.TextStyle.paragraph, required=False, max_length=500)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await _ps_cog(interaction).registrar_ocorrencia(interaction, self)
+
+
+class BOModal(_PSModal, title="Boletim de Ocorrência"):
+    tipo = discord.ui.TextInput(label="O que aconteceu?", placeholder="Ex: Furto, Agressão, Perda de documento", max_length=60)
+    local = discord.ui.TextInput(label="Local do fato", max_length=100)
+    quando = discord.ui.TextInput(label="Quando aconteceu?", placeholder="Ex: Hoje, por volta das 20h", max_length=60)
+    descricao = discord.ui.TextInput(label="Relato", style=discord.TextStyle.paragraph, max_length=1500)
+    envolvidos = discord.ui.TextInput(label="Suspeitos / testemunhas", style=discord.TextStyle.paragraph, required=False, max_length=500)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await _ps_cog(interaction).registrar_bo(interaction, self)
+
+
+class AcionamentoModal(_PSModal, title="Novo acionamento"):
+    local = discord.ui.TextInput(label="Local", max_length=100)
+    prioridade = discord.ui.TextInput(label="Prioridade", placeholder="Baixa, Média ou Alta", max_length=10, default="Média")
+    descricao = discord.ui.TextInput(label="Situação", style=discord.TextStyle.paragraph, max_length=1000)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await _ps_cog(interaction).registrar_acionamento(interaction, self)
+
+
+class CandidaturaModal(_PSModal, title="Candidatura à Polícia Civil"):
+    nome_rp = discord.ui.TextInput(label="Nome do personagem", max_length=60)
+    idade = discord.ui.TextInput(label="Sua idade (real)", max_length=3)
+    experiencia = discord.ui.TextInput(label="Experiência em RP", style=discord.TextStyle.paragraph, max_length=700)
+    motivo = discord.ui.TextInput(label="Por que quer entrar?", style=discord.TextStyle.paragraph, max_length=700)
+    disponibilidade = discord.ui.TextInput(label="Disponibilidade (dias/horários)", max_length=100)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await _ps_cog(interaction).candidatar(interaction, self)
+
+
+class ReprovarModal(_PSModal, title="Reprovar candidato"):
+    motivo = discord.ui.TextInput(label="Motivo (será enviado ao candidato)", style=discord.TextStyle.paragraph,
+                                  required=False, max_length=500)
+
+    def __init__(self, msg_id: int):
+        super().__init__()
+        self.msg_id = msg_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await _ps_cog(interaction).reprovar_candidato(interaction, self.msg_id, self.motivo.value)
+
+
+# ── views persistentes (custom_id fixo: continuam funcionando após reiniciar) ──
+class PontoView(_PSView):
+    @discord.ui.button(label="Entrar em serviço", emoji="🟢", style=discord.ButtonStyle.success, custom_id="ps_ponto_entrar")
+    async def entrar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).ponto_entrar(interaction)
+
+    @discord.ui.button(label="Sair de serviço", emoji="🔴", style=discord.ButtonStyle.danger, custom_id="ps_ponto_sair")
+    async def sair(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).ponto_sair(interaction)
+
+    @discord.ui.button(label="Minhas horas", emoji="📊", style=discord.ButtonStyle.secondary, custom_id="ps_ponto_horas")
+    async def horas(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).ponto_horas(interaction)
+
+
+class OcorrenciaView(_PSView):
+    @discord.ui.button(label="Registrar ocorrência", emoji="📝", style=discord.ButtonStyle.primary, custom_id="ps_oc_novo")
+    async def novo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _ps_cog(interaction)._tem(interaction.user, _PC_POL):
+            await interaction.response.send_message("❌ Apenas policiais podem registrar ocorrências.", ephemeral=True)
+            return
+        await interaction.response.send_modal(OcorrenciaModal())
+
+
+class BOView(_PSView):
+    @discord.ui.button(label="Registrar boletim de ocorrência", emoji="📄", style=discord.ButtonStyle.primary, custom_id="ps_bo_novo")
+    async def novo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(BOModal())
+
+
+class BOStatusView(_PSView):
+    @discord.ui.button(label="Assumir", emoji="👀", style=discord.ButtonStyle.primary, custom_id="ps_bo_assumir")
+    async def assumir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).bo_acao(interaction, "assumir")
+
+    @discord.ui.button(label="Concluir", emoji="✅", style=discord.ButtonStyle.success, custom_id="ps_bo_concluir")
+    async def concluir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).bo_acao(interaction, "concluir")
+
+    @discord.ui.button(label="Arquivar", emoji="🗄️", style=discord.ButtonStyle.secondary, custom_id="ps_bo_arquivar")
+    async def arquivar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).bo_acao(interaction, "arquivar")
+
+
+class AcionamentoPainelView(_PSView):
+    @discord.ui.button(label="Novo acionamento", emoji="🚨", style=discord.ButtonStyle.danger, custom_id="ps_ac_novo")
+    async def novo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _ps_cog(interaction)._tem(interaction.user, _PC_POL + ["core", "dep_op"]):
+            await interaction.response.send_message("❌ Apenas policiais podem abrir acionamentos.", ephemeral=True)
+            return
+        await interaction.response.send_modal(AcionamentoModal())
+
+
+class AcionamentoChamadoView(_PSView):
+    @discord.ui.button(label="Atender", emoji="🚓", style=discord.ButtonStyle.primary, custom_id="ps_ac_atender")
+    async def atender(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).ac_acao(interaction, "atender")
+
+    @discord.ui.button(label="Encerrar", emoji="✅", style=discord.ButtonStyle.success, custom_id="ps_ac_encerrar")
+    async def encerrar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).ac_acao(interaction, "encerrar")
+
+
+class _TicketSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            custom_id="ps_tk_tipo",
+            placeholder="Escolha o motivo do atendimento...",
+            options=[discord.SelectOption(label=l, value=v, emoji=e, description=d)
+                     for v, (l, e, d) in _PS_TICKET_TIPOS.items()],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await _ps_cog(interaction).abrir_ticket(interaction, self.values[0])
+
+
+class TicketPainelView(_PSView):
+    def __init__(self):
+        super().__init__()
+        self.add_item(_TicketSelect())
+
+
+class TicketControlView(_PSView):
+    @discord.ui.button(label="Assumir atendimento", emoji="🙋", style=discord.ButtonStyle.primary, custom_id="ps_tk_assumir")
+    async def assumir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).assumir_ticket(interaction)
+
+    @discord.ui.button(label="Fechar", emoji="🔒", style=discord.ButtonStyle.danger, custom_id="ps_tk_fechar")
+    async def fechar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).fechar_ticket(interaction)
+
+
+class RecrutamentoView(_PSView):
+    @discord.ui.button(label="Candidatar-se", emoji="📝", style=discord.ButtonStyle.success, custom_id="ps_rc_novo")
+    async def novo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(CandidaturaModal())
+
+
+class RecrutamentoDecisaoView(_PSView):
+    @discord.ui.button(label="Aprovar", emoji="✅", style=discord.ButtonStyle.success, custom_id="ps_rc_aprovar")
+    async def aprovar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await _ps_cog(interaction).aprovar_candidato(interaction)
+
+    @discord.ui.button(label="Reprovar", emoji="❌", style=discord.ButtonStyle.danger, custom_id="ps_rc_reprovar")
+    async def reprovar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = _ps_cog(interaction)
+        if not cog._eh_recrutador(interaction.user):
+            await interaction.response.send_message("❌ Apenas a equipe de recrutamento pode decidir.", ephemeral=True)
+            return
+        await interaction.response.send_modal(ReprovarModal(interaction.message.id))
+
+
+# ── a cog ─────────────────────────────────────────────────────────────────
+class PoliciaSistema(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        d = ler("policia_sistema")
+        self.dados = d if isinstance(d, dict) else {}
+        self.dados.setdefault("guilds", {})
+        self._loop_ponto.start()
+        self._loop_paineis.start()
+
+    async def cog_load(self):
+        for v in (PontoView(), OcorrenciaView(), BOView(), BOStatusView(), AcionamentoPainelView(),
+                  AcionamentoChamadoView(), TicketPainelView(), TicketControlView(),
+                  RecrutamentoView(), RecrutamentoDecisaoView()):
+            self.bot.add_view(v)
+
+    def cog_unload(self):
+        self._loop_ponto.cancel()
+        self._loop_paineis.cancel()
+
+    # ── dados / utilidades ──
+    def _salvar(self) -> None:
+        try:
+            salvar("policia_sistema", self.dados)
+        except Exception as e:
+            _log_erro("policia_sistema/salvar", e)
+
+    def _g(self, guild: discord.Guild) -> dict:
+        d = self.dados["guilds"].setdefault(str(guild.id), {})
+        for k in ("canais", "paineis", "cont", "ponto", "tickets", "bo", "cand", "ac", "cooldown"):
+            d.setdefault(k, {})
+        return d
+
+    def _proximo(self, guild: discord.Guild, nome: str) -> int:
+        c = self._g(guild)["cont"]
+        c[nome] = c.get(nome, 0) + 1
+        self._salvar()
+        return c[nome]
+
+    def _role(self, guild: discord.Guild, key: str):
+        return _pc_achar(guild.roles, _PS_NOMES[key])
+
+    def _tem(self, member, keys) -> bool:
+        roles = getattr(member, "roles", None)
+        if not roles:
+            return False
+        meus = {r.id for r in roles}
+        guild = member.guild
+        return any((r := self._role(guild, k)) is not None and r.id in meus for k in keys)
+
+    def _eh_comando(self, member) -> bool:
+        if member.id == member.guild.owner_id or member.guild_permissions.administrator:
+            return True
+        return self._tem(member, _PC_AUTO)
+
+    def _eh_recrutador(self, member) -> bool:
+        return self._eh_comando(member) or self._tem(member, ["recrutador", "avaliador"] + _PC_TOP)
+
+    def _canal(self, guild: discord.Guild, key: str):
+        cid = self.dados["guilds"].get(str(guild.id), {}).get("canais", {}).get(key)
+        ch = guild.get_channel(cid) if cid else None
+        if ch is None:
+            for k, _c, nome, _v, _w in _PS_CANAIS:
+                if k == key:
+                    ch = _pc_achar(guild.text_channels, nome)
+                    break
+        return ch
+
+    async def _enviar(self, guild: discord.Guild, key: str, **kw):
+        ch = self._canal(guild, key)
+        if ch is None:
+            return None
+        try:
+            return await ch.send(**kw)
+        except discord.HTTPException as e:
+            print(f"[SETAP] ⚠️ Não consegui enviar em {key}: {e}")
+            return None
+
+    async def _log(self, guild: discord.Guild, key: str, embed: discord.Embed):
+        await self._enviar(guild, key, embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
+    async def _publicar_painel(self, guild, key, embed, view=None, criar: bool = True) -> bool:
+        ch = self._canal(guild, key)
+        if ch is None:
+            return False
+        g = self._g(guild)
+        mid = g["paineis"].get(key)
+        if mid:
+            try:
+                msg = await ch.fetch_message(mid)
+                await msg.edit(embed=embed, view=view)
+                return True
+            except discord.NotFound:
+                pass
+            except discord.HTTPException:
+                return False
+        if not criar:
+            return False
+        try:
+            msg = await ch.send(embed=embed, view=view)
+        except discord.HTTPException:
+            return False
+        g["paineis"][key] = msg.id
+        self._salvar()
+        return True
+
+    @staticmethod
+    def _embed(titulo: str, desc: str = "", cor: int = _PS_COR) -> discord.Embed:
+        e = discord.Embed(title=titulo, description=desc, color=cor)
+        e.set_footer(text="Polícia Civil • Sistema automático")
+        return e
+
+    # ══════════════════ !setap ══════════════════
+    @commands.command(name="setap")
+    @commands.guild_only()
+    async def setap(self, ctx: commands.Context):
+        guild = ctx.guild
+        if not self._eh_comando(ctx.author):
+            await ctx.send("❌ Apenas o proprietário, administradores ou o comando podem usar este comando.", delete_after=8)
+            return
+        if not guild.me.guild_permissions.manage_channels:
+            await ctx.send("❌ Eu preciso da permissão **Gerenciar Canais** (ou Administrador).")
+            return
+        mapa = {k: r for k, n, *_ in _PC_CARGOS if (r := _pc_achar(guild.roles, n)) is not None}
+        faltam = [k for k in ("chefe", "admin", "cidadao", "servico", "fora", "agente", "bots") if k not in mapa]
+        if faltam:
+            await ctx.send("❌ Faltam cargos da Polícia Civil no servidor. Rode primeiro `!pconlycargos` e depois `!setap`.")
+            return
+        lock = _PC_LOCKS.setdefault(guild.id, asyncio.Lock())
+        if lock.locked():
+            await ctx.send("⏳ Já existe uma operação em andamento.")
+            return
+
+        async with lock:
+            aviso = await ctx.send("⚙️ Configurando canais e painéis... pode levar alguns minutos.")
+            g = self._g(guild)
+            falhas: list[str] = []
+            criados = atualizados = 0
+
+            # categorias novas (ponto, atendimentos, logs)
+            cats: dict[str, discord.CategoryChannel] = {}
+            for nome, view in _PS_CATEGORIAS_NOVAS.items():
+                cat = _pc_achar(guild.categories, nome)
+                try:
+                    ow = Whitelist._pc_overwrites(guild, mapa, view, [], False)
+                    if cat is None:
+                        cat = await guild.create_category(name=nome, overwrites=ow, reason="!setap")
+                    else:
+                        await cat.edit(overwrites=ow, reason="!setap")
+                    cats[nome] = cat
+                except discord.HTTPException as e:
+                    falhas.append(f"Categoria {nome}: {getattr(e, 'text', e)}")
+                await asyncio.sleep(0.5)
+
+            # canais funcionais
+            for key, cat_nome, nome, view, write in _PS_CANAIS:
+                try:
+                    cat = cats.get(cat_nome) or _pc_achar(guild.categories, cat_nome)
+                    if cat is None:
+                        cat = await guild.create_category(
+                            name=cat_nome, overwrites=Whitelist._pc_overwrites(guild, mapa, view, [], False), reason="!setap")
+                        cats[cat_nome] = cat
+                    ow = Whitelist._pc_overwrites(guild, mapa, view, write, False)
+                    ch = _pc_achar(guild.text_channels, nome)
+                    if ch is None:
+                        ch = await guild.create_text_channel(name=nome, category=cat, overwrites=ow, reason="!setap")
+                        criados += 1
+                    else:
+                        await ch.edit(overwrites=ow, reason="!setap — permissões")
+                        atualizados += 1
+                    g["canais"][key] = ch.id
+                except discord.HTTPException as e:
+                    falhas.append(f"Canal {nome}: {getattr(e, 'text', e)}")
+                await asyncio.sleep(0.5)
+            self._salvar()
+
+            # painéis
+            paineis = [
+                ("ponto", self._emb_ponto(), PontoView()),
+                ("oc_painel", self._emb_ocorrencia(), OcorrenciaView()),
+                ("bo_painel", self._emb_bo(), BOView()),
+                ("tk_painel", self._emb_ticket(), TicketPainelView()),
+                ("rec_painel", self._emb_recrutamento(), RecrutamentoView()),
+                ("regulamento", self._emb_regulamento(), None),
+                ("como_ingressar", self._emb_ingressar(guild), None),
+                ("comandos", self._emb_comandos(), None),
+                ("hierarquia", self._emb_hierarquia(guild), None),
+                ("departamentos", self._emb_departamentos(guild), None),
+                ("ranking", self._emb_ranking(guild), None),
+            ]
+            publicados = 0
+            for key, emb, view in paineis:
+                if await self._publicar_painel(guild, key, emb, view):
+                    publicados += 1
+                else:
+                    falhas.append(f"Painel '{key}' não publicado (canal ausente ou sem permissão)")
+                await asyncio.sleep(0.5)
+            await self._repostar_painel_acionamento(guild)
+            publicados += 1
+
+            embed = self._embed("✅ Sistema da Polícia Civil configurado")
+            embed.color = 0x57F287 if not falhas else 0xFEE75C
+            embed.add_field(name="📂 Canais", value=f"Criados: {criados}\nAtualizados: {atualizados}", inline=True)
+            embed.add_field(name="📌 Painéis", value=f"{publicados} publicados/atualizados", inline=True)
+            embed.add_field(name="⚙️ Funções ativas", value=(
+                "🕒 **Ponto** — entrar/sair de serviço, horas, ranking e encerramento automático (12h)\n"
+                "📋 **Ocorrências** — registro policial com protocolo\n"
+                "📄 **Boletim de Ocorrência** — cidadão registra, polícia assume/conclui\n"
+                "🚨 **Acionamentos** — chamado com ping em quem está em serviço\n"
+                "🎫 **Atendimento ao cidadão** — tickets privados com transcrição\n"
+                "📝 **Recrutamento** — candidatura, aprovação/reprovação e cargos\n"
+                "👋 **Boas-vindas e saídas** — + 🛠️ logs de mensagens, voz, cargos e moderação\n"
+                "🏅 **Hierarquia e departamentos** ao vivo · 📈 `!promover` / `!rebaixar` · 💡 sugestões com votação"
+            ), inline=False)
+            if falhas:
+                texto = "\n".join(f"• {f}" for f in falhas[:8])
+                embed.add_field(name=f"⚠️ Falhas ({len(falhas)})", value=texto[:1024], inline=False)
+            try:
+                await aviso.edit(content=None, embed=embed)
+            except discord.HTTPException:
+                await ctx.send(embed=embed)
+
+    # ══════════════════ embeds dos painéis ══════════════════
+    def _emb_ponto(self) -> discord.Embed:
+        return self._embed("🕒 Bater Ponto", (
+            "Registre sua entrada e saída de serviço.\n\n"
+            "🟢 **Entrar em serviço** — recebe o cargo *Em Serviço*\n"
+            "🔴 **Sair de serviço** — registra o tempo e volta para *Fora de Serviço*\n"
+            "📊 **Minhas horas** — total acumulado\n\n"
+            "⚠️ Turnos esquecidos abertos por mais de **12h** são encerrados automaticamente."
+        ), 0x2E7D32)
+
+    def _emb_ocorrencia(self) -> discord.Embed:
+        return self._embed("📋 Registro de Ocorrências", (
+            "Policial, registre aqui toda ocorrência atendida.\n"
+            "Clique no botão, preencha o formulário e o registro vai para "
+            "o arquivo oficial com um **protocolo** próprio."
+        ))
+
+    def _emb_bo(self) -> discord.Embed:
+        return self._embed("📄 Boletim de Ocorrência", (
+            "Foi vítima ou testemunha de um crime? Registre seu boletim.\n\n"
+            "1️⃣ Clique no botão abaixo\n2️⃣ Preencha o relato com o máximo de detalhes\n"
+            "3️⃣ Você recebe o **número do protocolo** e a polícia assume o caso\n\n"
+            "Para falar diretamente com um policial use o canal de atendimento ao cidadão."
+        ), 0xFEE75C)
+
+    def _emb_ticket(self) -> discord.Embed:
+        return self._embed("👥 Atendimento ao Cidadão", (
+            "Precisa falar com a Polícia Civil? Abra um atendimento **privado**.\n\n"
+            + "\n".join(f"{e} **{l}** — {d}" for l, e, d in _PS_TICKET_TIPOS.values())
+            + "\n\nEscolha o motivo no menu abaixo. Só você e os policiais verão o atendimento."
+        ), 0x00A6A6)
+
+    def _emb_recrutamento(self) -> discord.Embed:
+        return self._embed("📝 Inscrições — Polícia Civil", (
+            "Quer vestir a farda? Envie sua candidatura!\n\n"
+            "• Clique em **Candidatar-se** e preencha o formulário\n"
+            "• A equipe de recrutamento avalia e responde por aqui e na sua DM\n"
+            "• Aprovados entram na **Academia de Polícia**\n\n"
+            "Mantenha suas mensagens privadas abertas para receber o resultado."
+        ), 0x00897B)
+
+    def _emb_regulamento(self) -> discord.Embed:
+        return self._embed("📜 Regulamento", (
+            "**1.** Respeito acima de tudo: sem ofensas, preconceito ou assédio.\n"
+            "**2.** Mantenha o roleplay: sem *metagaming* ou *powergaming*.\n"
+            "**3.** Respeite a hierarquia e cumpra as ordens do comando.\n"
+            "**4.** Bata ponto ao entrar e sair de serviço; abuso gera advertência.\n"
+            "**5.** Sigilo: casos e informações confidenciais não saem dos canais autorizados.\n"
+            "**6.** Use cada canal para o seu fim; sem spam ou divulgação.\n"
+            "**7.** Condutas suspeitas vão para a Corregedoria; suas decisões são finais.\n"
+            "**8.** Desconhecer as regras não isenta de punição.\n\n"
+            "Ao permanecer no servidor você concorda com este regulamento."
+        ), 0xED4245)
+
+    def _emb_ingressar(self, guild: discord.Guild) -> discord.Embed:
+        insc = self._canal(guild, "rec_painel")
+        reg = self._canal(guild, "regulamento")
+        return self._embed("📋 Como ingressar na Polícia Civil", (
+            f"**1.** Leia o regulamento {reg.mention if reg else ''}\n"
+            f"**2.** Envie sua candidatura em {insc.mention if insc else 'inscrições'}\n"
+            "**3.** Aguarde a avaliação da equipe de recrutamento\n"
+            "**4.** Aprovado, você ingressa na **Academia de Polícia** como aluno\n"
+            "**5.** Conclua o treinamento e comece a carreira como **Agente de Polícia**\n\n"
+            "Dúvidas? Abra um atendimento ou pergunte em **dúvidas**."
+        ), 0x00897B)
+
+    def _emb_comandos(self) -> discord.Embed:
+        return self._embed("🤖 Comandos e recursos do bot", (
+            "**Painéis (botões)**\n"
+            "🕒 Bater ponto · 📋 Ocorrências · 📄 Boletim · 🚨 Acionamento · 🎫 Atendimento · 📝 Inscrição\n\n"
+            "**Comandos**\n"
+            "`!horas [@policial]` — horas de serviço\n"
+            "`!promover @policial [motivo]` — promove um posto (comando)\n"
+            "`!rebaixar @policial [motivo]` — rebaixa um posto (comando)\n"
+            "`!setap` — recria/atualiza canais e painéis (comando)"
+        ))
+
+    def _emb_hierarquia(self, guild: discord.Guild) -> discord.Embed:
+        e = self._embed("🏅 Hierarquia Policial", "Quadro atualizado automaticamente.")
+        for key in _PS_HIERARQUIA:
+            role = self._role(guild, key)
+            if role is None:
+                continue
+            membros = [m.mention for m in role.members if not m.bot]
+            if not membros:
+                valor = "*Vago*"
+            else:
+                valor = " ".join(membros[:15]) + (f" +{len(membros) - 15}" if len(membros) > 15 else "")
+            e.add_field(name=role.name, value=valor[:1024], inline=False)
+        return e
+
+    def _emb_departamentos(self, guild: discord.Guild) -> discord.Embed:
+        e = self._embed("🏢 Departamentos e Divisões", "Conheça as áreas da corporação.")
+        for key, desc in _PS_DEPARTAMENTOS:
+            role = self._role(guild, key)
+            if role is None:
+                continue
+            e.add_field(name=role.name, value=f"{desc}\n👥 **{len([m for m in role.members if not m.bot])}** membro(s)", inline=False)
+        return e
+
+    def _emb_ranking(self, guild: discord.Guild) -> discord.Embed:
+        ponto = self._g(guild)["ponto"]
+        agora = time.time()
+        itens = []
+        for uid, reg in ponto.items():
+            total = reg.get("total", 0) + (agora - reg["inicio"] if reg.get("inicio") else 0)
+            if total > 0:
+                itens.append((total, uid, bool(reg.get("inicio"))))
+        itens.sort(reverse=True)
+        medalhas = ["🥇", "🥈", "🥉"]
+        linhas = [
+            f"{medalhas[i] if i < 3 else f'`{i + 1}º`'} <@{uid}> — **{_ps_dur(total)}**" + (" 🟢" if ativo else "")
+            for i, (total, uid, ativo) in enumerate(itens[:10])
+        ]
+        em_servico = sum(1 for r in ponto.values() if r.get("inicio"))
+        e = self._embed("🏆 Ranking de Horas", "\n".join(linhas) or "Ninguém bateu ponto ainda.", 0xFF8F00)
+        e.add_field(name="🟢 Em serviço agora", value=str(em_servico), inline=True)
+        e.add_field(name="🔄 Atualizado", value=f"<t:{int(agora)}:R>", inline=True)
+        return e
+
+    def _emb_acionamento(self) -> discord.Embed:
+        return self._embed("🚨 Central de Acionamentos", (
+            "Precisa de apoio ou há uma ocorrência em andamento?\n"
+            "Clique em **Novo acionamento**: quem está **em serviço** será chamado."
+        ), 0xED4245)
+
+    async def _repostar_painel_acionamento(self, guild: discord.Guild) -> None:
+        ch = self._canal(guild, "acionamentos")
+        if ch is None:
+            return
+        g = self._g(guild)
+        mid = g["paineis"].get("acionamentos")
+        if mid:
+            try:
+                await (await ch.fetch_message(mid)).delete()
+            except discord.HTTPException:
+                pass
+        try:
+            msg = await ch.send(embed=self._emb_acionamento(), view=AcionamentoPainelView())
+            g["paineis"]["acionamentos"] = msg.id
+            self._salvar()
+        except discord.HTTPException:
+            pass
+
+    # ══════════════════ PONTO ══════════════════
+    async def _trocar_servico(self, guild, member, entrando: bool) -> None:
+        on, off = self._role(guild, "servico"), self._role(guild, "fora")
+        try:
+            add, rem = (on, off) if entrando else (off, on)
+            if rem is not None and rem in member.roles:
+                await member.remove_roles(rem, reason="Ponto")
+            if add is not None and add not in member.roles:
+                await member.add_roles(add, reason="Ponto")
+        except discord.HTTPException:
+            pass
+
+    async def ponto_entrar(self, interaction: discord.Interaction):
+        guild, m = interaction.guild, interaction.user
+        if not self._tem(m, _PC_POL):
+            await interaction.response.send_message("❌ Apenas policiais podem bater ponto.", ephemeral=True)
+            return
+        reg = self._g(guild)["ponto"].setdefault(str(m.id), {"inicio": None, "total": 0, "sessoes": 0})
+        if reg.get("inicio"):
+            await interaction.response.send_message(f"⚠️ Você já está em serviço desde <t:{int(reg['inicio'])}:R>.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        reg["inicio"] = time.time()
+        self._salvar()
+        await self._trocar_servico(guild, m, True)
+        e = discord.Embed(title="🟢 Entrada em serviço", description=m.mention, color=0x2E7D32, timestamp=discord.utils.utcnow())
+        e.set_thumbnail(url=m.display_avatar.url)
+        await self._log(guild, "ponto_log", e)
+        await interaction.followup.send("🟢 Você entrou em serviço. Bom trabalho!", ephemeral=True)
+
+    async def _fechar_sessao(self, guild, uid: int, member, auto: bool = False, saiu: bool = False):
+        reg = self._g(guild)["ponto"].get(str(uid))
+        if not reg or not reg.get("inicio"):
+            return None
+        dur = time.time() - reg["inicio"]
+        if auto:
+            dur = min(dur, _PS_LIMITE_PONTO)
+        reg["total"] = reg.get("total", 0) + dur
+        reg["sessoes"] = reg.get("sessoes", 0) + 1
+        reg["inicio"] = None
+        self._salvar()
+        if member is not None and not saiu:
+            await self._trocar_servico(guild, member, False)
+        e = discord.Embed(title="🔴 Saída de serviço", description=f"<@{uid}>", color=0xC62828, timestamp=discord.utils.utcnow())
+        e.add_field(name="⏱️ Duração", value=_ps_dur(dur), inline=True)
+        e.add_field(name="📊 Total acumulado", value=_ps_dur(reg["total"]), inline=True)
+        if auto:
+            e.set_footer(text="Encerrado automaticamente (turno aberto por mais de 12h)")
+        elif saiu:
+            e.set_footer(text="Encerrado: saiu do servidor")
+        await self._log(guild, "ponto_log", e)
+        await self._publicar_painel(guild, "ranking", self._emb_ranking(guild), None, criar=False)
+        return dur, reg["total"]
+
+    async def ponto_sair(self, interaction: discord.Interaction):
+        guild, m = interaction.guild, interaction.user
+        if not self._tem(m, _PC_POL):
+            await interaction.response.send_message("❌ Apenas policiais podem bater ponto.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        r = await self._fechar_sessao(guild, m.id, m)
+        if r is None:
+            await interaction.followup.send("⚠️ Você não está em serviço.", ephemeral=True)
+            return
+        dur, total = r
+        await interaction.followup.send(f"🔴 Saída registrada. Turno: **{_ps_dur(dur)}** · Total: **{_ps_dur(total)}**", ephemeral=True)
+
+    def _horas_txt(self, guild, uid: int) -> str:
+        reg = self._g(guild)["ponto"].get(str(uid))
+        if not reg:
+            return "Nenhum registro de ponto ainda."
+        atual = f"\n🟢 Turno atual: **{_ps_dur(time.time() - reg['inicio'])}**" if reg.get("inicio") else ""
+        return f"⏱️ Total: **{_ps_dur(reg.get('total', 0))}** em **{reg.get('sessoes', 0)}** turno(s){atual}"
+
+    async def ponto_horas(self, interaction: discord.Interaction):
+        await interaction.response.send_message(self._horas_txt(interaction.guild, interaction.user.id), ephemeral=True)
+
+    @commands.command(name="horas")
+    @commands.guild_only()
+    async def horas(self, ctx: commands.Context, membro: discord.Member = None):
+        membro = membro or ctx.author
+        await ctx.send(f"📊 **{membro.display_name}**\n{self._horas_txt(ctx.guild, membro.id)}")
+
+    @tasks.loop(minutes=10)
+    async def _loop_ponto(self):
+        agora = time.time()
+        for gid, g in list(self.dados["guilds"].items()):
+            guild = self.bot.get_guild(int(gid))
+            if guild is None:
+                continue
+            for uid, reg in list(g.get("ponto", {}).items()):
+                if reg.get("inicio") and agora - reg["inicio"] >= _PS_LIMITE_PONTO:
+                    try:
+                        await self._fechar_sessao(guild, int(uid), guild.get_member(int(uid)), auto=True)
+                    except Exception as e:
+                        _log_erro("loop_ponto", e)
+
+    @_loop_ponto.before_loop
+    async def _antes_loop_ponto(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(minutes=10)
+    async def _loop_paineis(self):
+        for gid in list(self.dados["guilds"].keys()):
+            guild = self.bot.get_guild(int(gid))
+            if guild is None:
+                continue
+            try:
+                for key, emb in (("hierarquia", self._emb_hierarquia(guild)),
+                                 ("departamentos", self._emb_departamentos(guild)),
+                                 ("ranking", self._emb_ranking(guild))):
+                    await self._publicar_painel(guild, key, emb, None, criar=False)
+                    await asyncio.sleep(1)
+            except Exception as e:
+                _log_erro("loop_paineis", e)
+
+    @_loop_paineis.before_loop
+    async def _antes_loop_paineis(self):
+        await self.bot.wait_until_ready()
+
+    # ══════════════════ OCORRÊNCIAS / BO / ACIONAMENTOS ══════════════════
+    async def registrar_ocorrencia(self, interaction: discord.Interaction, m: OcorrenciaModal):
+        guild, u = interaction.guild, interaction.user
+        await interaction.response.defer(ephemeral=True)
+        n = self._proximo(guild, "oc")
+        e = discord.Embed(title=f"📋 Ocorrência #{n:04d} — {_ps_txt(m.tipo.value, 80)}", color=_PS_COR, timestamp=discord.utils.utcnow())
+        e.set_author(name=str(u), icon_url=u.display_avatar.url)
+        e.add_field(name="📍 Local", value=_ps_txt(m.local.value), inline=True)
+        e.add_field(name="👮 Responsável", value=u.mention, inline=True)
+        e.add_field(name="📝 Descrição", value=_ps_txt(m.descricao.value), inline=False)
+        e.add_field(name="👥 Envolvidos", value=_ps_txt(m.envolvidos.value), inline=False)
+        e.add_field(name="✅ Ação / resultado", value=_ps_txt(m.acao.value), inline=False)
+        msg = await self._enviar(guild, "oc_log", embed=e, allowed_mentions=discord.AllowedMentions.none())
+        if msg is None:
+            await interaction.followup.send("⚠️ Canal de ocorrências não encontrado. Peça ao comando para rodar `!setap`.", ephemeral=True)
+            return
+        await interaction.followup.send(f"✅ Ocorrência **#{n:04d}** registrada: {msg.jump_url}", ephemeral=True)
+
+    async def registrar_bo(self, interaction: discord.Interaction, m: BOModal):
+        guild, u = interaction.guild, interaction.user
+        await interaction.response.defer(ephemeral=True)
+        g = self._g(guild)
+        ult = g["cooldown"].get(f"bo:{u.id}", 0)
+        if time.time() - ult < 120:
+            await interaction.followup.send("⏳ Aguarde um pouco antes de registrar outro boletim.", ephemeral=True)
+            return
+        n = self._proximo(guild, "bo")
+        e = discord.Embed(title=f"📄 Boletim #{n:04d} — {_ps_txt(m.tipo.value, 80)}", color=0xFEE75C, timestamp=discord.utils.utcnow())
+        e.set_author(name=str(u), icon_url=u.display_avatar.url)
+        e.add_field(name="📍 Local", value=_ps_txt(m.local.value), inline=True)
+        e.add_field(name="🕒 Quando", value=_ps_txt(m.quando.value), inline=True)
+        e.add_field(name="👤 Declarante", value=u.mention, inline=True)
+        e.add_field(name="📝 Relato", value=_ps_txt(m.descricao.value), inline=False)
+        e.add_field(name="👥 Suspeitos / testemunhas", value=_ps_txt(m.envolvidos.value), inline=False)
+        e.add_field(name="📌 Status", value="🟡 Aberto", inline=True)
+        e.add_field(name="👮 Responsável", value="—", inline=True)
+        e.set_footer(text=f"ID do declarante: {u.id}")
+        msg = await self._enviar(guild, "bo_recebidos", embed=e, view=BOStatusView(), allowed_mentions=discord.AllowedMentions.none())
+        if msg is None:
+            await interaction.followup.send("⚠️ Não consegui registrar agora. Avise a staff.", ephemeral=True)
+            return
+        g["bo"][str(msg.id)] = {"n": n, "user": u.id, "status": "aberto", "resp": None}
+        g["cooldown"][f"bo:{u.id}"] = time.time()
+        self._salvar()
+        await interaction.followup.send(f"✅ Boletim registrado! Seu protocolo é **#{n:04d}**. Um policial vai assumir o caso.", ephemeral=True)
+
+    async def bo_acao(self, interaction: discord.Interaction, acao: str):
+        guild, m = interaction.guild, interaction.user
+        if not (self._tem(m, _PC_POL) or self._eh_comando(m)):
+            await interaction.response.send_message("❌ Apenas policiais podem mexer nos boletins.", ephemeral=True)
+            return
+        reg = self._g(guild)["bo"].get(str(interaction.message.id))
+        if not reg:
+            await interaction.response.send_message("⚠️ Não achei os dados desse boletim.", ephemeral=True)
+            return
+        if reg["status"] in ("concluido", "arquivado"):
+            await interaction.response.send_message("⚠️ Esse boletim já foi encerrado.", ephemeral=True)
+            return
+        resp = reg.get("resp")
+        if resp and resp != m.id and not self._eh_comando(m):
+            await interaction.response.send_message(f"🔒 Esse boletim está com <@{resp}>.", ephemeral=True)
+            return
+        e = interaction.message.embeds[0].copy()
+        view = BOStatusView()
+        if acao == "assumir":
+            reg["status"], reg["resp"] = "andamento", m.id
+            _ps_set_field(e, "📌 Status", "🔵 Em andamento")
+            _ps_set_field(e, "👮 Responsável", m.mention)
+            e.color = 0x5865F2
+        elif acao == "concluir":
+            reg["status"] = "concluido"
+            _ps_set_field(e, "📌 Status", "🟢 Concluído")
+            _ps_set_field(e, "👮 Responsável", m.mention)
+            e.color, view = 0x57F287, None
+        else:
+            reg["status"] = "arquivado"
+            _ps_set_field(e, "📌 Status", "⚫ Arquivado")
+            e.color, view = 0x99AAB5, None
+        self._salvar()
+        await interaction.response.edit_message(embed=e, view=view)
+        if acao == "concluir":
+            u = guild.get_member(reg["user"])
+            if u:
+                try:
+                    await u.send(f"✅ Seu boletim **#{reg['n']:04d}** na Polícia Civil foi **concluído** por {m.display_name}.")
+                except discord.HTTPException:
+                    pass
+
+    async def registrar_acionamento(self, interaction: discord.Interaction, m: AcionamentoModal):
+        guild, u = interaction.guild, interaction.user
+        await interaction.response.defer(ephemeral=True)
+        n = self._proximo(guild, "ac")
+        p = m.prioridade.value.strip().lower()
+        cor, nivel = (0xED4245, "🔴 Alta") if p.startswith("alt") else (0xFF8F00, "🟠 Média") if p.startswith(("méd", "med")) else (0x57F287, "🟢 Baixa")
+        e = discord.Embed(title=f"🚨 Acionamento #{n:04d}", color=cor, timestamp=discord.utils.utcnow())
+        e.add_field(name="📍 Local", value=_ps_txt(m.local.value), inline=True)
+        e.add_field(name="⚡ Prioridade", value=nivel, inline=True)
+        e.add_field(name="📝 Situação", value=_ps_txt(m.descricao.value), inline=False)
+        e.add_field(name="📌 Status", value="🟡 Aguardando equipe", inline=True)
+        e.add_field(name="🚓 Equipe", value="—", inline=True)
+        e.set_footer(text=f"Aberto por {u}")
+        role = self._role(guild, "servico")
+        msg = await self._enviar(
+            guild, "acionamentos", content=role.mention if role else None, embed=e, view=AcionamentoChamadoView(),
+            allowed_mentions=discord.AllowedMentions(roles=[role]) if role else discord.AllowedMentions.none(),
+        )
+        if msg is None:
+            await interaction.followup.send("⚠️ Canal de acionamentos não encontrado. Rode `!setap`.", ephemeral=True)
+            return
+        self._g(guild)["ac"][str(msg.id)] = {"n": n, "autor": u.id, "equipe": [], "status": "aberto"}
+        self._salvar()
+        await self._repostar_painel_acionamento(guild)
+        await interaction.followup.send(f"🚨 Acionamento **#{n:04d}** enviado!", ephemeral=True)
+
+    async def ac_acao(self, interaction: discord.Interaction, acao: str):
+        guild, m = interaction.guild, interaction.user
+        if not (self._tem(m, _PC_POL + ["core", "dep_op"]) or self._eh_comando(m)):
+            await interaction.response.send_message("❌ Apenas policiais podem atender acionamentos.", ephemeral=True)
+            return
+        reg = self._g(guild)["ac"].get(str(interaction.message.id))
+        if not reg:
+            await interaction.response.send_message("⚠️ Não achei os dados desse acionamento.", ephemeral=True)
+            return
+        if reg["status"] == "encerrado":
+            await interaction.response.send_message("⚠️ Esse acionamento já foi encerrado.", ephemeral=True)
+            return
+        e = interaction.message.embeds[0].copy()
+        view = AcionamentoChamadoView()
+        if acao == "atender":
+            if m.id in reg["equipe"]:
+                await interaction.response.send_message("⚠️ Você já está nesse acionamento.", ephemeral=True)
+                return
+            reg["equipe"].append(m.id)
+            reg["status"] = "andamento"
+            _ps_set_field(e, "📌 Status", "🔵 Em atendimento")
+            _ps_set_field(e, "🚓 Equipe", " ".join(f"<@{i}>" for i in reg["equipe"]))
+        else:
+            if reg["equipe"] and m.id not in reg["equipe"] and not self._eh_comando(m):
+                await interaction.response.send_message("🔒 Só a equipe do acionamento (ou o comando) pode encerrar.", ephemeral=True)
+                return
+            reg["status"] = "encerrado"
+            _ps_set_field(e, "📌 Status", f"✅ Encerrado por {m.mention}")
+            e.color, view = 0x57F287, None
+        self._salvar()
+        await interaction.response.edit_message(embed=e, view=view)
+
+    # ══════════════════ ATENDIMENTO AO CIDADÃO (tickets) ══════════════════
+    async def abrir_ticket(self, interaction: discord.Interaction, tipo: str):
+        guild, m = interaction.guild, interaction.user
+        await interaction.response.defer(ephemeral=True)
+        g = self._g(guild)
+        for cid, t in list(g["tickets"].items()):
+            ch = guild.get_channel(int(cid))
+            if ch is None:
+                g["tickets"].pop(cid, None)
+            elif t["user"] == m.id:
+                await interaction.followup.send(f"⚠️ Você já tem um atendimento aberto: {ch.mention}", ephemeral=True)
+                return
+        label, emoji, _d = _PS_TICKET_TIPOS.get(tipo, _PS_TICKET_TIPOS["outro"])
+        cat = _pc_achar(guild.categories, _PS_CAT_TICKETS)
+        po = discord.PermissionOverwrite
+        ow = {
+            guild.default_role: po(view_channel=False),
+            m: po(view_channel=True, send_messages=True, read_message_history=True, attach_files=True, embed_links=True),
+            guild.me: po(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True, manage_messages=True),
+        }
+        for k in dict.fromkeys(_PS_STAFF_TICKET + ["admin"]):
+            r = self._role(guild, k)
+            if r is not None:
+                ow[r] = po(view_channel=True, send_messages=True, read_message_history=True, attach_files=True, embed_links=True)
+        n = self._proximo(guild, "tk")
+        try:
+            ch = await guild.create_text_channel(
+                name=f"🎫・{_slug(label)}-{_slug(m.name)}"[:90], category=cat, overwrites=ow,
+                topic=f"Atendimento #{n:04d} — {label} — {m} ({m.id})", reason=f"Atendimento aberto por {m}",
+            )
+        except discord.HTTPException as e:
+            await interaction.followup.send(f"⚠️ Não consegui abrir o atendimento: {getattr(e, 'text', e)}", ephemeral=True)
+            return
+        g["tickets"][str(ch.id)] = {"n": n, "user": m.id, "tipo": label, "assumido": None, "aberto": time.time()}
+        self._salvar()
+        e = self._embed(f"{emoji} Atendimento #{n:04d} — {label}", (
+            f"Olá, {m.mention}! Descreva sua situação com o máximo de detalhes.\n"
+            "Um policial vai atender você em breve.\n\n"
+            "🙋 **Assumir** — policial assume o atendimento\n🔒 **Fechar** — encerra e gera a transcrição"
+        ), 0x00A6A6)
+        plantao = self._role(guild, "plantao")
+        await ch.send(
+            content=f"{m.mention} {plantao.mention if plantao else ''}".strip(), embed=e, view=TicketControlView(),
+            allowed_mentions=discord.AllowedMentions(users=[m], roles=[plantao] if plantao else []),
+        )
+        await interaction.followup.send(f"✅ Atendimento aberto: {ch.mention}", ephemeral=True)
+
+    def _pode_ticket(self, member, reg: dict) -> bool:
+        return member.id == reg["user"] or self._tem(member, _PS_STAFF_TICKET) or self._eh_comando(member)
+
+    async def assumir_ticket(self, interaction: discord.Interaction):
+        guild, m = interaction.guild, interaction.user
+        reg = self._g(guild)["tickets"].get(str(interaction.channel.id))
+        if not reg:
+            await interaction.response.send_message("⚠️ Não achei os dados desse atendimento.", ephemeral=True)
+            return
+        if not (self._tem(m, _PS_STAFF_TICKET) or self._eh_comando(m)):
+            await interaction.response.send_message("❌ Apenas policiais podem assumir atendimentos.", ephemeral=True)
+            return
+        if reg.get("assumido"):
+            await interaction.response.send_message(f"⚠️ Já assumido por <@{reg['assumido']}>.", ephemeral=True)
+            return
+        reg["assumido"] = m.id
+        self._salvar()
+        await interaction.response.send_message(f"🙋 {m.mention} assumiu este atendimento.", allowed_mentions=discord.AllowedMentions.none())
+
+    async def fechar_ticket(self, interaction: discord.Interaction):
+        guild, m, ch = interaction.guild, interaction.user, interaction.channel
+        g = self._g(guild)
+        reg = g["tickets"].get(str(ch.id))
+        if not reg:
+            await interaction.response.send_message("⚠️ Não achei os dados desse atendimento.", ephemeral=True)
+            return
+        if not self._pode_ticket(m, reg):
+            await interaction.response.send_message("❌ Você não pode fechar este atendimento.", ephemeral=True)
+            return
+        await interaction.response.send_message("🔒 Gerando transcrição e fechando o atendimento...")
+        fuso = timezone(timedelta(hours=-3))
+        linhas = []
+        try:
+            async for msg in ch.history(limit=2000, oldest_first=True):
+                anexos = " ".join(a.url for a in msg.attachments)
+                linhas.append(f"[{msg.created_at.astimezone(fuso):%d/%m/%Y %H:%M}] {msg.author}: {msg.clean_content} {anexos}".strip())
+        except discord.HTTPException:
+            pass
+        nome_arq = f"atendimento-{reg['n']:04d}.txt"
+        dados = "\n".join(linhas).encode("utf-8")
+        e = discord.Embed(title=f"🗃️ Atendimento #{reg['n']:04d} encerrado", color=0x99AAB5, timestamp=discord.utils.utcnow())
+        e.add_field(name="Tipo", value=reg["tipo"], inline=True)
+        e.add_field(name="Cidadão", value=f"<@{reg['user']}>", inline=True)
+        e.add_field(name="Responsável", value=f"<@{reg['assumido']}>" if reg.get("assumido") else "—", inline=True)
+        e.add_field(name="Duração", value=_ps_dur(time.time() - reg["aberto"]), inline=True)
+        e.add_field(name="Fechado por", value=m.mention, inline=True)
+        await self._enviar(guild, "log_tk", embed=e, file=discord.File(io.BytesIO(dados), filename=nome_arq),
+                           allowed_mentions=discord.AllowedMentions.none())
+        u = guild.get_member(reg["user"])
+        if u:
+            try:
+                await u.send(f"🔒 Seu atendimento **#{reg['n']:04d}** na Polícia Civil foi encerrado. Segue a transcrição:",
+                             file=discord.File(io.BytesIO(dados), filename=nome_arq))
+            except discord.HTTPException:
+                pass
+        g["tickets"].pop(str(ch.id), None)
+        self._salvar()
+        await asyncio.sleep(4)
+        try:
+            await ch.delete(reason=f"Atendimento encerrado por {m}")
+        except discord.HTTPException:
+            pass
+
+    # ══════════════════ RECRUTAMENTO ══════════════════
+    async def candidatar(self, interaction: discord.Interaction, m: CandidaturaModal):
+        guild, u = interaction.guild, interaction.user
+        await interaction.response.defer(ephemeral=True)
+        if self._tem(u, _PC_POL + ["aluno"]):
+            await interaction.followup.send("⚠️ Você já faz parte da corporação.", ephemeral=True)
+            return
+        g = self._g(guild)
+        if any(c["user"] == u.id and c["status"] == "pendente" for c in g["cand"].values()):
+            await interaction.followup.send("⚠️ Você já tem uma candidatura em análise. Aguarde o resultado.", ephemeral=True)
+            return
+        n = self._proximo(guild, "rc")
+        e = discord.Embed(title=f"📝 Candidatura #{n:04d} — {_ps_txt(m.nome_rp.value, 60)}", color=0xFEE75C, timestamp=discord.utils.utcnow())
+        e.set_author(name=str(u), icon_url=u.display_avatar.url)
+        e.add_field(name="👤 Candidato", value=u.mention, inline=True)
+        e.add_field(name="🎂 Idade", value=_ps_txt(m.idade.value, 10), inline=True)
+        e.add_field(name="🕒 Disponibilidade", value=_ps_txt(m.disponibilidade.value, 100), inline=True)
+        e.add_field(name="🎮 Experiência em RP", value=_ps_txt(m.experiencia.value), inline=False)
+        e.add_field(name="💬 Motivo", value=_ps_txt(m.motivo.value), inline=False)
+        e.add_field(name="📌 Status", value="🟡 Pendente", inline=False)
+        e.set_footer(text=f"ID: {u.id}")
+        rec = self._role(guild, "recrutador")
+        msg = await self._enviar(
+            guild, "rec_equipe", content=rec.mention if rec else None, embed=e, view=RecrutamentoDecisaoView(),
+            allowed_mentions=discord.AllowedMentions(roles=[rec]) if rec else discord.AllowedMentions.none(),
+        )
+        if msg is None:
+            await interaction.followup.send("⚠️ Não consegui enviar a candidatura agora. Avise a staff.", ephemeral=True)
+            return
+        g["cand"][str(msg.id)] = {"n": n, "user": u.id, "status": "pendente"}
+        self._salvar()
+        await interaction.followup.send(f"✅ Candidatura **#{n:04d}** enviada! O resultado sai aqui no servidor e na sua DM.", ephemeral=True)
+
+    async def _finalizar_candidatura(self, guild, msg: discord.Message, reg: dict, aprovado: bool, autor, motivo: str = "") -> None:
+        reg["status"] = "aprovado" if aprovado else "reprovado"
+        self._salvar()
+        e = msg.embeds[0].copy()
+        _ps_set_field(e, "📌 Status", (f"✅ Aprovado por {autor.mention}" if aprovado else f"❌ Reprovado por {autor.mention}"), inline=False)
+        e.color = 0x57F287 if aprovado else 0xED4245
+        await msg.edit(embed=e, view=None)
+        cand = guild.get_member(reg["user"])
+        mencao = cand.mention if cand else f"<@{reg['user']}>"
+        if aprovado:
+            aluno = self._role(guild, "aluno")
+            if cand and aluno:
+                try:
+                    await cand.add_roles(aluno, reason=f"Candidatura aprovada por {autor}")
+                except discord.HTTPException:
+                    pass
+            r = self._embed(f"✅ Candidatura #{reg['n']:04d} aprovada", f"{mencao} foi **aprovado(a)**! Bem-vindo(a) à Academia de Polícia. 🎓", 0x57F287)
+            await self._enviar(guild, "aprovados", embed=r, allowed_mentions=discord.AllowedMentions(users=True))
+            dm = "🎉 Sua candidatura à Polícia Civil foi **aprovada**! Você agora é aluno da Academia de Polícia."
+        else:
+            r = self._embed(f"❌ Candidatura #{reg['n']:04d} reprovada", f"{mencao} não foi aprovado(a) desta vez." + (f"\n**Motivo:** {_ps_txt(motivo, 500)}" if motivo.strip() else ""), 0xED4245)
+            await self._enviar(guild, "reprovados", embed=r, allowed_mentions=discord.AllowedMentions(users=True))
+            dm = "❌ Sua candidatura à Polícia Civil **não foi aprovada** desta vez." + (f"\nMotivo: {_ps_txt(motivo, 500)}" if motivo.strip() else "") + "\nVocê pode se candidatar novamente."
+        if cand:
+            try:
+                await cand.send(dm)
+            except discord.HTTPException:
+                pass
+
+    async def aprovar_candidato(self, interaction: discord.Interaction):
+        guild, m = interaction.guild, interaction.user
+        if not self._eh_recrutador(m):
+            await interaction.response.send_message("❌ Apenas a equipe de recrutamento pode decidir.", ephemeral=True)
+            return
+        reg = self._g(guild)["cand"].get(str(interaction.message.id))
+        if not reg or reg["status"] != "pendente":
+            await interaction.response.send_message("⚠️ Essa candidatura já foi decidida (ou não achei os dados).", ephemeral=True)
+            return
+        await interaction.response.defer()
+        await self._finalizar_candidatura(guild, interaction.message, reg, True, m)
+
+    async def reprovar_candidato(self, interaction: discord.Interaction, msg_id: int, motivo: str):
+        guild, m = interaction.guild, interaction.user
+        await interaction.response.defer(ephemeral=True)
+        reg = self._g(guild)["cand"].get(str(msg_id))
+        if not reg or reg["status"] != "pendente":
+            await interaction.followup.send("⚠️ Essa candidatura já foi decidida (ou não achei os dados).", ephemeral=True)
+            return
+        try:
+            msg = await interaction.channel.fetch_message(msg_id)
+        except discord.HTTPException:
+            await interaction.followup.send("⚠️ Não achei a mensagem da candidatura.", ephemeral=True)
+            return
+        await self._finalizar_candidatura(guild, msg, reg, False, m, motivo)
+        await interaction.followup.send("❌ Candidato reprovado.", ephemeral=True)
+
+    # ══════════════════ PROMOÇÕES ══════════════════
+    def _idx_escada(self, member) -> int:
+        idx = -1
+        for i, k in enumerate(_PS_ESCADA):
+            if self._tem(member, [k]):
+                idx = i
+        return idx
+
+    async def _mudar_posto(self, ctx: commands.Context, membro: discord.Member, delta: int, motivo: str):
+        guild, autor = ctx.guild, ctx.author
+        if not (self._eh_comando(autor) or self._tem(autor, _PC_GEST)):
+            await ctx.send("❌ Apenas o comando e delegados podem promover/rebaixar.")
+            return
+        if membro.bot or membro.id == autor.id:
+            await ctx.send("❌ Alvo inválido.")
+            return
+        atual = self._idx_escada(membro)
+        novo = (0 if atual == -1 else atual + 1) if delta > 0 else atual - 1
+        if delta < 0 and atual <= 0:
+            await ctx.send("⚠️ Esse policial já está no menor posto da escada (ou não tem posto).")
+            return
+        if novo >= len(_PS_ESCADA):
+            await ctx.send("⚠️ Esse policial já está no maior posto da escada.")
+            return
+        nivel_autor = len(_PS_ESCADA) if self._eh_comando(autor) else self._idx_escada(autor)
+        if nivel_autor <= max(novo, atual if delta < 0 else -1):
+            await ctx.send("❌ Você só pode mudar postos abaixo do seu.")
+            return
+        antigo = self._role(guild, _PS_ESCADA[atual]) if atual >= 0 else None
+        novo_role = self._role(guild, _PS_ESCADA[novo])
+        try:
+            if antigo:
+                await membro.remove_roles(antigo, reason=f"{'Promoção' if delta > 0 else 'Rebaixamento'} por {autor}")
+            await membro.add_roles(novo_role, reason=f"{'Promoção' if delta > 0 else 'Rebaixamento'} por {autor}")
+        except discord.HTTPException as e:
+            await ctx.send(f"⚠️ Não consegui alterar os cargos: {getattr(e, 'text', e)}")
+            return
+        sobe = delta > 0
+        e = self._embed("📈 Promoção" if sobe else "📉 Rebaixamento", "", 0x57F287 if sobe else 0xED4245)
+        e.add_field(name="👮 Policial", value=membro.mention, inline=True)
+        e.add_field(name="📌 Posto", value=f"{antigo.name if antigo else '—'} ➜ **{novo_role.name}**", inline=True)
+        e.add_field(name="✍️ Responsável", value=autor.mention, inline=True)
+        e.add_field(name="📝 Motivo", value=_ps_txt(motivo, 500), inline=False)
+        e.set_thumbnail(url=membro.display_avatar.url)
+        await self._enviar(guild, "promocoes", embed=e, allowed_mentions=discord.AllowedMentions.none())
+        await ctx.send(f"{'📈' if sobe else '📉'} {membro.mention} agora é **{novo_role.name}**.", allowed_mentions=discord.AllowedMentions.none())
+
+    @commands.command(name="promover")
+    @commands.guild_only()
+    async def promover(self, ctx: commands.Context, membro: discord.Member, *, motivo: str = "Não informado"):
+        await self._mudar_posto(ctx, membro, +1, motivo)
+
+    @commands.command(name="rebaixar")
+    @commands.guild_only()
+    async def rebaixar(self, ctx: commands.Context, membro: discord.Member, *, motivo: str = "Não informado"):
+        await self._mudar_posto(ctx, membro, -1, motivo)
+
+    @promover.error
+    @rebaixar.error
+    async def _erro_posto(self, ctx, error):
+        if isinstance(error, (commands.MemberNotFound, commands.MissingRequiredArgument)):
+            await ctx.send("Uso: `!promover @policial [motivo]` / `!rebaixar @policial [motivo]`", delete_after=8)
+
+    # ══════════════════ BOAS-VINDAS / SAÍDAS / LOGS ══════════════════
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        guild = member.guild
+        if str(guild.id) not in self.dados["guilds"]:
+            return
+        if not member.bot:
+            reg, ingr = self._canal(guild, "regulamento"), self._canal(guild, "como_ingressar")
+            insc = self._canal(guild, "rec_painel")
+            e = self._embed("🚔 Bem-vindo(a) à Polícia Civil!", (
+                f"Olá, {member.mention}! Que bom ter você aqui.\n\n"
+                f"📜 Leia o regulamento: {reg.mention if reg else '—'}\n"
+                f"📋 Veja como ingressar: {ingr.mention if ingr else '—'}\n"
+                f"📝 Quer ser policial? Candidate-se em {insc.mention if insc else '—'}"
+            ), 0x57F287)
+            e.set_thumbnail(url=member.display_avatar.url)
+            e.set_footer(text=f"Você é o {guild.member_count}º membro • Polícia Civil")
+            await self._enviar(guild, "boas_vindas", content=member.mention, embed=e,
+                               allowed_mentions=discord.AllowedMentions(users=[member]))
+        log = discord.Embed(title="📥 Membro entrou" if not member.bot else "🤖 Bot adicionado", color=0x57F287, timestamp=discord.utils.utcnow())
+        log.description = f"{member.mention} (`{member.id}`)"
+        log.add_field(name="Conta criada", value=f"<t:{int(member.created_at.timestamp())}:R>", inline=True)
+        log.add_field(name="Membros", value=str(guild.member_count), inline=True)
+        log.set_thumbnail(url=member.display_avatar.url)
+        await self._log(guild, "log_membros", log)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        guild = member.guild
+        if str(guild.id) not in self.dados["guilds"]:
+            return
+        # turno aberto? fecha pra não ficar contando horas de quem saiu
+        try:
+            await self._fechar_sessao(guild, member.id, None, saiu=True)
+        except Exception as e:
+            _log_erro("fechar_sessao_saida", e)
+        if not member.bot:
+            e = self._embed("👋 Até logo!", f"**{_ps_txt(member.display_name, 60)}** deixou a corporação.", 0x99AAB5)
+            e.set_thumbnail(url=member.display_avatar.url)
+            await self._enviar(guild, "saidas", embed=e, allowed_mentions=discord.AllowedMentions.none())
+        log = discord.Embed(title="📤 Membro saiu", color=0xED4245, timestamp=discord.utils.utcnow())
+        log.description = f"{member.mention} (`{member.id}`) — {_ps_txt(str(member), 80)}"
+        if member.joined_at:
+            log.add_field(name="Ficou por", value=_ps_dur(time.time() - member.joined_at.timestamp()), inline=True)
+        cargos = [r.mention for r in member.roles if not r.is_default()]
+        log.add_field(name="Cargos", value=(" ".join(cargos) or "—")[:1024], inline=False)
+        log.set_thumbnail(url=member.display_avatar.url)
+        await self._log(guild, "log_membros", log)
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message):
+        if message.guild is None or message.author.bot or str(message.guild.id) not in self.dados["guilds"]:
+            return
+        e = discord.Embed(title="🗑️ Mensagem apagada", color=0xED4245, timestamp=discord.utils.utcnow())
+        e.add_field(name="Autor", value=f"{message.author.mention} (`{message.author.id}`)", inline=True)
+        e.add_field(name="Canal", value=message.channel.mention, inline=True)
+        e.add_field(name="Conteúdo", value=_ps_txt(message.content or "*(sem texto)*"), inline=False)
+        if message.attachments:
+            e.add_field(name="Anexos", value=str(len(message.attachments)), inline=True)
+        await self._log(message.guild, "log_msg", e)
+
+    @commands.Cog.listener()
+    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        if after.guild is None or after.author.bot or before.content == after.content:
+            return
+        if str(after.guild.id) not in self.dados["guilds"]:
+            return
+        e = discord.Embed(title="✏️ Mensagem editada", color=0xFEE75C, timestamp=discord.utils.utcnow())
+        e.add_field(name="Autor", value=f"{after.author.mention} (`{after.author.id}`)", inline=True)
+        e.add_field(name="Canal", value=f"{after.channel.mention} — [ir]({after.jump_url})", inline=True)
+        e.add_field(name="Antes", value=_ps_txt(before.content or "—", 500), inline=False)
+        e.add_field(name="Depois", value=_ps_txt(after.content or "—", 500), inline=False)
+        await self._log(after.guild, "log_msg", e)
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+        if member.bot or before.channel == after.channel or str(member.guild.id) not in self.dados["guilds"]:
+            return
+        if before.channel is None:
+            titulo, cor, desc = "🔊 Entrou na voz", 0x57F287, f"{member.mention} entrou em **{after.channel.name}**"
+        elif after.channel is None:
+            titulo, cor, desc = "🔇 Saiu da voz", 0xED4245, f"{member.mention} saiu de **{before.channel.name}**"
+        else:
+            titulo, cor, desc = "🔀 Trocou de sala", 0xFEE75C, f"{member.mention}: **{before.channel.name}** ➜ **{after.channel.name}**"
+        await self._log(member.guild, "log_voz", discord.Embed(title=titulo, description=desc, color=cor, timestamp=discord.utils.utcnow()))
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        guild = after.guild
+        if str(guild.id) not in self.dados["guilds"]:
+            return
+        ignorar = {r.id for k in ("servico", "fora") if (r := self._role(guild, k)) is not None}
+        ganhou = [r for r in after.roles if r not in before.roles and r.id not in ignorar]
+        perdeu = [r for r in before.roles if r not in after.roles and r.id not in ignorar]
+        if ganhou or perdeu or before.nick != after.nick:
+            e = discord.Embed(title="🛡️ Membro atualizado", description=after.mention, color=_PS_COR, timestamp=discord.utils.utcnow())
+            if ganhou:
+                e.add_field(name="➕ Cargos adicionados", value=" ".join(r.mention for r in ganhou)[:1024], inline=False)
+            if perdeu:
+                e.add_field(name="➖ Cargos removidos", value=" ".join(r.mention for r in perdeu)[:1024], inline=False)
+            if before.nick != after.nick:
+                e.add_field(name="Apelido", value=f"{_ps_txt(before.nick or '—', 60)} ➜ {_ps_txt(after.nick or '—', 60)}", inline=False)
+            await self._log(guild, "log_cargos", e)
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, user: discord.User):
+        if str(guild.id) in self.dados["guilds"]:
+            await self._log(guild, "log_mod", discord.Embed(title="🔨 Membro banido", description=f"{user} (`{user.id}`)", color=0xED4245, timestamp=discord.utils.utcnow()))
+
+    @commands.Cog.listener()
+    async def on_member_unban(self, guild: discord.Guild, user: discord.User):
+        if str(guild.id) in self.dados["guilds"]:
+            await self._log(guild, "log_mod", discord.Embed(title="♻️ Banimento removido", description=f"{user} (`{user.id}`)", color=0x57F287, timestamp=discord.utils.utcnow()))
+
+    # ── sugestões: reações de voto + thread de discussão ──
+    @commands.Cog.listener("on_message")
+    async def _sugestoes(self, message: discord.Message):
+        if message.guild is None or message.author.bot or str(message.guild.id) not in self.dados["guilds"]:
+            return
+        ch = self._canal(message.guild, "sugestoes")
+        if ch is None or message.channel.id != ch.id or message.content.startswith(("!", "/")):
+            return
+        try:
+            await message.add_reaction("👍")
+            await message.add_reaction("👎")
+            await message.create_thread(name=f"Sugestão de {message.author.display_name}"[:90], auto_archive_duration=1440)
+        except discord.HTTPException:
+            pass
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Whitelist(bot))
+    await bot.add_cog(PoliciaSistema(bot))
