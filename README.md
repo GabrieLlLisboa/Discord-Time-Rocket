@@ -1,47 +1,121 @@
-# Bot de Whitelist — Servidor Minecraft
+# 🤖 Arvenor Bot
 
-Bot separado, só com a whitelist. Funciona apenas no servidor `1566899003520716960`.
+Bot do Discord da rede Arvenor, feito em Python com `discord.py`.
 
-## Como funciona
-1. Alguém entra → o bot cria um canal privado só dessa pessoa (categoria "🔒 Whitelist").
-2. Ela clica em **Começar** e responde só 2 coisas:
-   - **Qual seu nick do Minecraft?** → o apelido dela no Discord é trocado por esse nick
-   - **Java ou Bedrock?**
-3. A staff recebe o resumo (no canal + no `LOG_CHANNEL_ID`, se configurado) e clica em **Aprovar** ou **Recusar**.
-   - Aprovar: tira o cargo "sem acesso", dá o cargo de membro, canal é apagado em 10 min.
-   - Recusar: expulsa a pessoa (pede confirmação), canal é apagado em 10 min.
+---
 
-Validação do nick: Java = 3–16 caracteres (letras, números, `_`). Bedrock = até 16 (letras, números, espaço, `.`).
+## 📁 Estrutura
 
-## Montar o servidor: `!setupmine` (só administrador)
-Cria 20 cargos (Direção / Equipe / Survival / Extras, com separadores) e 4 categorias com 20 canais
-(informações, comunidade, minecraft e voz). Pode rodar de novo: o que já existe é reaproveitado.
-- `@everyone` não vê nada. Quem entra só enxerga o canal da própria whitelist.
-- Aprovado na whitelist = ganha **🌱・Novato** e passa a ver o servidor.
-- Canais de informações são só leitura (só equipe e bots escrevem).
-- Equipe que aprova whitelist: Fundador, Diretor, Adm da Tryharders, Adm do Survival, Administrador, Moderador, Ajudante.
-- Ao rodar, ele grava os IDs em `data/config.json` (o `.env` com `STAFF_ROLE_ID` etc. vira só reserva).
-- Antes de rodar: arraste o cargo do bot pro **topo** da lista de cargos.
-
-## Comandos (staff)
-- `!whitelist @membro` — abre a whitelist de alguém que já está no servidor
-- `!aprovar-whitelist` / `!reprovar-whitelist` — dentro do canal da whitelist
-
-## Instalar
 ```
+arvenor-bot/
+├── main.py              ← Arquivo principal (inicia o bot)
+├── .env                 ← Token e configurações (NÃO suba no GitHub)
+├── requirements.txt     ← Dependências Python
+└── cogs/
+    ├── welcome.py       ← Boas-vindas ao entrar no servidor
+    └── ...              ← Futuras funcionalidades aqui
+```
+
+---
+
+## ⚙️ Instalação
+
+### 1. Instale as dependências
+```bash
 pip install -r requirements.txt
-cp .env.example .env      # preencha DISCORD_TOKEN e os IDs
+```
+
+### 2. Configure o `.env`
+Abra o arquivo `.env` e preencha:
+```env
+DISCORD_TOKEN=SEU_TOKEN_AQUI
+WELCOME_CHANNEL_ID=1514774138516930661
+PREFIX=!
+```
+
+### 3. Ative os Intents no Discord Developer Portal
+Acesse https://discord.com/developers/applications → seu bot → **Bot**:
+- ✅ **SERVER MEMBERS INTENT**
+- ✅ **MESSAGE CONTENT INTENT**
+
+### 4. Rode o bot
+```bash
 python main.py
 ```
 
-## No Discord Developer Portal
-- Bot → ligar **Server Members Intent** e **Message Content Intent**
-- Permissões do bot no servidor: Gerenciar Canais, Gerenciar Cargos, Gerenciar Apelidos,
-  Expulsar Membros, Ver Canais, Enviar Mensagens, Incorporar Links, Ler Histórico.
-- O cargo do bot precisa estar **acima** do cargo "sem acesso", do cargo de membro e dos membros que ele edita.
+---
 
-## Cargos (opcional, no .env)
-`STAFF_ROLE_ID`, `NO_ACCESS_ROLE_ID`, `MEMBER_ROLE_ID`, `LOG_CHANNEL_ID`, `CATEGORY_ID`.
-Sem eles o bot funciona igual (só administradores aprovam, sem troca de cargos).
-Para a pessoa não ver o servidor antes de ser aprovada, crie um cargo "sem acesso" (ou deixe os canais
-visíveis só pro cargo de membro) e coloque os IDs.
+## ➕ Adicionar novas funcionalidades
+
+1. Crie um novo arquivo em `cogs/`, ex: `cogs/moderation.py`
+2. Use a estrutura padrão de Cog (veja `cogs/welcome.py` como exemplo)
+3. Adicione o nome do cog na lista `COGS` dentro de `main.py`:
+```python
+COGS = [
+    "cogs.welcome",
+    "cogs.moderation",  # ← aqui
+]
+```
+
+---
+
+## 📦 Funcionalidades
+
+| Arquivo            | Função                            | Status |
+|--------------------|-----------------------------------|--------|
+| `cogs/welcome.py`  | Embed de boas-vindas ao entrar    | ✅ Ativo |
+
+---
+
+## 🛡️ Sistema de Moderação
+
+Sistema completo de moderação em Slash Commands + painel de botões, com
+banco de dados em JSON (pasta `data/`), hierarquia de cargos e logs
+configuráveis.
+
+### Arquivos
+| Arquivo                 | Função |
+|--------------------------|--------|
+| `cogs/mod_utils.py`      | Núcleo: banco de dados, hierarquia, embeds, confirmação |
+| `cogs/moderation.py`     | Comandos de moderação (warn, ban, kick, timeout, etc.) |
+| `cogs/automod.py`        | AutoMod: spam, flood, links, convites, palavrões, CAPS, menções, emojis, phishing |
+| `cogs/antiraid.py`       | Anti-Raid: detecção de entradas em massa e modo de emergência |
+| `cogs/mod_config.py`     | Painel `/moderacao-config` (canais de log, cargos, toggles) |
+| `cogs/mod_setup.py`      | Comando `!setup-moderacao` — painel de botões + modais |
+
+### Primeiros passos
+1. **Convide o bot** com o escopo `bot` + `applications.commands` e as permissões:
+   `Administrador` (mais simples) **ou**, no mínimo: Banir/Expulsar membros,
+   Gerenciar Cargos/Canais/Mensagens/Apelidos, Moderar Membros (timeout).
+2. No servidor, rode `/moderacao-config` e defina:
+   - Canal de logs de moderação, de AutoMod e de Anti-Raid
+   - Cargos de Staff (usados como "imunes" no AutoMod/Anti-Raid e para o painel de botões)
+   - Se quer DM automática pro punido e confirmação obrigatória em ações perigosas
+3. Rode `!setup-moderacao` no canal onde a staff vai atuar — isso manda o
+   **painel de botões** (Advertir, Timeout, Expulsar, Banir, Ban Temporário,
+   Desbanir, Softban, Limpar Mensagens, Slowmode, Nick, Trancar/Destrancar).
+   Cada botão abre uma janela (modal) pedindo usuário/motivo/duração.
+4. Configure o AutoMod com `/automod status`, `/automod ativar`, `/automod acao`,
+   `/automod palavra-adicionar`, `/automod whitelist-link`, `/automod limite`.
+5. Configure o Anti-Raid com `/antiraid status`, `/antiraid configurar`,
+   `/antiraid acao`, `/antiraid emergencia true` (trava entradas na hora).
+
+### Comandos principais
+`/warn` `/avisos` `/removeraviso` `/historico` `/timeout` `/untimeout`
+`/kick` `/ban` `/tempban` `/unban` `/softban` `/clear` `/slowmode` `/nick`
+`/lock` `/unlock` `/cargo adicionar|remover` `/canal criar|deletar|renomear`
+`/thread trancar|destrancar|arquivar` `/automod ...` `/antiraid ...`
+`/moderacao-config`
+
+### Observações importantes
+- **Hierarquia de cargos**: ninguém consegue moderar quem tem cargo igual ou
+  maior, nem o dono do servidor; o bot também precisa estar acima do alvo na
+  hierarquia.
+- **Banco de dados**: tudo fica em `data/mod_config.json`, `data/mod_punicoes.json`,
+  `data/mod_automod.json` e `data/mod_antiraid.json` — inclua a pasta `data/`
+  no seu backup.
+- **Ban temporário/timeout**: um loop interno confere a cada 1 minuto e
+  desbane automaticamente quando o prazo expira.
+- Um Modal do Discord só aceita campos de texto (não aceita botões dentro
+  dele) — por isso o painel do `!setup-moderacao` usa **botões que abrem
+  modais**, e não um único modal com tudo dentro.
