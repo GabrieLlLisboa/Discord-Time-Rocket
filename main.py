@@ -66,6 +66,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from cogs.mod_utils import SUPER_ADMIN_IDS, eh_super_admin_membro
+from isolamento_mine import BotIsolado, ComandoBloqueado, instalar_isolamento
 
 load_dotenv()
 TOKEN    = os.getenv("DISCORD_TOKEN")
@@ -76,7 +77,8 @@ intents = discord.Intents.default()
 intents.members         = True
 intents.message_content = True
 
-bot = commands.Bot(command_prefix=PREFIX, intents=intents)
+bot = BotIsolado(command_prefix=PREFIX, intents=intents)
+instalar_isolamento(bot)  # servidor de Minecraft: só as cogs Mc* funcionam lá
 
 
 @bot.before_invoke
@@ -100,6 +102,13 @@ async def apagar_mensagem_do_comando(ctx: commands.Context):
 async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
     import traceback
 
+
+    if isinstance(error, ComandoBloqueado):
+        try:
+            await interaction.response.send_message("❌ Esse comando não funciona neste servidor.", ephemeral=True)
+        except discord.HTTPException:
+            pass
+        return
 
     print(f"[SLASH] ❌ Erro no comando '/{interaction.command.name if interaction.command else '?'}':")
     traceback.print_exception(type(error), error, error.__traceback__)
@@ -138,6 +147,8 @@ COGS = [
     "cogs.logs",
     "cogs.convites",
     "cogs.whitelist",
+    "cogs.mc_whitelist",   # whitelist do servidor de Minecraft
+    "cogs.mc_setup",       # !setupmine
     "cogs.staff_tag",
     "cogs.cargo_equipe_auto",
     "cogs.enquete",
