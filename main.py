@@ -153,7 +153,6 @@ COGS = [
     "cogs.cargo_equipe_auto",
     "cogs.enquete",
     "cogs.auto_update",
-    "cogs.demote",
     "cogs.coach_commands",
     "cogs.tradutor",
     "cogs.quiz",

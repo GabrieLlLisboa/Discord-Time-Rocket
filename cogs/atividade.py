@@ -403,12 +403,39 @@ class Atividade(commands.Cog):
                         if membro:
                             await self._checar_e_anunciar(membro)
 
+            cfg = _ler_config()
+            if not cfg.get("expulsao_feita"):
+                cfg["expulsao_feita"] = True
+                _salvar_config(cfg)
+                await self._expulsar_inativos()
+
             print("[ATIVIDADE] 🏁 Período de verificação de atividade encerrado.")
             self.verificar_fim_periodo.cancel()
         except Exception as e:
 
 
             print(f"[ATIVIDADE] ⚠️ Erro ao encerrar período: {e}")
+
+    async def _expulsar_inativos(self):
+        """Fim do período: expulsa quem tem menos de 5 pontos e avisa por DM."""
+        for guild in self.bot.guilds:
+            for membro in list(guild.members):
+                if membro.bot or membro.id == guild.owner_id or entrou_durante_periodo(membro):
+                    continue
+                if membro.top_role >= guild.me.top_role:
+                    continue
+                registro = self.dados.get(str(membro.id), {})
+                if pontos_do_periodo(registro) >= 5:
+                    continue
+                try:
+                    await membro.send("Olá, você foi expulso por inatividade.")
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+                try:
+                    await guild.kick(membro, reason="Inatividade: menos de 5 pontos no período")
+                    print(f"[ATIVIDADE] 🔻 {membro} expulso por inatividade.")
+                except (discord.Forbidden, discord.HTTPException) as e:
+                    print(f"[ATIVIDADE] ⚠️ Não consegui expulsar {membro}: {e}")
 
     @verificar_fim_periodo.before_loop
     async def antes_verificar(self):
@@ -733,11 +760,6 @@ class Atividade(commands.Cog):
 
 
         aviso_extra = ""
-        demote_cog = self.bot.get_cog("Demote")
-        if demote_cog is not None:
-            saiu = await demote_cog.forcar_saida_quarentena(membro, motivo="Marcado como ativo manualmente via !ativar")
-            if saiu:
-                aviso_extra = " Ela também foi **tirada da quarentena** automaticamente."
 
         await ctx.send(f"✅ **{membro.display_name}** foi marcado como ativo.{aviso_extra}", delete_after=10)
         print(f"[ATIVIDADE] ✅ {membro} marcado manualmente como ativo por {ctx.author}.")
