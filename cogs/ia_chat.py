@@ -16,7 +16,7 @@ COMO FUNCIONA
 
 CONFIGURAÇÃO (.env)
     GROQ_API_KEY=...                       (obrigatória — NUNCA coloque a chave no código)
-    GROQ_MODEL=llama-3.3-70b-versatile
+    GROQ_MODEL=openai/gpt-oss-120b         (opcional; o llama-3.3-70b saiu do ar em 16/08/2026)
     IA_CHAT_CANAL_ID=1511910275618443314
     IA_CHAT_INATIVIDADE_MIN=30             minutos sem ninguém falar = chat parado
     IA_CHAT_COOLDOWN_MIN=180               mínimo entre uma puxada de assunto e outra
@@ -61,7 +61,10 @@ def _env_int(nome: str, padrao: int) -> int:
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 CANAL_ID = _env_int("IA_CHAT_CANAL_ID", 1511910275618443314)
-MODELO = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODELO = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+# Se o modelo configurado sumir (404), o bot procura um destes na lista de modelos ativos da Groq:
+MODELOS_RESERVA = ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"]
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 INATIVIDADE_MIN = _env_int("IA_CHAT_INATIVIDADE_MIN", 30)
 COOLDOWN_MIN = _env_int("IA_CHAT_COOLDOWN_MIN", 180)
 
@@ -82,6 +85,10 @@ VIGIA_MSGS = 6                # mensagens de membros...
 VIGIA_JANELA_S = 180          # ...dentro dessa janela (e de pelo menos 2 pessoas)
 VIGIA_INTERVALO_S = 120       # mínimo entre duas análises do vigia
 COOLDOWN_BRIGA_S = 180        # mínimo entre duas intervenções de briga
+
+# time.monotonic() conta desde que o PC ligou — "nunca aconteceu" tem que ser -infinito, não 0,
+# senão os cooldowns ficam travados enquanto o computador tem pouco tempo ligado.
+NUNCA = float("-inf")
 
 CHECAGEM_MIN = 5
 MSGS_BUSCADAS = 60
@@ -212,11 +219,13 @@ class IAChat(commands.Cog):
         self.api_key = os.getenv("GROQ_API_KEY", "").strip()
         self.http: httpx.AsyncClient | None = None
         self.punir = PUNIR_PADRAO
+        self.modelo = MODELO
         self.ultimo_erro = ""
+        self._ultima_troca_modelo = NUNCA
 
-        self.ultima_fala = 0.0     # última vez que o bot PUXOU assunto (time.monotonic)
-        self.ultima_vigia = 0.0
-        self.ultima_briga = 0.0
+        self.ultima_fala = NUNCA   # última vez que o bot PUXOU assunto (time.monotonic)
+        self.ultima_vigia = NUNCA
+        self.ultima_briga = NUNCA
         self.sessao: dict | None = None
         self.recentes: deque = deque()    # (instante, autor_id) das mensagens de membros
         self.punicoes: deque = deque()    # instantes das punições automáticas (trava/hora)
@@ -232,7 +241,7 @@ class IAChat(commands.Cog):
         self.http = httpx.AsyncClient(timeout=30)
         self.verificar.start()
         self.checar_sessao.start()
-        print(f"[IA_CHAT] ✅ Ativo no canal {CANAL_ID} (modelo {MODELO}, punir={'sim' if self.punir else 'não'}).")
+        print(f"[IA_CHAT] ✅ Ativo no canal {CANAL_ID} (modelo {self.modelo}, punir={'sim' if self.punir else 'não'}).")
 
     async def cog_unload(self):
         self.verificar.cancel()
@@ -243,11 +252,12 @@ class IAChat(commands.Cog):
             await self.http.aclose()
 
     # ─── IA ────────────────────────────────────────────────────────────────
-    async def _perguntar_ia(self, transcricao: str, modo_txt: str) -> dict | None:
+    def _payload(self, transcricao: str, modo_txt: str) -> dict:
+        raciocina = self.modelo.startswith("openai/gpt-oss")  # modelos que "pensam" gastam tokens antes de responder
         payload = {
-            "model": MODELO,
+            "model": self.modelo,
             "temperature": 0.6,
-            "max_tokens": 350,
+            "max_completion_tokens": 1500 if raciocina else 350,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": PROMPT_SISTEMA},
@@ -258,26 +268,80 @@ class IAChat(commands.Cog):
                 },
             ],
         }
+        if raciocina:
+            payload["reasoning_effort"] = "low"
+        return payload
+
+    @staticmethod
+    def _detalhe_erro(resp: httpx.Response) -> str:
+        try:
+            erro = resp.json()["error"]
+            return f"{erro.get('code') or erro.get('type')}: {erro.get('message')}"[:200]
+        except (KeyError, ValueError, TypeError, AttributeError):
+            return (resp.text or "sem detalhes")[:200]
+
+    @staticmethod
+    def _extrair_json(texto: str) -> dict | None:
+        """Aceita JSON puro ou com texto em volta (alguns modelos adicionam comentário)."""
+        for candidato in (texto, texto[texto.find("{"): texto.rfind("}") + 1] if "{" in texto else ""):
+            try:
+                dados = json.loads(candidato)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(dados, dict):
+                return dados
+        return None
+
+    async def _trocar_modelo(self) -> bool:
+        """Modelo sumiu (404)? Procura um modelo reserva ativo na lista da Groq e passa a usar ele."""
+        agora = time.monotonic()
+        if agora - self._ultima_troca_modelo < 600:  # não fica consultando a cada erro
+            return False
+        self._ultima_troca_modelo = agora
+        try:
+            resp = await self.http.get(GROQ_MODELS_URL, headers={"Authorization": f"Bearer {self.api_key}"})
+            ativos = {m["id"] for m in resp.json()["data"]} if resp.status_code == 200 else set()
+        except (httpx.HTTPError, KeyError, ValueError, TypeError):
+            return False
+        for candidato in MODELOS_RESERVA:
+            if candidato in ativos and candidato != self.modelo:
+                print(f"[IA_CHAT] 🔁 Modelo '{self.modelo}' indisponível — trocando para '{candidato}'.")
+                self.modelo = candidato
+                return True
+        print("[IA_CHAT] ⚠️ Nenhum modelo reserva ativo encontrado. Defina GROQ_MODEL no .env "
+              "(veja a lista em console.groq.com/docs/models).")
+        return False
+
+    async def _perguntar_ia(self, transcricao: str, modo_txt: str) -> dict | None:
         headers = {"Authorization": f"Bearer {self.api_key}"}
-        try:
-            resp = await self.http.post(GROQ_URL, json=payload, headers=headers)
-        except httpx.HTTPError as e:
-            self.ultimo_erro = f"rede: {type(e).__name__}"
-            print(f"[IA_CHAT] ❌ Erro de rede falando com a Groq: {type(e).__name__}")
+        resp = None
+        for tentativa in range(2):
+            try:
+                resp = await self.http.post(GROQ_URL, json=self._payload(transcricao, modo_txt), headers=headers)
+            except httpx.HTTPError as e:
+                self.ultimo_erro = f"rede: {type(e).__name__}"
+                print(f"[IA_CHAT] ❌ Erro de rede falando com a Groq: {type(e).__name__}")
+                return None
+            if resp.status_code == 200:
+                break
+            detalhe = self._detalhe_erro(resp)
+            self.ultimo_erro = f"HTTP {resp.status_code}: {detalhe}"
+            print(f"[IA_CHAT] ❌ Groq respondeu HTTP {resp.status_code}: {detalhe}")
+            if tentativa == 0 and resp.status_code in (400, 404) and await self._trocar_modelo():
+                continue  # tenta de novo com o modelo novo
+            return None
+        if resp is None or resp.status_code != 200:
             return None
 
-        if resp.status_code != 200:
-            self.ultimo_erro = f"HTTP {resp.status_code}"
-            print(f"[IA_CHAT] ❌ Groq respondeu HTTP {resp.status_code}")
-            return None
-
         try:
-            dados = json.loads(resp.json()["choices"][0]["message"]["content"])
-        except (KeyError, IndexError, ValueError, TypeError):
+            conteudo = resp.json()["choices"][0]["message"].get("content") or ""
+        except (KeyError, IndexError, ValueError, TypeError, AttributeError):
+            conteudo = ""
+        dados = self._extrair_json(conteudo)
+        if dados is None:
             self.ultimo_erro = "resposta fora do formato"
             print("[IA_CHAT] ❌ Resposta da Groq fora do formato esperado.")
-            return None
-        return dados if isinstance(dados, dict) else None
+        return dados
 
     @staticmethod
     def _tipo(resultado: dict, permitidos: set) -> str:
@@ -692,7 +756,7 @@ class IAChat(commands.Cog):
         conversa = "nenhuma" if s is None else f"aberta ({s['respostas']}/{MAX_RESPOSTAS} respostas)"
         await ctx.send(
             f"🤖 **IA no chat**\n"
-            f"• Canal: <#{CANAL_ID}> • Modelo: `{MODELO}`\n"
+            f"• Canal: <#{CANAL_ID}> • Modelo: `{self.modelo}`\n"
             f"• Considera parado após: {INATIVIDADE_MIN} min • Cooldown: {COOLDOWN_MIN} min\n"
             f"• Conversa: {conversa} • Duração máx.: {SESSAO_MIN} min • Máx. respostas: {MAX_RESPOSTAS}\n"
             f"• Punição automática: {'ligada' if self.punir else 'desligada'} "
