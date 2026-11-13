@@ -147,6 +147,7 @@ COGS = [
     "cogs.logs",
     "cogs.convites",
     "cogs.whitelist",
+    "cogs.ia_chat",
     "cogs.mc_whitelist",   # whitelist do servidor de Minecraft
     "cogs.mc_setup",       # !setupmine
     "cogs.staff_tag",
