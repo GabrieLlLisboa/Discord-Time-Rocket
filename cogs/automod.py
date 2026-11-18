@@ -231,15 +231,7 @@ class Automod(commands.Cog):
                     return
 
 
-        if cfg.get("anti_caps"):
-            letras = [c for c in conteudo if c.isalpha()]
-            if len(letras) >= 8:
-                maiusculas = sum(1 for c in letras if c.isupper())
-                percentual = (maiusculas / len(letras)) * 100
-                if percentual >= cfg.get("anti_caps_percentual", 70):
-                    await self._acao(message, "Excesso de letras maiúsculas (CAPS)", conteudo, cfg)
-                    return
-
+        # CAPS LOCK: o automod não pune mais mensagens em maiúsculas (filtro removido).
 
         if cfg.get("anti_mencoes") and message.mention_everyone:
             await self._acao(message, "Menção a @everyone/@here por quem não é staff", conteudo, cfg)
@@ -324,7 +316,7 @@ class Automod(commands.Cog):
             f"**Anti-flood:** {'✅' if cfg['anti_flood'] else '❌'} ({cfg['anti_flood_limite']} repetidas em {cfg.get('anti_flood_janela', FLOOD_JANELA_PADRAO)}s)",
             f"**Anti-links:** {'✅' if cfg['anti_links'] else '❌'}",
             f"**Anti-convites:** {'✅' if cfg['anti_convites'] else '❌'}",
-            f"**Anti-CAPS:** {'✅' if cfg['anti_caps'] else '❌'} ({cfg['anti_caps_percentual']}%)",
+            "**Anti-CAPS:** ❌ (removido — caps lock liberado)",
             f"**Anti-menções em massa:** {'✅' if cfg['anti_mencoes'] else '❌'} (limite {cfg['anti_mencoes_limite']})",
             f"**Anti-emojis em excesso:** {'✅' if cfg['anti_emojis'] else '❌'} (limite {cfg['anti_emojis_limite']})",
             f"**Anti-phishing:** {'✅' if cfg['anti_phishing'] else '❌'}",
@@ -342,7 +334,6 @@ class Automod(commands.Cog):
         app_commands.Choice(name="Anti-flood", value="anti_flood"),
         app_commands.Choice(name="Anti-links", value="anti_links"),
         app_commands.Choice(name="Anti-convites", value="anti_convites"),
-        app_commands.Choice(name="Anti-CAPS", value="anti_caps"),
         app_commands.Choice(name="Anti-menções em massa", value="anti_mencoes"),
         app_commands.Choice(name="Anti-emojis em excesso", value="anti_emojis"),
         app_commands.Choice(name="Anti-phishing", value="anti_phishing"),
@@ -394,7 +385,6 @@ class Automod(commands.Cog):
         app_commands.Choice(name="Intervalo em segundos (anti-spam)", value="anti_spam_intervalo"),
         app_commands.Choice(name="Repetições seguidas (anti-flood)", value="anti_flood_limite"),
         app_commands.Choice(name="Janela em segundos (anti-flood)", value="anti_flood_janela"),
-        app_commands.Choice(name="Percentual de CAPS", value="anti_caps_percentual"),
         app_commands.Choice(name="Limite de menções", value="anti_mencoes_limite"),
         app_commands.Choice(name="Limite de emojis", value="anti_emojis_limite"),
         app_commands.Choice(name="Duração do timeout (segundos)", value="timeout_segundos"),
